@@ -1065,6 +1065,34 @@ body {
   box-shadow: 0 2px 8px rgba(124, 108, 240, 0.3);
 }
 
+/* ── Realized P/L Banner ──────────────────────────────────────── */
+.realized-pnl-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 1rem;
+  border-radius: 10px;
+  margin-bottom: 1rem;
+  font-size: 0.85rem;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.realized-pnl-banner.banner-positive {
+  background: rgba(52, 211, 153, 0.08);
+  border-color: rgba(52, 211, 153, 0.2);
+}
+.realized-pnl-banner.banner-negative {
+  background: rgba(248, 113, 113, 0.08);
+  border-color: rgba(248, 113, 113, 0.2);
+}
+.realized-pnl-banner strong {
+  font-size: 1.05rem;
+}
+.realized-breakdown {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  margin-left: auto;
+}
+
 @keyframes msg-pop {
   from { opacity: 0; transform: translateY(-4px) scale(0.97); }
   to   { opacity: 1; transform: translateY(0)  scale(1); }

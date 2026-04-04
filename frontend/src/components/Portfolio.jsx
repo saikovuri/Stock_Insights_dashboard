@@ -5,6 +5,7 @@ import {
   fetchPortfolioSummary, buyStock, sellStock,
   fetchOptionsSummary, buyOption, closeOption,
   editHolding, deleteHolding, editOption, deleteOption,
+  fetchClosedTrades, fetchClosedOptions,
 } from '../api/stockApi';
 
 const GUEST_HOLDINGS_KEY = 'guest_holdings';
@@ -22,8 +23,11 @@ export default function Portfolio() {
   const isGuest = !user;
 
   const [tab, setTab] = useState('stocks');
+  const [view, setView] = useState('current');   // 'current' | 'sold'
   const [portfolio, setPortfolio] = useState(null);
   const [optionsSummary, setOptionsSummary] = useState(null);
+  const [closedStocks, setClosedStocks] = useState(null);
+  const [closedOpts, setClosedOpts] = useState(null);
   const [form, setForm] = useState({ ticker: '', shares: 1, price: 100 });
   const [optForm, setOptForm] = useState({
     ticker: '', type: 'call', strike: 100, expiry: '', premium: 2.5, contracts: 1,
@@ -70,7 +74,20 @@ export default function Portfolio() {
     try { setOptionsSummary(await fetchOptionsSummary()); } catch { /* empty */ }
   }, [isGuest]);
 
-  useEffect(() => { loadStocks(); loadOptions(); }, [loadStocks, loadOptions]);
+  const loadClosed = useCallback(async () => {
+    if (isGuest) {
+      try {
+        const raw = JSON.parse(localStorage.getItem('guest_sold_stocks') || '[]');
+        const total = raw.reduce((s, t) => s + t.pnl, 0);
+        setClosedStocks({ total_realized_pnl: Math.round(total * 100) / 100, trades: raw });
+      } catch { setClosedStocks({ total_realized_pnl: 0, trades: [] }); }
+      return;
+    }
+    try { setClosedStocks(await fetchClosedTrades()); } catch { /* empty */ }
+    try { setClosedOpts(await fetchClosedOptions()); } catch { /* empty */ }
+  }, [isGuest]);
+
+  useEffect(() => { loadStocks(); loadOptions(); loadClosed(); }, [loadStocks, loadOptions, loadClosed]);
 
   // Auto-clear messages after 4s
   useEffect(() => {
@@ -117,14 +134,22 @@ export default function Portfolio() {
       const raw = getGuestHoldings();
       const existing = raw.find((h) => h.ticker === ticker);
       if (!existing) { setMsg(`No position in ${ticker}`); return; }
-      const remaining = existing.shares - form.shares;
+      const soldShares = Math.min(form.shares, existing.shares);
+      const remaining = existing.shares - soldShares;
       const updated = remaining <= 0
         ? raw.filter((h) => h.ticker !== ticker)
         : raw.map((h) => h.ticker === ticker ? { ...h, shares: parseFloat(remaining.toFixed(4)) } : h);
       saveGuestHoldings(updated);
-      setMsg(`Sold ${form.shares} shares of ${ticker}`);
+      // Record closed trade in guest localStorage
+      const pnl = (form.price - existing.buy_price) * soldShares;
+      const pnl_pct = existing.buy_price > 0 ? ((form.price - existing.buy_price) / existing.buy_price) * 100 : 0;
+      const sold = JSON.parse(localStorage.getItem('guest_sold_stocks') || '[]');
+      sold.unshift({ id: Date.now(), ticker, shares: soldShares, buy_price: existing.buy_price, sell_price: form.price, pnl: Math.round(pnl * 100) / 100, pnl_pct: Math.round(pnl_pct * 100) / 100, closed_at: new Date().toISOString() });
+      localStorage.setItem('guest_sold_stocks', JSON.stringify(sold));
+      setMsg(`Sold ${soldShares} shares of ${ticker}`);
       setForm({ ticker: '', shares: 1, price: 100 });
       loadGuestStocks();
+      loadClosed();
       return;
     }
 
@@ -133,6 +158,7 @@ export default function Portfolio() {
       setMsg(`Sold ${form.shares} shares of ${ticker}`);
       setForm({ ticker: '', shares: 1, price: 100 });
       loadStocks();
+      loadClosed();
     } catch (e) { setMsg(e.message); }
   };
 
@@ -202,6 +228,7 @@ export default function Portfolio() {
       }
       setOptForm({ ticker: '', type: 'call', strike: 100, expiry: '', premium: 2.5, contracts: 1, action: 'bto' });
       loadOptions();
+      if (action === 'stc' || action === 'btc') loadClosed();
     } catch (e) { setMsg(e.message); }
   };
 
@@ -245,19 +272,52 @@ export default function Portfolio() {
     setOptForm({ ticker: '', type: 'call', strike: 100, expiry: '', premium: 2.5, contracts: 1, action: 'bto' });
   };
 
+  // Compute combined realized P/L for the banner
+  const realizedStockPnl = closedStocks?.total_realized_pnl || 0;
+  const realizedOptPnl = closedOpts?.total_realized_pnl || 0;
+  const totalRealizedPnl = realizedStockPnl + realizedOptPnl;
+
   return (
     <div className="card">
+      {/* ── Realized P/L Banner ─────────────────────────── */}
+      {(closedStocks?.trades?.length > 0 || closedOpts?.trades?.length > 0) && (
+        <div className={`realized-pnl-banner ${totalRealizedPnl >= 0 ? 'banner-positive' : 'banner-negative'}`}>
+          <span>Realized P/L</span>
+          <strong className={totalRealizedPnl >= 0 ? 'positive' : 'negative'}>
+            ${totalRealizedPnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </strong>
+          {!isGuest && realizedStockPnl !== 0 && realizedOptPnl !== 0 && (
+            <span className="realized-breakdown">
+              Stocks: <span className={realizedStockPnl >= 0 ? 'positive' : 'negative'}>${realizedStockPnl.toLocaleString()}</span>
+              {' · '}
+              Options: <span className={realizedOptPnl >= 0 ? 'positive' : 'negative'}>${realizedOptPnl.toLocaleString()}</span>
+            </span>
+          )}
+        </div>
+      )}
+
       <div className="portfolio-tabs">
         <h3 style={{ margin: 0 }}>Portfolio {isGuest && <span className="guest-badge">Guest</span>}</h3>
         <div className="chart-toggle">
-          <button className={tab === 'stocks' ? 'active' : ''} onClick={() => { setTab('stocks'); cancelEdit(); }}>
+          <button className={tab === 'stocks' ? 'active' : ''} onClick={() => { setTab('stocks'); setView('current'); cancelEdit(); }}>
             Stocks
           </button>
-          <button className={tab === 'options' ? 'active' : ''} onClick={() => { setTab('options'); cancelEdit(); }}>
+          <button className={tab === 'options' ? 'active' : ''} onClick={() => { setTab('options'); setView('current'); cancelEdit(); }}>
             Options
           </button>
         </div>
       </div>
+
+      {/* ── Current / Sold Sub-Toggle ────────────────────── */}
+      <div className="chart-toggle" style={{ marginBottom: '0.75rem' }}>
+        <button className={view === 'current' ? 'active' : ''} onClick={() => setView('current')}>
+          Current Holdings
+        </button>
+        <button className={view === 'sold' ? 'active' : ''} onClick={() => setView('sold')}>
+          Sold / Closed
+        </button>
+      </div>
+
       {isGuest && (
         <p className="guest-note">
           Portfolio saved in this browser only. Sign in to sync across devices and unlock options tracking.
@@ -267,7 +327,7 @@ export default function Portfolio() {
       {msg && <p className="portfolio-msg">{msg}</p>}
 
       {/* ── Stocks Tab ────────────────────────────────────────── */}
-      {tab === 'stocks' && (
+      {tab === 'stocks' && view === 'current' && (
         <>
           <div className="portfolio-form labeled-form">
             <div className="form-field">
@@ -361,8 +421,58 @@ export default function Portfolio() {
         </>
       )}
 
+      {/* ── Sold Stocks ───────────────────────────────────────── */}
+      {tab === 'stocks' && view === 'sold' && (
+        <>
+          {closedStocks?.trades?.length > 0 ? (
+            <>
+              <div className="metrics-grid" style={{ marginTop: '0.5rem' }}>
+                <div className="metric">
+                  <span className="metric-label">Closed Trades</span>
+                  <span className="metric-value">{closedStocks.trades.length}</span>
+                </div>
+                <div className={`metric ${closedStocks.total_realized_pnl >= 0 ? 'metric-positive' : 'metric-negative'}`}>
+                  <span className="metric-label">Realized P/L</span>
+                  <span className={`metric-value ${closedStocks.total_realized_pnl >= 0 ? 'positive' : 'negative'}`}>
+                    ${closedStocks.total_realized_pnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+              </div>
+              <table className="portfolio-table">
+                <thead>
+                  <tr>
+                    <th>Ticker</th>
+                    <th>Shares</th>
+                    <th>Buy Price</th>
+                    <th>Sell Price</th>
+                    <th>P/L ($)</th>
+                    <th>P/L %</th>
+                    <th>Date</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {closedStocks.trades.map((t) => (
+                    <tr key={t.id}>
+                      <td><strong>{t.ticker}</strong></td>
+                      <td>{t.shares}</td>
+                      <td>${t.buy_price.toFixed(2)}</td>
+                      <td>${t.sell_price.toFixed(2)}</td>
+                      <td className={t.pnl >= 0 ? 'positive' : 'negative'}>${t.pnl.toFixed(2)}</td>
+                      <td className={t.pnl_pct >= 0 ? 'positive' : 'negative'}>{t.pnl_pct.toFixed(2)}%</td>
+                      <td>{new Date(t.closed_at).toLocaleDateString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          ) : (
+            <p className="empty-state">No sold stocks yet. Sell a position to see it here.</p>
+          )}
+        </>
+      )}
+
       {/* ── Options Tab ───────────────────────────────────────── */}
-      {tab === 'options' && (
+      {tab === 'options' && view === 'current' && (
         isGuest ? (
           <div className="empty-state guest-note" style={{ marginTop: '1.5rem' }}>
             Options tracking requires an account. Sign in to add and track calls &amp; puts with live P/L.
@@ -526,6 +636,70 @@ export default function Portfolio() {
             </>
           ) : (
             <p className="empty-state">No options positions yet. Use the form above to add calls or puts.</p>
+          )}
+        </>
+        )
+      )}
+
+      {/* ── Closed Options ────────────────────────────────────── */}
+      {tab === 'options' && view === 'sold' && (
+        isGuest ? (
+          <div className="empty-state guest-note" style={{ marginTop: '1.5rem' }}>
+            Options tracking requires an account. Sign in to view closed options.
+          </div>
+        ) : (
+        <>
+          {closedOpts?.trades?.length > 0 ? (
+            <>
+              <div className="metrics-grid" style={{ marginTop: '0.5rem' }}>
+                <div className="metric">
+                  <span className="metric-label">Closed Trades</span>
+                  <span className="metric-value">{closedOpts.trades.length}</span>
+                </div>
+                <div className={`metric ${closedOpts.total_realized_pnl >= 0 ? 'metric-positive' : 'metric-negative'}`}>
+                  <span className="metric-label">Realized P/L</span>
+                  <span className={`metric-value ${closedOpts.total_realized_pnl >= 0 ? 'positive' : 'negative'}`}>
+                    ${closedOpts.total_realized_pnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+              </div>
+              <table className="portfolio-table">
+                <thead>
+                  <tr>
+                    <th>Ticker</th>
+                    <th>Type</th>
+                    <th>Side</th>
+                    <th>Strike</th>
+                    <th>Expiry</th>
+                    <th>Qty</th>
+                    <th>Open</th>
+                    <th>Close</th>
+                    <th>P/L ($)</th>
+                    <th>P/L %</th>
+                    <th>Date</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {closedOpts.trades.map((t) => (
+                    <tr key={t.id}>
+                      <td><strong>{t.ticker}</strong></td>
+                      <td className={t.option_type === 'call' ? 'positive' : 'negative'}>{t.option_type.toUpperCase()}</td>
+                      <td><span className={`side-badge side-${t.position}`}>{t.position.toUpperCase()}</span></td>
+                      <td>${t.strike.toFixed(2)}</td>
+                      <td>{t.expiry}</td>
+                      <td>{t.contracts}</td>
+                      <td>${t.open_premium.toFixed(2)}</td>
+                      <td>${t.close_premium.toFixed(2)}</td>
+                      <td className={t.pnl >= 0 ? 'positive' : 'negative'}>${t.pnl.toFixed(2)}</td>
+                      <td className={t.pnl_pct >= 0 ? 'positive' : 'negative'}>{t.pnl_pct.toFixed(2)}%</td>
+                      <td>{new Date(t.closed_at).toLocaleDateString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          ) : (
+            <p className="empty-state">No closed options yet. Close a position to see it here.</p>
           )}
         </>
         )

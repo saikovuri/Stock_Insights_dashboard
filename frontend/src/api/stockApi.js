@@ -120,6 +120,19 @@ export async function deleteOption(id) {
   return res.json();
 }
 
+// ── Closed trades ────────────────────────────────────────────────
+export async function fetchClosedTrades() {
+  const res = await fetch(`${BASE}/portfolio/closed`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('Failed to fetch closed trades');
+  return res.json();
+}
+
+export async function fetchClosedOptions() {
+  const res = await fetch(`${BASE}/portfolio/options/closed`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('Failed to fetch closed options');
+  return res.json();
+}
+
 // ── New AI / analytical endpoints ────────────────────────────────
 export async function fetchWhyMoving(ticker) {
   const res = await fetch(`${BASE}/stock/${ticker}/why-moving`);

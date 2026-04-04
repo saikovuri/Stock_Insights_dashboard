@@ -14,6 +14,7 @@ from database import (
     get_user_holdings, add_user_holding, update_user_holding, delete_user_holding, sell_user_holding,
     get_user_options, add_user_option, close_user_option, update_user_option, delete_user_option,
     get_user_transactions, get_user_watchlist, add_to_watchlist, remove_from_watchlist,
+    get_closed_trades, get_closed_options,
 )
 from config import CORS_ORIGINS
 
@@ -280,6 +281,20 @@ def portfolio_delete(holding_id: int, user: dict = Depends(get_current_user)):
 @app.get("/api/portfolio/history")
 def portfolio_history(user: dict = Depends(get_current_user)):
     return get_user_transactions(user["user_id"])
+
+
+@app.get("/api/portfolio/closed")
+def closed_trades_endpoint(user: dict = Depends(get_current_user)):
+    trades = get_closed_trades(user["user_id"])
+    total_pnl = sum(t["pnl"] for t in trades)
+    return {"total_realized_pnl": round(total_pnl, 2), "trades": trades}
+
+
+@app.get("/api/portfolio/options/closed")
+def closed_options_endpoint(user: dict = Depends(get_current_user)):
+    trades = get_closed_options(user["user_id"])
+    total_pnl = sum(t["pnl"] for t in trades)
+    return {"total_realized_pnl": round(total_pnl, 2), "trades": trades}
 
 
 # ── Options (auth required) ────────────────────────────────────────────────

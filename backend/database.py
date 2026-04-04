@@ -68,6 +68,36 @@ def init_db():
             FOREIGN KEY (user_id) REFERENCES users(id),
             UNIQUE(user_id, ticker)
         );
+
+        CREATE TABLE IF NOT EXISTS closed_trades (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            ticker TEXT NOT NULL,
+            shares REAL NOT NULL,
+            buy_price REAL NOT NULL,
+            sell_price REAL NOT NULL,
+            pnl REAL NOT NULL,
+            pnl_pct REAL NOT NULL,
+            closed_at TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS closed_options (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            ticker TEXT NOT NULL,
+            option_type TEXT NOT NULL,
+            position TEXT NOT NULL,
+            strike REAL NOT NULL,
+            expiry TEXT NOT NULL,
+            open_premium REAL NOT NULL,
+            close_premium REAL NOT NULL,
+            contracts INTEGER NOT NULL,
+            pnl REAL NOT NULL,
+            pnl_pct REAL NOT NULL,
+            closed_at TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        );
     """)
     conn.commit()
     conn.close()
@@ -175,13 +205,22 @@ def sell_user_holding(user_id: int, ticker: str, shares: float, sell_price: floa
     else:
         conn.execute("UPDATE holdings SET shares = shares - ? WHERE id=?", (shares, h["id"]))
         sold_shares = shares
+    # Calculate realized P/L
+    pnl = (sell_price - h["buy_price"]) * sold_shares
+    invested = h["buy_price"] * sold_shares
+    pnl_pct = (pnl / invested * 100) if invested else 0
+    # Record closed trade
+    conn.execute(
+        "INSERT INTO closed_trades (user_id, ticker, shares, buy_price, sell_price, pnl, pnl_pct) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (user_id, ticker, sold_shares, h["buy_price"], sell_price, round(pnl, 2), round(pnl_pct, 2)),
+    )
     conn.execute(
         "INSERT INTO transactions (user_id, action, ticker, details) VALUES (?, 'SELL', ?, ?)",
-        (user_id, ticker, json.dumps({"shares": sold_shares, "price": sell_price})),
+        (user_id, ticker, json.dumps({"shares": sold_shares, "price": sell_price, "pnl": round(pnl, 2)})),
     )
     conn.commit()
     conn.close()
-    return {"action": "SELL", "ticker": ticker, "shares": sold_shares, "sell_price": sell_price}
+    return {"action": "SELL", "ticker": ticker, "shares": sold_shares, "sell_price": sell_price, "pnl": round(pnl, 2)}
 
 
 # ── Options operations ──────────────────────────────────────────────────
@@ -230,16 +269,28 @@ def close_user_option(user_id: int, ticker: str, option_type: str, strike: float
     else:
         conn.execute("UPDATE options SET contracts = contracts - ? WHERE id=?", (contracts, opt["id"]))
         closed = contracts
+    # Calculate realized P/L for options
+    if position.lower() == "long":
+        pnl = (close_premium - opt["premium"]) * closed * 100
+    else:
+        pnl = (opt["premium"] - close_premium) * closed * 100
+    cost_basis = opt["premium"] * closed * 100
+    pnl_pct = (pnl / cost_basis * 100) if cost_basis else 0
+    # Record closed option
+    conn.execute(
+        "INSERT INTO closed_options (user_id, ticker, option_type, position, strike, expiry, open_premium, close_premium, contracts, pnl, pnl_pct) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (user_id, ticker, option_type.lower(), position.lower(), strike, expiry, opt["premium"], close_premium, closed, round(pnl, 2), round(pnl_pct, 2)),
+    )
     close_action = "STC" if position == "long" else "BTC"
     conn.execute(
         "INSERT INTO transactions (user_id, action, ticker, details) VALUES (?, ?, ?, ?)",
         (user_id, f"{close_action}_{option_type.upper()}", ticker,
-         json.dumps({"strike": strike, "expiry": expiry, "premium": close_premium, "contracts": closed})),
+         json.dumps({"strike": strike, "expiry": expiry, "premium": close_premium, "contracts": closed, "pnl": round(pnl, 2)})),
     )
     conn.commit()
     conn.close()
     return {"action": close_action, "ticker": ticker, "type": option_type, "strike": strike,
-            "expiry": expiry, "close_premium": close_premium, "contracts": closed}
+            "expiry": expiry, "close_premium": close_premium, "contracts": closed, "pnl": round(pnl, 2)}
 
 
 def update_user_option(user_id: int, option_id: int, ticker: str, option_type: str,
@@ -315,6 +366,22 @@ def remove_from_watchlist(user_id: int, ticker: str) -> bool:
     removed = cur.rowcount > 0
     conn.close()
     return removed
+
+
+# ── Closed trades operations ─────────────────────────────────────────────
+
+def get_closed_trades(user_id: int) -> list[dict]:
+    conn = get_db()
+    rows = conn.execute("SELECT * FROM closed_trades WHERE user_id=? ORDER BY closed_at DESC", (user_id,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_closed_options(user_id: int) -> list[dict]:
+    conn = get_db()
+    rows = conn.execute("SELECT * FROM closed_options WHERE user_id=? ORDER BY closed_at DESC", (user_id,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
 # Initialize DB on import
