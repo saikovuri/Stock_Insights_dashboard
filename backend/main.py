@@ -306,19 +306,26 @@ def options_summary_endpoint(user: dict = Depends(get_current_user)):
     if not options:
         return {"total_cost": 0, "total_value": 0, "total_pnl": 0, "total_pnl_pct": 0, "options": []}
 
+    # Index tickers that need ^ prefix for yfinance
+    INDEX_MAP = {
+        "SPX": "^SPX", "NDX": "^NDX", "RUT": "^RUT", "DJX": "^DJI",
+        "VIX": "^VIX", "OEX": "^OEX", "XSP": "^XSP",
+    }
+
     current_prices = {}
     for o in options:
         if o["ticker"] not in current_prices:
+            yf_sym = INDEX_MAP.get(o["ticker"].upper(), o["ticker"])
             try:
-                m = get_key_metrics(o["ticker"])
+                m = get_key_metrics(yf_sym)
                 p = m.get("price", 0)
                 if not p:
-                    fast = yf.Ticker(o["ticker"]).fast_info
+                    fast = yf.Ticker(yf_sym).fast_info
                     p = getattr(fast, "last_price", 0) or 0
                 current_prices[o["ticker"]] = p if p else o["strike"]
             except Exception:
                 try:
-                    fast = yf.Ticker(o["ticker"]).fast_info
+                    fast = yf.Ticker(yf_sym).fast_info
                     current_prices[o["ticker"]] = getattr(fast, "last_price", o["strike"]) or o["strike"]
                 except Exception:
                     current_prices[o["ticker"]] = o["strike"]

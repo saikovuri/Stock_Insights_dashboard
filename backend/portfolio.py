@@ -277,15 +277,26 @@ def get_options_summary(current_prices: dict[str, float]) -> dict:
     details = []
     today = _date.today()
 
+    # Index tickers that need ^ prefix for yfinance
+    INDEX_MAP = {
+        "SPX": "^SPX", "NDX": "^NDX", "RUT": "^RUT", "DJX": "^DJI",
+        "VIX": "^VIX", "OEX": "^OEX", "XSP": "^XSP",
+    }
+
+    def _yf_ticker(ticker: str) -> str:
+        """Convert display ticker to yfinance-compatible ticker."""
+        return INDEX_MAP.get(ticker.upper(), ticker)
+
     # Cache option chains per (ticker, expiry) to avoid duplicate fetches
     chain_cache: dict[tuple[str, str], dict] = {}
 
     def _get_market_price(ticker: str, opt_type: str, strike: float, expiry: str) -> dict:
         """Fetch real market data for a specific option contract."""
-        key = (ticker, expiry)
+        yf_sym = _yf_ticker(ticker)
+        key = (yf_sym, expiry)
         if key not in chain_cache:
             try:
-                t = yf.Ticker(ticker)
+                t = yf.Ticker(yf_sym)
                 # Find the closest available expiry
                 available = t.options  # tuple of date strings
                 if expiry in available:
