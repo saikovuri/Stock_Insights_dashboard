@@ -10,7 +10,6 @@ if USE_PG:
     import psycopg2
     import psycopg2.extras
     from psycopg2 import pool as pg_pool
-    _pg_pool = pg_pool.ThreadedConnectionPool(2, 20, DATABASE_URL)
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "stockinsights.db")
 
@@ -18,10 +17,19 @@ DB_PATH = os.path.join(os.path.dirname(__file__), "stockinsights.db")
 # SQLite uses ?, PostgreSQL uses %s
 PH = "%s" if USE_PG else "?"
 
+# ── Lazy connection pool ────────────────────────────────────────────────
+_pg_pool_instance = None
+
+def _get_pg_pool():
+    global _pg_pool_instance
+    if _pg_pool_instance is None:
+        _pg_pool_instance = pg_pool.ThreadedConnectionPool(2, 20, DATABASE_URL)
+    return _pg_pool_instance
+
 
 def get_db():
     if USE_PG:
-        conn = _pg_pool.getconn()
+        conn = _get_pg_pool().getconn()
         conn.autocommit = False
         return conn
     else:
@@ -35,7 +43,7 @@ def get_db():
 def _release(conn):
     """Return a PG connection to the pool, or close SQLite."""
     if USE_PG:
-        _pg_pool.putconn(conn)
+        _get_pg_pool().putconn(conn)
     else:
         conn.close()
 
