@@ -6,6 +6,8 @@ import { API_BASE } from '../api/config';
 const BASE = API_BASE;
 const GUEST_KEY = 'guest_watchlist';
 const ALERTS_KEY = 'screener_alerts';
+const SCREENER_CACHE_KEY = 'screener_cache';
+const SCREENER_CACHE_TTL = 60000; // 60 seconds
 
 function getGuestList() {
   try { return JSON.parse(localStorage.getItem(GUEST_KEY) || '[]'); }
@@ -76,6 +78,7 @@ export default function Screener() {
   const [addMsg, setAddMsg] = useState('');
   const [sortCol, setSortCol] = useState('ticker');
   const [sortDir, setSortDir] = useState(1);
+  const [lastUpdated, setLastUpdated] = useState(null);
 
   // ── Alert state ────────────────────────────────────────────────
   const [screenerAlerts, setScreenerAlerts] = useState(getAlerts);
@@ -85,11 +88,27 @@ export default function Screener() {
 
   // ── Auth mode ──────────────────────────────────────────────────
 
-  const fetchScreenerAuth = useCallback(async () => {
+  const fetchScreenerAuth = useCallback(async (forceRefresh = false) => {
+    // Show cached data immediately (stale-while-revalidate)
+    try {
+      const cached = JSON.parse(sessionStorage.getItem(SCREENER_CACHE_KEY) || 'null');
+      if (cached && !forceRefresh && Date.now() - cached.ts < SCREENER_CACHE_TTL) {
+        setStocks(cached.stocks);
+        setLastUpdated(new Date(cached.ts));
+        return;  // Cache is fresh enough, skip fetch
+      }
+      if (cached) { setStocks(cached.stocks); setLastUpdated(new Date(cached.ts)); }
+    } catch { /* ignore */ }
     setLoading(true);
     try {
       const res = await fetch(`${BASE}/screener`, { headers: { Authorization: `Bearer ${token}` } });
-      if (res.ok) setStocks((await res.json()).stocks || []);
+      if (res.ok) {
+        const data = (await res.json()).stocks || [];
+        const now = Date.now();
+        setStocks(data);
+        setLastUpdated(new Date(now));
+        sessionStorage.setItem(SCREENER_CACHE_KEY, JSON.stringify({ stocks: data, ts: now }));
+      }
     } catch { /* ignore */ }
     setLoading(false);
   }, [token]);
@@ -151,7 +170,7 @@ export default function Screener() {
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ ticker: t }),
         });
-        if (res.ok) { setAddTicker(''); fetchScreenerAuth(); }
+        if (res.ok) { setAddTicker(''); sessionStorage.removeItem(SCREENER_CACHE_KEY); fetchScreenerAuth(true); }
         else { const err = await res.json(); setAddMsg(err.detail || 'Failed to add'); }
       } catch { setAddMsg('Network error'); }
     }
@@ -170,6 +189,7 @@ export default function Screener() {
         await fetch(`${BASE}/watchlist/${ticker}`, {
           method: 'DELETE', headers: { Authorization: `Bearer ${token}` },
         });
+        sessionStorage.removeItem(SCREENER_CACHE_KEY);
         setStocks((prev) => prev.filter((s) => s.ticker !== ticker));
       } catch { /* ignore */ }
     }
@@ -258,8 +278,21 @@ export default function Screener() {
       <div className="screener-header">
         <h3>
           Screener / Watchlist {isGuest && <span className="guest-badge">Guest</span>}
+          {lastUpdated && (
+            <span className="screener-updated">
+              Updated {lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          )}
         </h3>
         <div className="screener-header-right">
+          <button
+            className="btn-refresh"
+            onClick={() => isGuest ? fetchScreenerGuest() : fetchScreenerAuth(true)}
+            disabled={loading}
+            title="Refresh data"
+          >
+            {loading ? '⟳' : '↻'} Refresh
+          </button>
           {screenerAlerts.length > 0 && typeof Notification !== 'undefined' && Notification.permission === 'default' && (
             <button className="btn-notify" onClick={() => Notification.requestPermission()} title="Get browser notifications when an alert triggers">
               🔔 Enable notifications

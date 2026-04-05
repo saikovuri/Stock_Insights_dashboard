@@ -263,43 +263,51 @@ body {
   .watchlist-rail {
     position: static;
     flex-direction: row;
+    align-items: center;
     max-height: none;
     overflow-x: auto;
     overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
-    scrollbar-width: thin;
-    gap: 0.35rem;
-    padding: 0.5rem 0.75rem;
+    scrollbar-width: none;
+    gap: 0.25rem;
+    padding: 0.35rem 0.5rem;
   }
+  .watchlist-rail::-webkit-scrollbar { display: none; }
   .rail-header {
     writing-mode: horizontal-tb;
     border-bottom: none;
     border-right: 1px solid var(--border);
     padding-bottom: 0;
-    padding-right: 0.6rem;
+    padding-right: 0.5rem;
+    margin-right: 0.15rem;
     white-space: nowrap;
     flex-direction: column;
-    gap: 0.2rem;
+    gap: 0.1rem;
+    flex-shrink: 0;
   }
   .rail-list {
     flex-direction: row;
-    gap: 0.3rem;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-    flex-shrink: 0;
+    gap: 0.2rem;
+    overflow: visible;
   }
   .rail-list::-webkit-scrollbar { display: none; }
   .rail-ticker {
     white-space: nowrap;
     min-width: max-content;
     flex-shrink: 0;
+    padding: 0.3rem 0.45rem;
+    gap: 0.3rem;
   }
+  .rail-ticker-symbol { font-size: 0.75rem; }
+  .rail-ticker-data { flex-direction: row; gap: 0.25rem; align-items: center; }
+  .rail-price { font-size: 0.68rem; }
+  .rail-change { font-size: 0.62rem; }
   .rail-add-btn {
     min-width: max-content;
     width: auto;
-    padding: 0.4rem 0.75rem;
+    padding: 0.3rem 0.6rem;
     flex-shrink: 0;
+    font-size: 0.7rem;
   }
   /* On mobile, show rail above content (order) */
   .dashboard-layout {
@@ -1797,6 +1805,36 @@ body {
   align-items: center;
   gap: 0.5rem;
   flex-wrap: wrap;
+}
+
+.screener-updated {
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: var(--text-muted);
+  margin-left: 0.5rem;
+}
+
+.btn-refresh {
+  padding: 0.35rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: inherit;
+  white-space: nowrap;
+}
+.btn-refresh:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.btn-refresh:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .alert-count-badge {
