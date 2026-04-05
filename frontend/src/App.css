@@ -1148,6 +1148,115 @@ body {
   border-left: 3px solid var(--accent);
 }
 
+.portfolio-table tr.row-selling {
+  background: rgba(255, 165, 0, 0.08);
+  border-left: 3px solid #e17055;
+}
+
+.sell-lot-banner {
+  width: 100%;
+  background: rgba(225, 112, 85, 0.12);
+  color: #e17055;
+  padding: 0.4rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  border: 1px solid rgba(225, 112, 85, 0.25);
+}
+
+/* ── Lot Groups (collapsible ticker groups) ── */
+.lot-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.lot-group {
+  background: var(--glass);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.lot-group-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  font-size: 0.9rem;
+  user-select: none;
+  flex-wrap: wrap;
+}
+
+.lot-group-header.clickable {
+  cursor: pointer;
+}
+
+.lot-group-header.clickable:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.lot-toggle {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  width: 1rem;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.lot-ticker {
+  min-width: 60px;
+  font-weight: 700;
+}
+
+.lot-shares {
+  color: var(--text-secondary);
+  min-width: 80px;
+}
+
+.lot-count {
+  font-size: 0.75rem;
+  background: var(--accent-soft);
+  color: var(--accent);
+  padding: 0.15rem 0.45rem;
+  border-radius: 6px;
+  font-weight: 600;
+}
+
+.lot-avg,
+.lot-current {
+  color: var(--text-secondary);
+  min-width: 80px;
+}
+
+.lot-pnl {
+  font-weight: 600;
+  min-width: 120px;
+  margin-left: auto;
+}
+
+.lot-actions {
+  display: flex;
+  gap: 0.25rem;
+  margin-left: 0.5rem;
+}
+
+.lot-table {
+  margin: 0 !important;
+  border-radius: 0 !important;
+  border-top: 1px solid var(--border);
+}
+
+.lot-table thead th {
+  font-size: 0.72rem;
+  padding: 0.4rem 0.6rem;
+}
+
+.lot-row td {
+  font-size: 0.82rem;
+  padding: 0.4rem 0.6rem;
+}
+
 .moneyness-badge {
   display: inline-block;
   padding: 0.1rem 0.4rem;
@@ -2043,6 +2152,19 @@ tr.alert-triggered {
   .labeled-form .form-actions button {
     flex: 1;
   }
+
+  .lot-group-header {
+    font-size: 0.78rem;
+    gap: 0.4rem;
+    padding: 0.6rem 0.65rem;
+  }
+
+  .lot-ticker { min-width: 45px; }
+  .lot-shares { min-width: 55px; font-size: 0.72rem; }
+  .lot-avg, .lot-current { display: none; }
+  .lot-pnl { min-width: 90px; font-size: 0.78rem; }
+
+  .sell-lot-banner { font-size: 0.72rem; }
 
   .portfolio-table {
     font-size: 0.7rem;

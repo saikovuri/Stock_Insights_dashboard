@@ -12,6 +12,7 @@ from auth import hash_password, verify_password, create_token, decode_token
 from database import (
     create_user, get_user_by_username,
     get_user_holdings, add_user_holding, update_user_holding, delete_user_holding, sell_user_holding,
+    sell_user_holding_by_lot,
     get_user_options, add_user_option, close_user_option, update_user_option, delete_user_option,
     get_user_transactions, get_user_watchlist, add_to_watchlist, remove_from_watchlist,
     get_closed_trades, get_closed_options,
@@ -259,6 +260,14 @@ def portfolio_sell(req: HoldingRequest, user: dict = Depends(get_current_user)):
     result = sell_user_holding(user["user_id"], req.ticker, req.shares, req.price)
     if result is None:
         raise HTTPException(status_code=404, detail=f"{req.ticker} not found in portfolio")
+    return result
+
+
+@app.post("/api/portfolio/sell-lot/{holding_id}")
+def portfolio_sell_lot(holding_id: int, req: HoldingRequest, user: dict = Depends(get_current_user)):
+    result = sell_user_holding_by_lot(user["user_id"], holding_id, req.shares, req.price)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Lot not found")
     return result
 
 

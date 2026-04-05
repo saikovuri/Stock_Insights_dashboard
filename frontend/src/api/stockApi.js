@@ -64,6 +64,15 @@ export async function sellStock(ticker, shares, price) {
   return res.json();
 }
 
+export async function sellStockLot(holdingId, ticker, shares, price) {
+  const res = await fetch(`${BASE}/portfolio/sell-lot/${holdingId}`, {
+    method: 'POST', headers: authHeaders(),
+    body: JSON.stringify({ ticker, shares, price }),
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || 'Failed to sell lot');
+  return res.json();
+}
+
 // ── Options ──────────────────────────────────────────────────────
 export async function fetchOptionsSummary() {
   const res = await fetch(`${BASE}/portfolio/options/summary`, { headers: authHeaders() });

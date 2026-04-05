@@ -223,6 +223,39 @@ def sell_user_holding(user_id: int, ticker: str, shares: float, sell_price: floa
     return {"action": "SELL", "ticker": ticker, "shares": sold_shares, "sell_price": sell_price, "pnl": round(pnl, 2)}
 
 
+def sell_user_holding_by_lot(user_id: int, holding_id: int, shares: float, sell_price: float) -> dict | None:
+    """Sell shares from a specific lot (holding_id)."""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT * FROM holdings WHERE id=? AND user_id=?", (holding_id, user_id)
+    ).fetchone()
+    if not row:
+        conn.close()
+        return None
+    h = dict(row)
+    sold_shares = min(shares, h["shares"])
+    if shares >= h["shares"]:
+        conn.execute("DELETE FROM holdings WHERE id=?", (h["id"],))
+    else:
+        conn.execute("UPDATE holdings SET shares = shares - ? WHERE id=?", (sold_shares, h["id"]))
+    # Calculate realized P/L
+    pnl = (sell_price - h["buy_price"]) * sold_shares
+    invested = h["buy_price"] * sold_shares
+    pnl_pct = (pnl / invested * 100) if invested else 0
+    # Record closed trade
+    conn.execute(
+        "INSERT INTO closed_trades (user_id, ticker, shares, buy_price, sell_price, pnl, pnl_pct) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (user_id, h["ticker"], sold_shares, h["buy_price"], sell_price, round(pnl, 2), round(pnl_pct, 2)),
+    )
+    conn.execute(
+        "INSERT INTO transactions (user_id, action, ticker, details) VALUES (?, 'SELL', ?, ?)",
+        (user_id, h["ticker"], json.dumps({"shares": sold_shares, "price": sell_price, "buy_price": h["buy_price"], "pnl": round(pnl, 2)})),
+    )
+    conn.commit()
+    conn.close()
+    return {"action": "SELL", "ticker": h["ticker"], "shares": sold_shares, "sell_price": sell_price, "pnl": round(pnl, 2)}
+
+
 # ── Options operations ──────────────────────────────────────────────────
 
 def get_user_options(user_id: int) -> list[dict]:

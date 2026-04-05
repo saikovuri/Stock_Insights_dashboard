@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../AuthContext';
 import { API_BASE } from '../api/config';
 import {
-  fetchPortfolioSummary, buyStock, sellStock,
+  fetchPortfolioSummary, buyStock, sellStock, sellStockLot,
   fetchOptionsSummary, buyOption, closeOption,
   editHolding, deleteHolding, editOption, deleteOption,
   fetchClosedTrades, fetchClosedOptions,
@@ -37,6 +37,8 @@ export default function Portfolio() {
   const [editIdx, setEditIdx] = useState(null);        // DB id / guest id being edited (stocks)
   const [editOptIdx, setEditOptIdx] = useState(null);   // DB id being edited (options)
   const [confirmDelete, setConfirmDelete] = useState(null); // { type: 'stock'|'option', id }
+  const [sellLotId, setSellLotId] = useState(null);    // lot id being sold
+  const [expanded, setExpanded] = useState({});         // { ticker: true/false } for collapsibles
 
   // ── Guest: build portfolio summary from localStorage + live prices ──
 
@@ -100,18 +102,10 @@ export default function Portfolio() {
     const ticker = form.ticker.toUpperCase();
 
     if (isGuest) {
+      // Always create a new lot (separate tax lot tracking)
       const raw = getGuestHoldings();
-      const existing = raw.find((h) => h.ticker === ticker);
-      if (existing) {
-        // Average down/up: weighted avg price, combined shares
-        const totalShares = existing.shares + form.shares;
-        const avgPrice = (existing.buy_price * existing.shares + form.price * form.shares) / totalShares;
-        const updated = raw.map((h) => h.ticker === ticker ? { ...h, shares: totalShares, buy_price: parseFloat(avgPrice.toFixed(4)) } : h);
-        saveGuestHoldings(updated);
-      } else {
-        const newHolding = { id: Date.now(), ticker, shares: form.shares, buy_price: form.price, date_added: new Date().toISOString() };
-        saveGuestHoldings([...raw, newHolding]);
-      }
+      const newHolding = { id: Date.now(), ticker, shares: form.shares, buy_price: form.price, date_added: new Date().toISOString() };
+      saveGuestHoldings([...raw, newHolding]);
       setMsg(`Bought ${form.shares} shares of ${ticker}`);
       setForm({ ticker: '', shares: 1, price: 100 });
       loadGuestStocks();
@@ -132,13 +126,15 @@ export default function Portfolio() {
 
     if (isGuest) {
       const raw = getGuestHoldings();
-      const existing = raw.find((h) => h.ticker === ticker);
+      // If selling a specific lot, find by id; otherwise find by ticker
+      const lotId = sellLotId;
+      const existing = lotId ? raw.find((h) => h.id === lotId) : raw.find((h) => h.ticker === ticker);
       if (!existing) { setMsg(`No position in ${ticker}`); return; }
       const soldShares = Math.min(form.shares, existing.shares);
       const remaining = existing.shares - soldShares;
       const updated = remaining <= 0
-        ? raw.filter((h) => h.ticker !== ticker)
-        : raw.map((h) => h.ticker === ticker ? { ...h, shares: parseFloat(remaining.toFixed(4)) } : h);
+        ? raw.filter((h) => h.id !== existing.id)
+        : raw.map((h) => h.id === existing.id ? { ...h, shares: parseFloat(remaining.toFixed(4)) } : h);
       saveGuestHoldings(updated);
       // Record closed trade in guest localStorage
       const pnl = (form.price - existing.buy_price) * soldShares;
@@ -146,20 +142,32 @@ export default function Portfolio() {
       const sold = JSON.parse(localStorage.getItem('guest_sold_stocks') || '[]');
       sold.unshift({ id: Date.now(), ticker, shares: soldShares, buy_price: existing.buy_price, sell_price: form.price, pnl: Math.round(pnl * 100) / 100, pnl_pct: Math.round(pnl_pct * 100) / 100, closed_at: new Date().toISOString() });
       localStorage.setItem('guest_sold_stocks', JSON.stringify(sold));
-      setMsg(`Sold ${soldShares} shares of ${ticker}`);
+      setMsg(`Sold ${soldShares} shares of ${ticker} @ $${form.price}`);
       setForm({ ticker: '', shares: 1, price: 100 });
+      setSellLotId(null);
       loadGuestStocks();
       loadClosed();
       return;
     }
 
     try {
-      await sellStock(ticker, form.shares, form.price);
-      setMsg(`Sold ${form.shares} shares of ${ticker}`);
+      if (sellLotId) {
+        await sellStockLot(sellLotId, ticker, form.shares, form.price);
+      } else {
+        await sellStock(ticker, form.shares, form.price);
+      }
+      setMsg(`Sold ${form.shares} shares of ${ticker} @ $${form.price}`);
       setForm({ ticker: '', shares: 1, price: 100 });
+      setSellLotId(null);
       loadStocks();
       loadClosed();
     } catch (e) { setMsg(e.message); }
+  };
+
+  const startSellLot = (lot) => {
+    setSellLotId(lot.id);
+    setEditIdx(null);
+    setForm({ ticker: lot.ticker, shares: lot.shares, price: lot.current_price ?? lot.buy_price });
   };
 
   const startEditStock = (h) => {
@@ -268,6 +276,7 @@ export default function Portfolio() {
   const cancelEdit = () => {
     setEditIdx(null);
     setEditOptIdx(null);
+    setSellLotId(null);
     setForm({ ticker: '', shares: 1, price: 100 });
     setOptForm({ ticker: '', type: 'call', strike: 100, expiry: '', premium: 2.5, contracts: 1, action: 'bto' });
   };
@@ -330,6 +339,9 @@ export default function Portfolio() {
       {tab === 'stocks' && view === 'current' && (
         <>
           <div className="portfolio-form labeled-form">
+            {sellLotId !== null && (
+              <div className="sell-lot-banner">Selling from lot: <strong>{form.ticker}</strong> — {form.shares} shares @ ${form.price}</div>
+            )}
             <div className="form-field">
               <label htmlFor="stock-ticker">Ticker</label>
               <input id="stock-ticker" type="text" placeholder="e.g. AAPL" value={form.ticker}
@@ -351,6 +363,11 @@ export default function Portfolio() {
                   <button className="btn-primary" onClick={handleSaveEdit}>Save</button>
                   <button className="btn-secondary" onClick={cancelEdit}>Cancel</button>
                 </>
+              ) : sellLotId !== null ? (
+                <>
+                  <button className="btn-secondary" onClick={handleSell}>Sell Lot</button>
+                  <button className="btn-secondary" onClick={cancelEdit}>Cancel</button>
+                </>
               ) : (
                 <>
                   <button className="btn-primary" onClick={handleBuy}>Buy</button>
@@ -360,62 +377,123 @@ export default function Portfolio() {
             </div>
           </div>
 
-          {portfolio && portfolio.holdings && portfolio.holdings.length > 0 ? (
-            <>
-              <div className="metrics-grid" style={{ marginTop: '1rem' }}>
-                <div className="metric">
-                  <span className="metric-label">Invested</span>
-                  <span className="metric-value">${portfolio.total_invested.toLocaleString()}</span>
+          {portfolio && portfolio.holdings && portfolio.holdings.length > 0 ? (() => {
+            // Group holdings by ticker
+            const groups = {};
+            portfolio.holdings.forEach((h) => {
+              if (!groups[h.ticker]) groups[h.ticker] = [];
+              groups[h.ticker].push(h);
+            });
+
+            return (
+              <>
+                <div className="metrics-grid" style={{ marginTop: '1rem' }}>
+                  <div className="metric">
+                    <span className="metric-label">Invested</span>
+                    <span className="metric-value">${portfolio.total_invested.toLocaleString()}</span>
+                  </div>
+                  <div className="metric">
+                    <span className="metric-label">Current Value</span>
+                    <span className="metric-value">${portfolio.total_current.toLocaleString()}</span>
+                  </div>
+                  <div className={`metric ${portfolio.total_pnl >= 0 ? 'metric-positive' : 'metric-negative'}`}>
+                    <span className="metric-label">Total P/L</span>
+                    <span className={`metric-value ${portfolio.total_pnl >= 0 ? 'positive' : 'negative'}`}>
+                      ${portfolio.total_pnl.toLocaleString()} ({portfolio.total_pnl_pct.toFixed(2)}%)
+                    </span>
+                  </div>
                 </div>
-                <div className="metric">
-                  <span className="metric-label">Current Value</span>
-                  <span className="metric-value">${portfolio.total_current.toLocaleString()}</span>
-                </div>
-                <div className={`metric ${portfolio.total_pnl >= 0 ? 'metric-positive' : 'metric-negative'}`}>
-                  <span className="metric-label">Total P/L</span>
-                  <span className={`metric-value ${portfolio.total_pnl >= 0 ? 'positive' : 'negative'}`}>
-                    ${portfolio.total_pnl.toLocaleString()} ({portfolio.total_pnl_pct.toFixed(2)}%)
-                  </span>
-                </div>
-              </div>
-              <table className="portfolio-table">
-                <thead>
-                  <tr>
-                    <th title="Stock symbol (e.g. AAPL)">Ticker</th>
-                    <th title="Number of shares held">Shares</th>
-                    <th title="Average price paid per share">Avg Buy</th>
-                    <th title="Current market price per share">Current</th>
-                    <th title="Profit/Loss: (Current − Buy) × Shares">P/L ($)</th>
-                    <th title="Percentage gain or loss">P/L %</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {portfolio.holdings.map((h) => (
-                    <tr key={h.id} className={editIdx === h.id ? 'row-editing' : ''}>
-                      <td><strong>{h.ticker}</strong></td>
-                      <td>{h.shares}</td>
-                      <td>${h.buy_price.toFixed(2)}</td>
-                      <td>${h.current_price.toFixed(2)}</td>
-                      <td className={h.pnl >= 0 ? 'positive' : 'negative'}>${h.pnl.toFixed(2)}</td>
-                      <td className={h.pnl_pct >= 0 ? 'positive' : 'negative'}>{h.pnl_pct.toFixed(2)}%</td>
-                      <td className="action-cell">
-                        <button className="btn-icon" title="Edit position" onClick={() => startEditStock(h)}>✏️</button>
-                        {confirmDelete?.type === 'stock' && confirmDelete?.id === h.id ? (
-                          <>
-                            <button className="btn-icon btn-confirm-del" title="Confirm delete" onClick={() => handleDeleteStock(h.id)}>✔</button>
-                            <button className="btn-icon" title="Cancel" onClick={() => setConfirmDelete(null)}>✕</button>
-                          </>
-                        ) : (
-                          <button className="btn-icon" title="Delete position" onClick={() => setConfirmDelete({ type: 'stock', id: h.id })}>🗑️</button>
+
+                <div className="lot-groups">
+                  {Object.entries(groups).map(([ticker, lots]) => {
+                    const isOpen = !!expanded[ticker];
+                    const totalShares = lots.reduce((s, l) => s + l.shares, 0);
+                    const totalInvested = lots.reduce((s, l) => s + l.buy_price * l.shares, 0);
+                    const avgBuy = totalInvested / totalShares;
+                    const currentPrice = lots[0].current_price;
+                    const totalCurrent = totalShares * currentPrice;
+                    const totalPnl = totalCurrent - totalInvested;
+                    const totalPnlPct = totalInvested > 0 ? (totalPnl / totalInvested * 100) : 0;
+                    const hasMultipleLots = lots.length > 1;
+
+                    return (
+                      <div key={ticker} className="lot-group">
+                        <div
+                          className={`lot-group-header ${hasMultipleLots ? 'clickable' : ''}`}
+                          onClick={() => hasMultipleLots && setExpanded((p) => ({ ...p, [ticker]: !p[ticker] }))}
+                        >
+                          <span className="lot-toggle">{hasMultipleLots ? (isOpen ? '▼' : '▶') : '•'}</span>
+                          <strong className="lot-ticker">{ticker}</strong>
+                          <span className="lot-shares">{totalShares} shares</span>
+                          {hasMultipleLots && <span className="lot-count">{lots.length} lots</span>}
+                          <span className="lot-avg">Avg ${avgBuy.toFixed(2)}</span>
+                          <span className="lot-current">${currentPrice.toFixed(2)}</span>
+                          <span className={`lot-pnl ${totalPnl >= 0 ? 'positive' : 'negative'}`}>
+                            ${totalPnl.toFixed(2)} ({totalPnlPct.toFixed(2)}%)
+                          </span>
+                          {!hasMultipleLots && (
+                            <span className="lot-actions">
+                              <button className="btn-icon" title="Sell lot" onClick={(e) => { e.stopPropagation(); startSellLot(lots[0]); }}>💲</button>
+                              <button className="btn-icon" title="Edit" onClick={(e) => { e.stopPropagation(); startEditStock(lots[0]); }}>✏️</button>
+                              {confirmDelete?.type === 'stock' && confirmDelete?.id === lots[0].id ? (
+                                <>
+                                  <button className="btn-icon btn-confirm-del" title="Confirm" onClick={(e) => { e.stopPropagation(); handleDeleteStock(lots[0].id); }}>✔</button>
+                                  <button className="btn-icon" title="Cancel" onClick={(e) => { e.stopPropagation(); setConfirmDelete(null); }}>✕</button>
+                                </>
+                              ) : (
+                                <button className="btn-icon" title="Delete" onClick={(e) => { e.stopPropagation(); setConfirmDelete({ type: 'stock', id: lots[0].id }); }}>🗑️</button>
+                              )}
+                            </span>
+                          )}
+                        </div>
+                        {isOpen && (
+                          <table className="portfolio-table lot-table">
+                            <thead>
+                              <tr>
+                                <th>Lot #</th>
+                                <th>Shares</th>
+                                <th>Buy Price</th>
+                                <th>Current</th>
+                                <th>P/L ($)</th>
+                                <th>P/L %</th>
+                                <th>Date</th>
+                                <th>Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {lots.map((h, i) => (
+                                <tr key={h.id} className={`lot-row ${editIdx === h.id ? 'row-editing' : ''} ${sellLotId === h.id ? 'row-selling' : ''}`}>
+                                  <td>{i + 1}</td>
+                                  <td>{h.shares}</td>
+                                  <td>${h.buy_price.toFixed(2)}</td>
+                                  <td>${h.current_price.toFixed(2)}</td>
+                                  <td className={h.pnl >= 0 ? 'positive' : 'negative'}>${h.pnl.toFixed(2)}</td>
+                                  <td className={h.pnl_pct >= 0 ? 'positive' : 'negative'}>{h.pnl_pct.toFixed(2)}%</td>
+                                  <td>{new Date(h.date_added || h.date).toLocaleDateString()}</td>
+                                  <td className="action-cell">
+                                    <button className="btn-icon" title="Sell this lot" onClick={() => startSellLot(h)}>💲</button>
+                                    <button className="btn-icon" title="Edit" onClick={() => startEditStock(h)}>✏️</button>
+                                    {confirmDelete?.type === 'stock' && confirmDelete?.id === h.id ? (
+                                      <>
+                                        <button className="btn-icon btn-confirm-del" title="Confirm" onClick={() => handleDeleteStock(h.id)}>✔</button>
+                                        <button className="btn-icon" title="Cancel" onClick={() => setConfirmDelete(null)}>✕</button>
+                                      </>
+                                    ) : (
+                                      <button className="btn-icon" title="Delete" onClick={() => setConfirmDelete({ type: 'stock', id: h.id })}>🗑️</button>
+                                    )}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
                         )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </>
-          ) : (
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            );
+          })() : (
             <p className="empty-state">No stock holdings yet. Use the form above to add positions.</p>
           )}
         </>
