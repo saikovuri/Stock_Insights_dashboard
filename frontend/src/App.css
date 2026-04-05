@@ -269,8 +269,8 @@ body {
     overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
-    gap: 0.25rem;
-    padding: 0.35rem 0.5rem;
+    gap: 0.15rem;
+    padding: 0.25rem 0.35rem;
   }
   .watchlist-rail::-webkit-scrollbar { display: none; }
   .rail-header {
@@ -278,16 +278,16 @@ body {
     border-bottom: none;
     border-right: 1px solid var(--border);
     padding-bottom: 0;
-    padding-right: 0.5rem;
-    margin-right: 0.15rem;
+    padding-right: 0.35rem;
+    margin-right: 0.1rem;
     white-space: nowrap;
     flex-direction: column;
-    gap: 0.1rem;
+    gap: 0.05rem;
     flex-shrink: 0;
   }
   .rail-list {
     flex-direction: row;
-    gap: 0.2rem;
+    gap: 0.1rem;
     overflow: visible;
   }
   .rail-list::-webkit-scrollbar { display: none; }
@@ -295,19 +295,19 @@ body {
     white-space: nowrap;
     min-width: max-content;
     flex-shrink: 0;
-    padding: 0.3rem 0.45rem;
-    gap: 0.3rem;
+    padding: 0.18rem 0.3rem;
+    gap: 0.2rem;
   }
-  .rail-ticker-symbol { font-size: 0.75rem; }
-  .rail-ticker-data { flex-direction: row; gap: 0.25rem; align-items: center; }
-  .rail-price { font-size: 0.68rem; }
-  .rail-change { font-size: 0.62rem; }
+  .rail-ticker-symbol { font-size: 0.72rem; }
+  .rail-ticker-data { flex-direction: row; gap: 0.18rem; align-items: center; }
+  .rail-price { font-size: 0.65rem; }
+  .rail-change { font-size: 0.58rem; }
   .rail-add-btn {
     min-width: max-content;
     width: auto;
-    padding: 0.3rem 0.6rem;
+    padding: 0.18rem 0.45rem;
     flex-shrink: 0;
-    font-size: 0.7rem;
+    font-size: 0.65rem;
   }
   /* On mobile, show rail above content (order) */
   .dashboard-layout {
