@@ -204,7 +204,7 @@ def auth_me(user: dict = Depends(get_current_user)):
 # ── Stock endpoints (no auth needed) ───────────────────────────────────────
 
 @app.get("/api/stock/{ticker}/metrics")
-@limiter.limit("30/minute")
+@limiter.limit("120/minute")
 def stock_metrics(request: Request, ticker: str):
     ticker = _valid_ticker(ticker)
     try:
@@ -215,8 +215,29 @@ def stock_metrics(request: Request, ticker: str):
         raise HTTPException(status_code=404, detail=str(e))
 
 
+class BatchMetricsRequest(BaseModel):
+    tickers: list[str]
+
+
+@app.post("/api/stock/batch-metrics")
+@limiter.limit("30/minute")
+def batch_metrics(request: Request, req: BatchMetricsRequest):
+    """Fetch metrics for multiple tickers in one request (max 30)."""
+    from concurrent.futures import ThreadPoolExecutor
+    tickers = [_valid_ticker(t) for t in req.tickers[:30]]
+    def _fetch(t):
+        try:
+            m = get_key_metrics(t)
+            return {"ticker": t, "price": m.get("price"), "change_pct": m.get("change_pct"), "name": m.get("name", t)}
+        except Exception:
+            return {"ticker": t, "price": None, "change_pct": None, "name": t}
+    with ThreadPoolExecutor(max_workers=min(len(tickers), 8)) as pool:
+        results = list(pool.map(_fetch, tickers))
+    return {"quotes": {r["ticker"]: r for r in results}}
+
+
 @app.get("/api/stock/{ticker}/history")
-@limiter.limit("20/minute")
+@limiter.limit("60/minute")
 def stock_history(
     request: Request,
     ticker: str,
@@ -259,7 +280,7 @@ def stock_history(
 
 
 @app.get("/api/stock/{ticker}/news")
-@limiter.limit("15/minute")
+@limiter.limit("30/minute")
 def stock_news(request: Request, ticker: str):
     ticker = _valid_ticker(ticker)
     try:
@@ -272,7 +293,7 @@ def stock_news(request: Request, ticker: str):
 
 
 @app.get("/api/stock/{ticker}/summary")
-@limiter.limit("10/minute")
+@limiter.limit("30/minute")
 def stock_summary(request: Request, ticker: str):
     ticker = _valid_ticker(ticker)
     try:
@@ -611,21 +632,46 @@ def watchlist_remove(ticker: str, user: dict = Depends(get_current_user)):
 
 @app.get("/api/screener")
 def screener_data(user: dict = Depends(get_current_user)):
-    """Fetch key metrics for all stocks in user's watchlist."""
+    """Fetch key metrics for all stocks in user's watchlist (batch-optimized)."""
+    import yfinance as yf
+    from concurrent.futures import ThreadPoolExecutor
     tickers = get_user_watchlist(user["user_id"])
-    results = []
-    for t in tickers:
-        try:
-            m = get_key_metrics(t)
-            # Fetch RSI from recent data
-            try:
-                df = get_stock_data(t, period="1mo", interval="1d")
-                df = compute_indicators(df)
-                rsi = df["rsi"].dropna().iloc[-1] if "rsi" in df.columns and not df["rsi"].dropna().empty else None
-            except Exception:
-                rsi = None
+    if not tickers:
+        return {"stocks": []}
 
-            results.append({
+    # Batch-fetch prices + basic data in one yf.download call
+    batch_prices = {}
+    try:
+        if len(tickers) == 1:
+            data = yf.download(tickers[0], period="1mo", interval="1d", progress=False)
+            if not data.empty:
+                batch_prices[tickers[0]] = data
+        else:
+            data = yf.download(tickers, period="1mo", interval="1d", progress=False, group_by="ticker")
+            for t in tickers:
+                try:
+                    df = data[t].dropna(how="all")
+                    if not df.empty:
+                        batch_prices[t] = df
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    def _process_ticker(t):
+        try:
+            m = get_key_metrics(t)  # Uses 60s cache
+            rsi = None
+            df = batch_prices.get(t)
+            if df is not None and len(df) >= 14:
+                try:
+                    df = compute_indicators(df)
+                    rsi_col = df["rsi"].dropna()
+                    if not rsi_col.empty:
+                        rsi = round(float(rsi_col.iloc[-1]), 1)
+                except Exception:
+                    pass
+            return {
                 "ticker": t,
                 "name": m.get("name", t),
                 "price": m.get("price", 0),
@@ -641,10 +687,13 @@ def screener_data(user: dict = Depends(get_current_user)):
                 "dividend_yield": m.get("dividend_yield"),
                 "beta": m.get("beta"),
                 "sector": m.get("sector", "N/A"),
-                "rsi": round(rsi, 1) if rsi is not None else None,
-            })
+                "rsi": rsi,
+            }
         except Exception:
-            results.append({"ticker": t, "name": t, "error": True})
+            return {"ticker": t, "name": t, "error": True}
+
+    with ThreadPoolExecutor(max_workers=min(len(tickers), 8)) as pool:
+        results = list(pool.map(_process_ticker, tickers))
     return {"stocks": results}
 
 
@@ -660,7 +709,7 @@ class ChatRequest(BaseModel):
 
 
 @app.get("/api/stock/{ticker}/why-moving")
-@limiter.limit("10/minute")
+@limiter.limit("30/minute")
 def why_moving(request: Request, ticker: str):
     """AI explanation of why a stock is moving today."""
     ticker = _valid_ticker(ticker)
@@ -698,7 +747,7 @@ In 2-3 short sentences, explain the most likely reason for today's move using on
 
 
 @app.get("/api/stock/{ticker}/bull-bear")
-@limiter.limit("10/minute")
+@limiter.limit("30/minute")
 def bull_bear(request: Request, ticker: str):
     """Structured bull vs bear case."""
     ticker = _valid_ticker(ticker)
@@ -803,7 +852,7 @@ Return ONLY valid JSON, no markdown fences."""
 
 
 @app.post("/api/stock/{ticker}/chat")
-@limiter.limit("15/minute")
+@limiter.limit("30/minute")
 def stock_chat(request: Request, ticker: str, req: ChatRequest):
     """AI chat with per-ticker context."""
     ticker = _valid_ticker(ticker)
@@ -839,7 +888,7 @@ Answer questions about this stock concisely. Always add a disclaimer that this i
 
 
 @app.get("/api/stock/{ticker}/peers")
-@limiter.limit("10/minute")
+@limiter.limit("30/minute")
 def stock_peers(request: Request, ticker: str):
     """Return peer/competitor metrics for comparison."""
     ticker = _valid_ticker(ticker)

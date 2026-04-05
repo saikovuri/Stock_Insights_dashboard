@@ -10,11 +10,16 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     if (token) {
-      fetch(`${API_BASE}/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+      fetch(`${API_BASE}/auth/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: controller.signal,
+      })
         .then(r => { if (!r.ok) throw new Error(); return r.json(); })
         .then(u => setUser(u))
         .catch(() => { localStorage.removeItem('token'); localStorage.removeItem('refresh_token'); setToken(null); })
-        .finally(() => setLoading(false));
+        .finally(() => { clearTimeout(timeout); setLoading(false); });
     } else {
       setLoading(false);
     }

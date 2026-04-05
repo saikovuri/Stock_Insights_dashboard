@@ -266,6 +266,8 @@ body {
     max-height: none;
     overflow-x: auto;
     overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
     gap: 0.35rem;
     padding: 0.5rem 0.75rem;
   }
@@ -282,15 +284,22 @@ body {
   .rail-list {
     flex-direction: row;
     gap: 0.3rem;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    flex-shrink: 0;
   }
+  .rail-list::-webkit-scrollbar { display: none; }
   .rail-ticker {
     white-space: nowrap;
     min-width: max-content;
+    flex-shrink: 0;
   }
   .rail-add-btn {
     min-width: max-content;
     width: auto;
     padding: 0.4rem 0.75rem;
+    flex-shrink: 0;
   }
   /* On mobile, show rail above content (order) */
   .dashboard-layout {

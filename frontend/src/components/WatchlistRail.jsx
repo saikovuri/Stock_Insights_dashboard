@@ -25,13 +25,12 @@ export default function WatchlistRail({ activeTicker, onSelect, onGoToScreener }
       setTickers(getGuestList());
     } else {
       try {
-        const res = await fetch(`${BASE}/screener`, {
+        const res = await fetch(`${BASE}/watchlist`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (res.ok) {
           const data = await res.json();
-          const stocks = data.stocks || [];
-          setTickers(stocks.map(s => s.ticker || s));
+          setTickers(data.tickers || []);
         }
       } catch { /* ignore */ }
     }
@@ -39,31 +38,40 @@ export default function WatchlistRail({ activeTicker, onSelect, onGoToScreener }
 
   useEffect(() => {
     loadTickers();
-    // Poll to catch changes from Screener tab
-    const id = setInterval(loadTickers, 3000);
+    // Poll for watchlist changes every 30s (lightweight DB-only call)
+    const id = setInterval(loadTickers, 30000);
     window.addEventListener('storage', loadTickers);
     return () => { clearInterval(id); window.removeEventListener('storage', loadTickers); };
   }, [loadTickers]);
 
-  // Fetch mini-quotes for all tickers
+  // Fetch mini-quotes for all tickers in one batch request
   const fetchQuotes = useCallback(async () => {
     if (!tickers.length) { setQuotes({}); return; }
     setLoading(true);
-    const result = {};
-    await Promise.all(tickers.map(async (t) => {
-      try {
-        const res = await fetch(`${BASE}/stock/${t}/metrics`);
-        if (res.ok) {
-          const m = await res.json();
-          result[t] = { price: m.price, change: m.change_pct, name: m.name || t };
+    try {
+      const res = await fetch(`${BASE}/stock/batch-metrics`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tickers }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const result = {};
+        for (const [t, q] of Object.entries(data.quotes || {})) {
+          result[t] = { price: q.price, change: q.change_pct, name: q.name || t };
         }
-      } catch { /* skip */ }
-    }));
-    setQuotes(result);
+        setQuotes(result);
+      }
+    } catch { /* skip */ }
     setLoading(false);
   }, [tickers]);
 
-  useEffect(() => { fetchQuotes(); }, [fetchQuotes]);
+  useEffect(() => {
+    fetchQuotes();
+    // Refresh quotes every 60s (metrics are cached server-side for 60s)
+    const id = setInterval(fetchQuotes, 60000);
+    return () => clearInterval(id);
+  }, [fetchQuotes]);
 
   if (!tickers.length) {
     return (

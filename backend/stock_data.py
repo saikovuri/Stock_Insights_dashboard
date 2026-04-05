@@ -1,6 +1,13 @@
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import time
+import threading
+
+# ── Simple TTL cache for metrics ─────────────────────────────────────────
+_metrics_cache = {}
+_cache_lock = threading.Lock()
+_CACHE_TTL = 60  # seconds
 
 
 def get_stock_data(ticker: str, period: str = "6mo", interval: str = "1d",
@@ -72,7 +79,14 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def get_key_metrics(ticker: str) -> dict:
-    """Return key financial metrics for a ticker."""
+    """Return key financial metrics for a ticker (cached for 60s)."""
+    now = time.time()
+    with _cache_lock:
+        if ticker in _metrics_cache:
+            cached, ts = _metrics_cache[ticker]
+            if now - ts < _CACHE_TTL:
+                return cached
+
     stock = yf.Ticker(ticker)
     info = stock.info
 
@@ -81,7 +95,7 @@ def get_key_metrics(ticker: str) -> dict:
     change = price - prev_close if price and prev_close else 0
     change_pct = (change / prev_close * 100) if prev_close else 0
 
-    return {
+    result = {
         "name": info.get("shortName", ticker),
         "sector": info.get("sector", "N/A"),
         "industry": info.get("industry", "N/A"),
@@ -105,6 +119,9 @@ def get_key_metrics(ticker: str) -> dict:
         "200d_avg": info.get("twoHundredDayAverage", 0),
         "beta": info.get("beta", None),
     }
+    with _cache_lock:
+        _metrics_cache[ticker] = (result, now)
+    return result
 
 
 def format_large_number(num) -> str:
