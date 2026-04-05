@@ -68,10 +68,11 @@ function AppShell() {
       const [m, h, n, a, ev] = await Promise.all([
         fetchMetrics(t),
         fetchHistory(t, usePeriod, useInterval, usePrepost),
-        fetchNews(t),
-        fetchAlerts(t),
+        fetchNews(t).catch(() => ({ articles: [], sentiment: {} })),
+        fetchAlerts(t).catch(() => []),
         fetchEvents(t).catch(() => null),
       ]);
+      if (!m) throw new Error(`No data found for "${t}"`);
       setMetrics(m);
       setHistory(h);
       setNewsData(n);

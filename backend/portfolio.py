@@ -268,12 +268,12 @@ def delete_option(index: int) -> dict | None:
     return removed
 
 
-def get_options_summary(current_prices: dict[str, float]) -> dict:
+def get_options_summary(current_prices: dict[str, float], options_list: list[dict] | None = None) -> dict:
     """Calculate options portfolio value using real Yahoo Finance option prices."""
     import yfinance as yf
     from datetime import date as _date
 
-    options = get_options()
+    options = options_list if options_list is not None else get_options()
     details = []
     today = _date.today()
 

@@ -1,8 +1,11 @@
-from fastapi import FastAPI, HTTPException, Query, Depends, Header
+from fastapi import FastAPI, HTTPException, Query, Depends, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
+from pydantic import BaseModel, field_validator
 from typing import Optional
 from datetime import datetime, date as _date
+import re
 
 from stock_data import get_stock_data, get_key_metrics, format_large_number, compute_indicators
 from news_sentiment import fetch_news, aggregate_sentiment
@@ -21,13 +24,39 @@ from config import CORS_ORIGINS
 
 app = FastAPI(title="Stock Insights API", version="2.0.0")
 
+# ── Security headers middleware ─────────────────────────────────────────────
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response: Response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        if request.url.scheme == "https":
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        return response
+
+app.add_middleware(SecurityHeadersMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in CORS_ORIGINS.split(",")],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
 )
+
+
+# ── Ticker validation ───────────────────────────────────────────────────────
+
+_TICKER_RE = re.compile(r"^[A-Za-z0-9\.\-\^]{1,10}$")
+
+def _valid_ticker(ticker: str) -> str:
+    t = ticker.strip().upper()
+    if not _TICKER_RE.match(t):
+        raise HTTPException(status_code=400, detail="Invalid ticker symbol")
+    return t
 
 
 # ── Auth dependency ─────────────────────────────────────────────────────────
@@ -122,8 +151,9 @@ def auth_me(user: dict = Depends(get_current_user)):
 
 @app.get("/api/stock/{ticker}/metrics")
 def stock_metrics(ticker: str):
+    ticker = _valid_ticker(ticker)
     try:
-        metrics = get_key_metrics(ticker.upper())
+        metrics = get_key_metrics(ticker)
         metrics["market_cap_fmt"] = format_large_number(metrics.get("market_cap"))
         return metrics
     except Exception as e:
@@ -137,8 +167,9 @@ def stock_history(
     interval: str = Query("1d", pattern="^(1m|2m|5m|15m|30m|1h|1d|5d|1wk|1mo)$"),
     prepost: bool = Query(False),
 ):
+    ticker = _valid_ticker(ticker)
     try:
-        df = get_stock_data(ticker.upper(), period=period, interval=interval, prepost=prepost)
+        df = get_stock_data(ticker, period=period, interval=interval, prepost=prepost)
         df = compute_indicators(df)
         records = []
         indicator_keys = [
@@ -172,9 +203,10 @@ def stock_history(
 
 @app.get("/api/stock/{ticker}/news")
 def stock_news(ticker: str):
+    ticker = _valid_ticker(ticker)
     try:
-        metrics = get_key_metrics(ticker.upper())
-        news = fetch_news(ticker.upper(), company_name=metrics.get("name", ""))
+        metrics = get_key_metrics(ticker)
+        news = fetch_news(ticker, company_name=metrics.get("name", ""))
         sentiment = aggregate_sentiment(news)
         return {"articles": news, "sentiment": sentiment}
     except Exception as e:
@@ -183,9 +215,10 @@ def stock_news(ticker: str):
 
 @app.get("/api/stock/{ticker}/summary")
 def stock_summary(ticker: str):
+    ticker = _valid_ticker(ticker)
     try:
-        metrics = get_key_metrics(ticker.upper())
-        news = fetch_news(ticker.upper(), company_name=metrics.get("name", ""))
+        metrics = get_key_metrics(ticker)
+        news = fetch_news(ticker, company_name=metrics.get("name", ""))
         sentiment = aggregate_sentiment(news)
         summary = get_ai_summary(metrics, sentiment, news)
         return {"summary": summary}
@@ -195,8 +228,9 @@ def stock_summary(ticker: str):
 
 @app.get("/api/stock/{ticker}/alerts")
 def stock_alerts(ticker: str):
+    ticker = _valid_ticker(ticker)
     try:
-        metrics = get_key_metrics(ticker.upper())
+        metrics = get_key_metrics(ticker)
         alerts = check_alerts(metrics)
         return alerts
     except Exception as e:
@@ -351,14 +385,7 @@ def options_summary_endpoint(user: dict = Depends(get_current_user)):
             "contracts": o["contracts"],
         })
 
-    # Monkey-patch get_options to return our list
-    import portfolio as _pm
-    _orig = _pm.get_options
-    _pm.get_options = lambda: legacy_opts
-    try:
-        result = _legacy_options_summary(current_prices)
-    finally:
-        _pm.get_options = _orig
+    result = _legacy_options_summary(current_prices, options_list=legacy_opts)
 
     # Add DB IDs to the result
     for i, detail in enumerate(result.get("options", [])):
@@ -481,11 +508,12 @@ class ChatRequest(BaseModel):
 @app.get("/api/stock/{ticker}/why-moving")
 def why_moving(ticker: str):
     """AI explanation of why a stock is moving today."""
+    ticker = _valid_ticker(ticker)
     try:
         from openai import OpenAI
         from config import OPENAI_API_KEY
-        metrics = get_key_metrics(ticker.upper())
-        news = fetch_news(ticker.upper(), company_name=metrics.get("name", ""))
+        metrics = get_key_metrics(ticker)
+        news = fetch_news(ticker, company_name=metrics.get("name", ""))
         headlines = "\n".join(f"- {a['title']}" for a in news[:6])
         change_pct = metrics.get("change_pct", 0)
         direction = "up" if change_pct >= 0 else "down"
@@ -517,12 +545,13 @@ In 2-3 short sentences, explain the most likely reason for today's move using on
 @app.get("/api/stock/{ticker}/bull-bear")
 def bull_bear(ticker: str):
     """Structured bull vs bear case."""
+    ticker = _valid_ticker(ticker)
     try:
         from openai import OpenAI
         from config import OPENAI_API_KEY
         import json
-        metrics = get_key_metrics(ticker.upper())
-        news = fetch_news(ticker.upper(), company_name=metrics.get("name", ""))
+        metrics = get_key_metrics(ticker)
+        news = fetch_news(ticker, company_name=metrics.get("name", ""))
         sentiment = aggregate_sentiment(news)
         headlines = "\n".join(f"- {a['title']}" for a in news[:8])
         if not OPENAI_API_KEY:
@@ -620,11 +649,12 @@ Return ONLY valid JSON, no markdown fences."""
 @app.post("/api/stock/{ticker}/chat")
 def stock_chat(ticker: str, req: ChatRequest):
     """AI chat with per-ticker context."""
+    ticker = _valid_ticker(ticker)
     try:
         from openai import OpenAI
         from config import OPENAI_API_KEY
         if not OPENAI_API_KEY:
-            metrics = get_key_metrics(ticker.upper())
+            metrics = get_key_metrics(ticker)
             last_q = req.messages[-1].content if req.messages else ""
             reply = (
                 f"AI Chat requires an OpenAI API key (add OPENAI_API_KEY to your .env file). "
@@ -654,9 +684,10 @@ Answer questions about this stock concisely. Always add a disclaimer that this i
 @app.get("/api/stock/{ticker}/peers")
 def stock_peers(ticker: str):
     """Return peer/competitor metrics for comparison."""
+    ticker = _valid_ticker(ticker)
     try:
         import yfinance as yf
-        stock = yf.Ticker(ticker.upper())
+        stock = yf.Ticker(ticker)
         info = stock.info
 
         # Try to discover peers dynamically from yfinance
@@ -732,9 +763,10 @@ def stock_peers(ticker: str):
 @app.get("/api/stock/{ticker}/events")
 def stock_events(ticker: str):
     """Return upcoming earnings date, past earnings, dividends, and key macro events."""
+    ticker = _valid_ticker(ticker)
     try:
         import yfinance as yf
-        stock = yf.Ticker(ticker.upper())
+        stock = yf.Ticker(ticker)
         earnings_date = None
         try:
             cal = stock.calendar
@@ -794,8 +826,9 @@ def stock_events(ticker: str):
 @app.get("/api/stock/{ticker}/history-returns")
 def stock_history_returns(ticker: str, period: str = Query("3mo")):
     """Return daily close prices for correlation computation."""
+    ticker = _valid_ticker(ticker)
     try:
-        df = get_stock_data(ticker.upper(), period=period, interval="1d")
+        df = get_stock_data(ticker, period=period, interval="1d")
         records = [{"date": ts.strftime("%Y-%m-%d"), "close": round(float(row["Close"]), 4)}
                    for ts, row in df.iterrows()]
         return records

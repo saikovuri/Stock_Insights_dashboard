@@ -3,9 +3,13 @@ import jwt
 import os
 from datetime import datetime, timedelta, timezone
 
-SECRET_KEY = os.getenv("JWT_SECRET", "stock-insights-secret-change-in-production")
+_default_secret = "stock-insights-dev-only-secret"
+SECRET_KEY = os.getenv("JWT_SECRET", _default_secret)
+if SECRET_KEY == _default_secret and os.getenv("DATABASE_URL"):
+    raise RuntimeError("JWT_SECRET must be set in production (DATABASE_URL is present but JWT_SECRET is missing)")
+
 ALGORITHM = "HS256"
-TOKEN_EXPIRE_HOURS = 72
+TOKEN_EXPIRE_HOURS = int(os.getenv("TOKEN_EXPIRE_HOURS", "24"))
 
 
 def hash_password(password: str) -> str:

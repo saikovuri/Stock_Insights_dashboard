@@ -9,6 +9,8 @@ USE_PG = bool(DATABASE_URL)
 if USE_PG:
     import psycopg2
     import psycopg2.extras
+    from psycopg2 import pool as pg_pool
+    _pg_pool = pg_pool.ThreadedConnectionPool(2, 20, DATABASE_URL)
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "stockinsights.db")
 
@@ -19,7 +21,7 @@ PH = "%s" if USE_PG else "?"
 
 def get_db():
     if USE_PG:
-        conn = psycopg2.connect(DATABASE_URL)
+        conn = _pg_pool.getconn()
         conn.autocommit = False
         return conn
     else:
@@ -28,6 +30,14 @@ def get_db():
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
         return conn
+
+
+def _release(conn):
+    """Return a PG connection to the pool, or close SQLite."""
+    if USE_PG:
+        _pg_pool.putconn(conn)
+    else:
+        _release(conn)
 
 
 def _fetchone(cur):
@@ -224,7 +234,21 @@ def init_db():
         """)
         conn.commit()
 
-    conn.close()
+    # ── Indexes (idempotent for both PG and SQLite) ──
+    idx = conn.cursor()
+    idx_stmts = [
+        "CREATE INDEX IF NOT EXISTS idx_holdings_user ON holdings(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_holdings_ticker ON holdings(user_id, ticker)",
+        "CREATE INDEX IF NOT EXISTS idx_options_user ON options(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_transactions_user ON transactions(user_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_watchlist_user ON watchlist(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_closed_trades_user ON closed_trades(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_closed_options_user ON closed_options(user_id)",
+    ]
+    for stmt in idx_stmts:
+        idx.execute(stmt)
+    conn.commit()
+    _release(conn)
 
 
 # ── User operations ──────────────────────────────────────────────────────
@@ -244,7 +268,7 @@ def create_user(username: str, password_hash: str, display_name: str) -> dict | 
         conn.rollback()
         return None
     finally:
-        conn.close()
+        _release(conn)
 
 
 def get_user_by_username(username: str) -> dict | None:
@@ -252,7 +276,7 @@ def get_user_by_username(username: str) -> dict | None:
     cur = conn.cursor()
     cur.execute(f"SELECT * FROM users WHERE username = {PH}", (username,))
     result = _fetchone(cur)
-    conn.close()
+    _release(conn)
     return result
 
 
@@ -263,7 +287,7 @@ def get_user_holdings(user_id: int) -> list[dict]:
     cur = conn.cursor()
     cur.execute(f"SELECT * FROM holdings WHERE user_id = {PH} ORDER BY id", (user_id,))
     rows = _fetchall(cur)
-    conn.close()
+    _release(conn)
     return rows
 
 
@@ -288,7 +312,7 @@ def add_user_holding(user_id: int, ticker: str, shares: float, buy_price: float)
         (user_id, ticker.upper(), json.dumps({"shares": shares, "price": buy_price})),
     )
     conn.commit()
-    conn.close()
+    _release(conn)
     return new_row
 
 
@@ -300,7 +324,7 @@ def update_user_holding(user_id: int, holding_id: int, ticker: str, shares: floa
         (ticker.upper(), shares, buy_price, holding_id, user_id),
     )
     if cur.rowcount == 0:
-        conn.close()
+        _release(conn)
         return None
     cur.execute(
         f"INSERT INTO transactions (user_id, action, ticker, details) VALUES ({PH}, 'EDIT', {PH}, {PH})",
@@ -309,7 +333,7 @@ def update_user_holding(user_id: int, holding_id: int, ticker: str, shares: floa
     conn.commit()
     cur.execute(f"SELECT * FROM holdings WHERE id = {PH}", (holding_id,))
     result = _fetchone(cur)
-    conn.close()
+    _release(conn)
     return result
 
 
@@ -319,7 +343,7 @@ def delete_user_holding(user_id: int, holding_id: int) -> dict | None:
     cur.execute(f"SELECT * FROM holdings WHERE id={PH} AND user_id={PH}", (holding_id, user_id))
     row = _fetchone(cur)
     if not row:
-        conn.close()
+        _release(conn)
         return None
     removed = row
     cur.execute(f"DELETE FROM holdings WHERE id={PH} AND user_id={PH}", (holding_id, user_id))
@@ -328,7 +352,7 @@ def delete_user_holding(user_id: int, holding_id: int) -> dict | None:
         (user_id, removed["ticker"], json.dumps({"shares": removed["shares"]})),
     )
     conn.commit()
-    conn.close()
+    _release(conn)
     return removed
 
 
@@ -341,7 +365,7 @@ def sell_user_holding(user_id: int, ticker: str, shares: float, sell_price: floa
     )
     row = _fetchone(cur)
     if not row:
-        conn.close()
+        _release(conn)
         return None
     h = row
     if shares >= h["shares"]:
@@ -362,7 +386,7 @@ def sell_user_holding(user_id: int, ticker: str, shares: float, sell_price: floa
         (user_id, ticker, json.dumps({"shares": sold_shares, "price": sell_price, "pnl": round(pnl, 2)})),
     )
     conn.commit()
-    conn.close()
+    _release(conn)
     return {"action": "SELL", "ticker": ticker, "shares": sold_shares, "sell_price": sell_price, "pnl": round(pnl, 2)}
 
 
@@ -375,7 +399,7 @@ def sell_user_holding_by_lot(user_id: int, holding_id: int, shares: float, sell_
     )
     row = _fetchone(cur)
     if not row:
-        conn.close()
+        _release(conn)
         return None
     h = row
     sold_shares = min(shares, h["shares"])
@@ -395,7 +419,7 @@ def sell_user_holding_by_lot(user_id: int, holding_id: int, shares: float, sell_
         (user_id, h["ticker"], json.dumps({"shares": sold_shares, "price": sell_price, "buy_price": h["buy_price"], "pnl": round(pnl, 2)})),
     )
     conn.commit()
-    conn.close()
+    _release(conn)
     return {"action": "SELL", "ticker": h["ticker"], "shares": sold_shares, "sell_price": sell_price, "pnl": round(pnl, 2)}
 
 
@@ -406,7 +430,7 @@ def get_user_options(user_id: int) -> list[dict]:
     cur = conn.cursor()
     cur.execute(f"SELECT * FROM options WHERE user_id = {PH} ORDER BY id", (user_id,))
     rows = _fetchall(cur)
-    conn.close()
+    _release(conn)
     return rows
 
 
@@ -434,7 +458,7 @@ def add_user_option(user_id: int, ticker: str, option_type: str, strike: float,
          json.dumps({"strike": strike, "expiry": expiry, "premium": premium, "contracts": contracts})),
     )
     conn.commit()
-    conn.close()
+    _release(conn)
     return new_row
 
 
@@ -449,7 +473,7 @@ def close_user_option(user_id: int, ticker: str, option_type: str, strike: float
     )
     row = _fetchone(cur)
     if not row:
-        conn.close()
+        _release(conn)
         return None
     opt = row
     if contracts >= opt["contracts"]:
@@ -475,7 +499,7 @@ def close_user_option(user_id: int, ticker: str, option_type: str, strike: float
          json.dumps({"strike": strike, "expiry": expiry, "premium": close_premium, "contracts": closed, "pnl": round(pnl, 2)})),
     )
     conn.commit()
-    conn.close()
+    _release(conn)
     return {"action": close_action, "ticker": ticker, "type": option_type, "strike": strike,
             "expiry": expiry, "close_premium": close_premium, "contracts": closed, "pnl": round(pnl, 2)}
 
@@ -490,7 +514,7 @@ def update_user_option(user_id: int, option_id: int, ticker: str, option_type: s
         (ticker.upper(), option_type.lower(), position.lower(), strike, expiry, premium, contracts, option_id, user_id),
     )
     if cur.rowcount == 0:
-        conn.close()
+        _release(conn)
         return None
     cur.execute(
         f"INSERT INTO transactions (user_id, action, ticker, details) VALUES ({PH}, 'EDIT_OPTION', {PH}, {PH})",
@@ -499,7 +523,7 @@ def update_user_option(user_id: int, option_id: int, ticker: str, option_type: s
     conn.commit()
     cur.execute(f"SELECT * FROM options WHERE id = {PH}", (option_id,))
     result = _fetchone(cur)
-    conn.close()
+    _release(conn)
     return result
 
 
@@ -509,7 +533,7 @@ def delete_user_option(user_id: int, option_id: int) -> dict | None:
     cur.execute(f"SELECT * FROM options WHERE id={PH} AND user_id={PH}", (option_id, user_id))
     row = _fetchone(cur)
     if not row:
-        conn.close()
+        _release(conn)
         return None
     removed = row
     cur.execute(f"DELETE FROM options WHERE id={PH} AND user_id={PH}", (option_id, user_id))
@@ -518,7 +542,7 @@ def delete_user_option(user_id: int, option_id: int) -> dict | None:
         (user_id, removed["ticker"], json.dumps({"strike": removed["strike"]})),
     )
     conn.commit()
-    conn.close()
+    _release(conn)
     return removed
 
 
@@ -527,7 +551,7 @@ def get_user_transactions(user_id: int) -> list[dict]:
     cur = conn.cursor()
     cur.execute(f"SELECT * FROM transactions WHERE user_id={PH} ORDER BY created_at DESC", (user_id,))
     rows = _fetchall(cur)
-    conn.close()
+    _release(conn)
     return rows
 
 
@@ -538,7 +562,7 @@ def get_user_watchlist(user_id: int) -> list[str]:
     cur = conn.cursor()
     cur.execute(f"SELECT ticker FROM watchlist WHERE user_id={PH} ORDER BY added_at", (user_id,))
     rows = _fetchall(cur)
-    conn.close()
+    _release(conn)
     return [r["ticker"] for r in rows]
 
 
@@ -548,11 +572,11 @@ def add_to_watchlist(user_id: int, ticker: str) -> bool:
     try:
         cur.execute(f"INSERT INTO watchlist (user_id, ticker) VALUES ({PH}, {PH})", (user_id, ticker.upper()))
         conn.commit()
-        conn.close()
+        _release(conn)
         return True
     except Exception:
         conn.rollback()
-        conn.close()
+        _release(conn)
         return False
 
 
@@ -562,7 +586,7 @@ def remove_from_watchlist(user_id: int, ticker: str) -> bool:
     cur.execute(f"DELETE FROM watchlist WHERE user_id={PH} AND ticker={PH}", (user_id, ticker.upper()))
     conn.commit()
     removed = cur.rowcount > 0
-    conn.close()
+    _release(conn)
     return removed
 
 
@@ -573,7 +597,7 @@ def get_closed_trades(user_id: int) -> list[dict]:
     cur = conn.cursor()
     cur.execute(f"SELECT * FROM closed_trades WHERE user_id={PH} ORDER BY closed_at DESC", (user_id,))
     rows = _fetchall(cur)
-    conn.close()
+    _release(conn)
     return rows
 
 
@@ -582,7 +606,7 @@ def get_closed_options(user_id: int) -> list[dict]:
     cur = conn.cursor()
     cur.execute(f"SELECT * FROM closed_options WHERE user_id={PH} ORDER BY closed_at DESC", (user_id,))
     rows = _fetchall(cur)
-    conn.close()
+    _release(conn)
     return rows
 
 
