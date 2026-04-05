@@ -13,7 +13,7 @@ export function AuthProvider({ children }) {
       fetch(`${API_BASE}/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
         .then(r => { if (!r.ok) throw new Error(); return r.json(); })
         .then(u => setUser(u))
-        .catch(() => { localStorage.removeItem('token'); setToken(null); })
+        .catch(() => { localStorage.removeItem('token'); localStorage.removeItem('refresh_token'); setToken(null); })
         .finally(() => setLoading(false));
     } else {
       setLoading(false);
@@ -32,6 +32,7 @@ export function AuthProvider({ children }) {
     }
     const data = await res.json();
     localStorage.setItem('token', data.token);
+    localStorage.setItem('refresh_token', data.refresh_token);
     setToken(data.token);
     setUser(data.user);
   };
@@ -48,12 +49,20 @@ export function AuthProvider({ children }) {
     }
     const data = await res.json();
     localStorage.setItem('token', data.token);
+    localStorage.setItem('refresh_token', data.refresh_token);
     setToken(data.token);
     setUser(data.user);
   };
 
-  const logout = () => {
+  const logout = async () => {
+    try {
+      await fetch(`${API_BASE}/auth/logout`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch { /* ignore */ }
     localStorage.removeItem('token');
+    localStorage.removeItem('refresh_token');
     setToken(null);
     setUser(null);
   };

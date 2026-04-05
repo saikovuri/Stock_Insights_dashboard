@@ -12,3 +12,4 @@ PyJWT>=2.8.0
 vaderSentiment>=3.3.2
 numpy>=1.24.0
 psycopg2-binary>=2.9.9
+slowapi>=0.1.9

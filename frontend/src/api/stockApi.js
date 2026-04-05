@@ -9,6 +9,43 @@ function authHeaders() {
   return h;
 }
 
+/**
+ * Wrapper around fetch that auto-refreshes the access token on 401.
+ * If the refresh itself fails, clears auth and reloads.
+ */
+let _refreshPromise = null;
+async function authFetch(url, opts = {}) {
+  opts.headers = opts.headers || authHeaders();
+  let res = await fetch(url, opts);
+  if (res.status === 401 && localStorage.getItem('refresh_token')) {
+    // Deduplicate concurrent refresh attempts
+    if (!_refreshPromise) {
+      _refreshPromise = fetch(`${BASE}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: localStorage.getItem('refresh_token') }),
+      }).then(async (r) => {
+        if (!r.ok) throw new Error('refresh failed');
+        return r.json();
+      }).finally(() => { _refreshPromise = null; });
+    }
+    try {
+      const data = await _refreshPromise;
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('refresh_token', data.refresh_token);
+      // Retry original request with new token
+      opts.headers['Authorization'] = `Bearer ${data.token}`;
+      res = await fetch(url, opts);
+    } catch {
+      localStorage.removeItem('token');
+      localStorage.removeItem('refresh_token');
+      window.location.reload();
+      throw new Error('Session expired');
+    }
+  }
+  return res;
+}
+
 export async function fetchMetrics(ticker) {
   const res = await fetch(`${BASE}/stock/${ticker}/metrics`);
   if (!res.ok) throw new Error((await res.json()).detail || 'Failed to fetch metrics');
@@ -41,13 +78,13 @@ export async function fetchAlerts(ticker) {
 }
 
 export async function fetchPortfolioSummary() {
-  const res = await fetch(`${BASE}/portfolio/summary`, { headers: authHeaders() });
+  const res = await authFetch(`${BASE}/portfolio/summary`, { headers: authHeaders() });
   if (!res.ok) throw new Error('Failed to fetch portfolio');
   return res.json();
 }
 
 export async function buyStock(ticker, shares, price) {
-  const res = await fetch(`${BASE}/portfolio/buy`, {
+  const res = await authFetch(`${BASE}/portfolio/buy`, {
     method: 'POST', headers: authHeaders(),
     body: JSON.stringify({ ticker, shares, price }),
   });
@@ -56,7 +93,7 @@ export async function buyStock(ticker, shares, price) {
 }
 
 export async function sellStock(ticker, shares, price) {
-  const res = await fetch(`${BASE}/portfolio/sell`, {
+  const res = await authFetch(`${BASE}/portfolio/sell`, {
     method: 'POST', headers: authHeaders(),
     body: JSON.stringify({ ticker, shares, price }),
   });
@@ -65,7 +102,7 @@ export async function sellStock(ticker, shares, price) {
 }
 
 export async function sellStockLot(holdingId, ticker, shares, price) {
-  const res = await fetch(`${BASE}/portfolio/sell-lot/${holdingId}`, {
+  const res = await authFetch(`${BASE}/portfolio/sell-lot/${holdingId}`, {
     method: 'POST', headers: authHeaders(),
     body: JSON.stringify({ ticker, shares, price }),
   });
@@ -75,13 +112,13 @@ export async function sellStockLot(holdingId, ticker, shares, price) {
 
 // ── Options ──────────────────────────────────────────────────────
 export async function fetchOptionsSummary() {
-  const res = await fetch(`${BASE}/portfolio/options/summary`, { headers: authHeaders() });
+  const res = await authFetch(`${BASE}/portfolio/options/summary`, { headers: authHeaders() });
   if (!res.ok) throw new Error('Failed to fetch options');
   return res.json();
 }
 
 export async function buyOption(ticker, option_type, strike, expiry, premium, contracts, position = 'long') {
-  const res = await fetch(`${BASE}/portfolio/options/buy`, {
+  const res = await authFetch(`${BASE}/portfolio/options/buy`, {
     method: 'POST', headers: authHeaders(),
     body: JSON.stringify({ ticker, option_type, strike, expiry, premium, contracts, position }),
   });
@@ -90,7 +127,7 @@ export async function buyOption(ticker, option_type, strike, expiry, premium, co
 }
 
 export async function closeOption(ticker, option_type, strike, expiry, premium, contracts, position = 'long') {
-  const res = await fetch(`${BASE}/portfolio/options/close`, {
+  const res = await authFetch(`${BASE}/portfolio/options/close`, {
     method: 'POST', headers: authHeaders(),
     body: JSON.stringify({ ticker, option_type, strike, expiry, premium, contracts, position }),
   });
@@ -100,7 +137,7 @@ export async function closeOption(ticker, option_type, strike, expiry, premium, 
 
 // ── Edit / Delete holdings ────────────────────────────────────────
 export async function editHolding(id, ticker, shares, price) {
-  const res = await fetch(`${BASE}/portfolio/${id}`, {
+  const res = await authFetch(`${BASE}/portfolio/${id}`, {
     method: 'PUT', headers: authHeaders(),
     body: JSON.stringify({ ticker, shares, price }),
   });
@@ -109,13 +146,13 @@ export async function editHolding(id, ticker, shares, price) {
 }
 
 export async function deleteHolding(id) {
-  const res = await fetch(`${BASE}/portfolio/${id}`, { method: 'DELETE', headers: authHeaders() });
+  const res = await authFetch(`${BASE}/portfolio/${id}`, { method: 'DELETE', headers: authHeaders() });
   if (!res.ok) throw new Error((await res.json()).detail || 'Failed to delete holding');
   return res.json();
 }
 
 export async function editOption(id, ticker, option_type, strike, expiry, premium, contracts, position = 'long') {
-  const res = await fetch(`${BASE}/portfolio/options/${id}`, {
+  const res = await authFetch(`${BASE}/portfolio/options/${id}`, {
     method: 'PUT', headers: authHeaders(),
     body: JSON.stringify({ ticker, option_type, strike, expiry, premium, contracts, position }),
   });
@@ -124,20 +161,20 @@ export async function editOption(id, ticker, option_type, strike, expiry, premiu
 }
 
 export async function deleteOption(id) {
-  const res = await fetch(`${BASE}/portfolio/options/${id}`, { method: 'DELETE', headers: authHeaders() });
+  const res = await authFetch(`${BASE}/portfolio/options/${id}`, { method: 'DELETE', headers: authHeaders() });
   if (!res.ok) throw new Error((await res.json()).detail || 'Failed to delete option');
   return res.json();
 }
 
 // ── Closed trades ────────────────────────────────────────────────
 export async function fetchClosedTrades() {
-  const res = await fetch(`${BASE}/portfolio/closed`, { headers: authHeaders() });
+  const res = await authFetch(`${BASE}/portfolio/closed`, { headers: authHeaders() });
   if (!res.ok) throw new Error('Failed to fetch closed trades');
   return res.json();
 }
 
 export async function fetchClosedOptions() {
-  const res = await fetch(`${BASE}/portfolio/options/closed`, { headers: authHeaders() });
+  const res = await authFetch(`${BASE}/portfolio/options/closed`, { headers: authHeaders() });
   if (!res.ok) throw new Error('Failed to fetch closed options');
   return res.json();
 }

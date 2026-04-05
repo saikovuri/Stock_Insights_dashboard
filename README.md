@@ -52,7 +52,7 @@ The dashboard works without API keys — you'll get rule-based analysis instead 
 
 ## Future Roadmap
 
-- [ ] Scheduled daily email/Slack alerts
+- [ ] Scheduled daily email
 - [ ] Multi-ticker comparison view
 - [ ] Technical indicators (RSI, MACD, Bollinger)
 - [ ] Watchlist with batch analysis

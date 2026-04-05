@@ -2,27 +2,37 @@ from fastapi import FastAPI, HTTPException, Query, Depends, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, date as _date
 import re
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 from stock_data import get_stock_data, get_key_metrics, format_large_number, compute_indicators
 from news_sentiment import fetch_news, aggregate_sentiment
 from ai_summary import get_ai_summary
 from alerts import check_alerts
-from auth import hash_password, verify_password, create_token, decode_token
+from auth import hash_password, verify_password, create_token, decode_token, create_refresh_token, REFRESH_EXPIRE_DAYS
 from database import (
-    create_user, get_user_by_username,
+    create_user, get_user_by_username, get_user_by_username_by_id,
     get_user_holdings, add_user_holding, update_user_holding, delete_user_holding, sell_user_holding,
     sell_user_holding_by_lot,
     get_user_options, add_user_option, close_user_option, update_user_option, delete_user_option,
     get_user_transactions, get_user_watchlist, add_to_watchlist, remove_from_watchlist,
     get_closed_trades, get_closed_options,
+    store_refresh_token, get_refresh_token, delete_refresh_token, delete_user_refresh_tokens,
 )
 from config import CORS_ORIGINS
 
 app = FastAPI(title="Stock Insights API", version="2.0.0")
+
+# ── Rate limiting ───────────────────────────────────────────────────────────
+
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # ── Security headers middleware ─────────────────────────────────────────────
 
@@ -116,8 +126,23 @@ class WatchlistRequest(BaseModel):
 
 # ── Auth endpoints ──────────────────────────────────────────────────────────
 
+def _issue_tokens(user: dict) -> dict:
+    """Create access + refresh tokens and return auth response."""
+    from datetime import timedelta
+    access = create_token(user["id"], user["username"])
+    refresh = create_refresh_token()
+    expires_at = (datetime.utcnow() + timedelta(days=REFRESH_EXPIRE_DAYS)).isoformat()
+    store_refresh_token(user["id"], refresh, expires_at)
+    return {
+        "token": access,
+        "refresh_token": refresh,
+        "user": {"id": user["id"], "username": user["username"], "display_name": user["display_name"]},
+    }
+
+
 @app.post("/api/auth/register")
-def register(req: RegisterRequest):
+@limiter.limit("5/minute")
+def register(request: Request, req: RegisterRequest):
     if len(req.username) < 3:
         raise HTTPException(status_code=400, detail="Username must be at least 3 characters")
     if len(req.password) < 6:
@@ -126,17 +151,46 @@ def register(req: RegisterRequest):
     user = create_user(req.username.strip(), hashed, req.display_name.strip())
     if not user:
         raise HTTPException(status_code=409, detail="Username already taken")
-    token = create_token(user["id"], user["username"])
-    return {"token": token, "user": {"id": user["id"], "username": user["username"], "display_name": user["display_name"]}}
+    return _issue_tokens(user)
 
 
 @app.post("/api/auth/login")
-def login(req: LoginRequest):
+@limiter.limit("10/minute")
+def login(request: Request, req: LoginRequest):
     user = get_user_by_username(req.username.strip())
     if not user or not verify_password(req.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid username or password")
-    token = create_token(user["id"], user["username"])
-    return {"token": token, "user": {"id": user["id"], "username": user["username"], "display_name": user["display_name"]}}
+    return _issue_tokens(user)
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+@app.post("/api/auth/refresh")
+@limiter.limit("30/minute")
+def refresh(request: Request, req: RefreshRequest):
+    stored = get_refresh_token(req.refresh_token)
+    if not stored:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+    # Check expiry
+    expires = datetime.fromisoformat(str(stored["expires_at"]).replace("+00:00", "").replace("Z", ""))
+    if datetime.utcnow() > expires:
+        delete_refresh_token(req.refresh_token)
+        raise HTTPException(status_code=401, detail="Refresh token expired")
+    # Rotate: delete old, issue new pair
+    user = get_user_by_username_by_id(stored["user_id"])
+    if not user:
+        delete_refresh_token(req.refresh_token)
+        raise HTTPException(status_code=401, detail="User not found")
+    delete_refresh_token(req.refresh_token)
+    return _issue_tokens(user)
+
+
+@app.post("/api/auth/logout")
+def logout(user: dict = Depends(get_current_user)):
+    delete_user_refresh_tokens(user["user_id"])
+    return {"message": "Logged out"}
 
 
 @app.get("/api/auth/me")
@@ -150,7 +204,8 @@ def auth_me(user: dict = Depends(get_current_user)):
 # ── Stock endpoints (no auth needed) ───────────────────────────────────────
 
 @app.get("/api/stock/{ticker}/metrics")
-def stock_metrics(ticker: str):
+@limiter.limit("30/minute")
+def stock_metrics(request: Request, ticker: str):
     ticker = _valid_ticker(ticker)
     try:
         metrics = get_key_metrics(ticker)
@@ -161,7 +216,9 @@ def stock_metrics(ticker: str):
 
 
 @app.get("/api/stock/{ticker}/history")
+@limiter.limit("20/minute")
 def stock_history(
+    request: Request,
     ticker: str,
     period: str = Query("6mo", pattern="^(1d|5d|1mo|3mo|6mo|1y|2y|5y|max)$"),
     interval: str = Query("1d", pattern="^(1m|2m|5m|15m|30m|1h|1d|5d|1wk|1mo)$"),
@@ -202,7 +259,8 @@ def stock_history(
 
 
 @app.get("/api/stock/{ticker}/news")
-def stock_news(ticker: str):
+@limiter.limit("15/minute")
+def stock_news(request: Request, ticker: str):
     ticker = _valid_ticker(ticker)
     try:
         metrics = get_key_metrics(ticker)
@@ -214,7 +272,8 @@ def stock_news(ticker: str):
 
 
 @app.get("/api/stock/{ticker}/summary")
-def stock_summary(ticker: str):
+@limiter.limit("10/minute")
+def stock_summary(request: Request, ticker: str):
     ticker = _valid_ticker(ticker)
     try:
         metrics = get_key_metrics(ticker)
@@ -245,13 +304,32 @@ def portfolio_summary_endpoint(user: dict = Depends(get_current_user)):
     if not holdings:
         return {"total_invested": 0, "total_current": 0, "total_pnl": 0, "total_pnl_pct": 0, "holdings": []}
 
+    # Batch fetch current prices — one yfinance call for all unique tickers
+    import yfinance as yf
+    unique_tickers = list({h["ticker"] for h in holdings})
     current_prices = {}
-    for h in holdings:
-        try:
-            m = get_key_metrics(h["ticker"])
-            current_prices[h["ticker"]] = m["price"]
-        except Exception:
-            current_prices[h["ticker"]] = h["buy_price"]
+    try:
+        if len(unique_tickers) == 1:
+            data = yf.download(unique_tickers[0], period="1d", interval="1d", progress=False)
+            if not data.empty:
+                current_prices[unique_tickers[0]] = round(float(data["Close"].iloc[-1]), 2)
+        else:
+            data = yf.download(unique_tickers, period="1d", interval="1d", progress=False, group_by="ticker")
+            for t in unique_tickers:
+                try:
+                    current_prices[t] = round(float(data[t]["Close"].iloc[-1]), 2)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    # Fill any missing tickers with individual fallbacks
+    for t in unique_tickers:
+        if t not in current_prices:
+            try:
+                m = get_key_metrics(t)
+                current_prices[t] = m["price"]
+            except Exception:
+                current_prices[t] = 0
 
     # Build summary from DB holdings
     total_invested = 0.0
@@ -349,49 +427,125 @@ def options_summary_endpoint(user: dict = Depends(get_current_user)):
     if not options:
         return {"total_cost": 0, "total_value": 0, "total_pnl": 0, "total_pnl_pct": 0, "options": []}
 
-    # Index tickers that need ^ prefix for yfinance
     INDEX_MAP = {
         "SPX": "^SPX", "NDX": "^NDX", "RUT": "^RUT", "DJX": "^DJI",
         "VIX": "^VIX", "OEX": "^OEX", "XSP": "^XSP",
     }
 
+    def _yf_ticker(ticker: str) -> str:
+        return INDEX_MAP.get(ticker.upper(), ticker)
+
+    # Fetch underlying prices (deduplicated)
     current_prices = {}
     for o in options:
         if o["ticker"] not in current_prices:
-            yf_sym = INDEX_MAP.get(o["ticker"].upper(), o["ticker"])
+            yf_sym = _yf_ticker(o["ticker"])
             try:
                 m = get_key_metrics(yf_sym)
                 p = m.get("price", 0)
                 if not p:
-                    fast = yf.Ticker(yf_sym).fast_info
-                    p = getattr(fast, "last_price", 0) or 0
+                    p = getattr(yf.Ticker(yf_sym).fast_info, "last_price", 0) or 0
                 current_prices[o["ticker"]] = p if p else o["strike"]
             except Exception:
                 try:
-                    fast = yf.Ticker(yf_sym).fast_info
-                    current_prices[o["ticker"]] = getattr(fast, "last_price", o["strike"]) or o["strike"]
+                    current_prices[o["ticker"]] = getattr(yf.Ticker(yf_sym).fast_info, "last_price", o["strike"]) or o["strike"]
                 except Exception:
                     current_prices[o["ticker"]] = o["strike"]
 
-    # Reuse the options summary logic from portfolio.py
-    from portfolio import get_options_summary as _legacy_options_summary
+    # Cache option chains per (ticker, expiry)
+    chain_cache: dict[tuple[str, str], dict] = {}
+    today = _date.today()
 
-    # Convert DB options to legacy format
-    legacy_opts = []
+    def _get_market_price(ticker: str, opt_type: str, strike: float, expiry: str) -> dict:
+        yf_sym = _yf_ticker(ticker)
+        key = (yf_sym, expiry)
+        if key not in chain_cache:
+            try:
+                t = yf.Ticker(yf_sym)
+                available = t.options
+                if expiry in available:
+                    chain = t.option_chain(expiry)
+                else:
+                    nearest = min(available, key=lambda e: abs(
+                        (datetime.strptime(e, "%Y-%m-%d").date() - datetime.strptime(expiry, "%Y-%m-%d").date()).days
+                    )) if available else None
+                    chain = t.option_chain(nearest) if nearest else None
+                chain_cache[key] = {"calls": chain.calls if chain else None, "puts": chain.puts if chain else None}
+            except Exception:
+                chain_cache[key] = {"calls": None, "puts": None}
+
+        cached = chain_cache[key]
+        df = cached["calls"] if opt_type == "call" else cached["puts"]
+        if df is None or df.empty:
+            return {}
+        match = df[df["strike"] == strike]
+        if match.empty:
+            closest_idx = (df["strike"] - strike).abs().idxmin()
+            match = df.loc[[closest_idx]]
+        row = match.iloc[0]
+        return {
+            "last_price": float(row.get("lastPrice", 0) or 0),
+            "bid": float(row.get("bid", 0) or 0),
+            "ask": float(row.get("ask", 0) or 0),
+            "iv": float(row.get("impliedVolatility", 0) or 0),
+            "volume": int(row.get("volume", 0) or 0),
+            "open_interest": int(row.get("openInterest", 0) or 0),
+        }
+
+    details = []
     for o in options:
-        legacy_opts.append({
-            "ticker": o["ticker"], "type": o["option_type"], "position": o["position"],
-            "strike": o["strike"], "expiry": o["expiry"], "premium": o["premium"],
-            "contracts": o["contracts"],
+        ticker = o["ticker"]
+        contracts = o["contracts"]
+        premium = o["premium"]
+        strike = o["strike"]
+        current = current_prices.get(ticker, strike)
+        position = o.get("position", "long")
+        opt_type = o["option_type"]
+
+        try:
+            expiry_date = datetime.strptime(o["expiry"], "%Y-%m-%d").date()
+            dte = max((expiry_date - today).days, 0)
+        except (ValueError, KeyError):
+            dte = 0
+
+        intrinsic = max(current - strike, 0) if opt_type == "call" else max(strike - current, 0)
+
+        market = _get_market_price(ticker, opt_type, strike, o["expiry"])
+        if market:
+            bid, ask = market.get("bid", 0), market.get("ask", 0)
+            market_price = (bid + ask) / 2 if bid > 0 and ask > 0 else market.get("last_price", 0)
+            iv, volume, oi = market.get("iv", 0), market.get("volume", 0), market.get("open_interest", 0)
+        else:
+            market_price, iv, volume, oi = intrinsic, 0, 0, 0
+
+        cost = premium * 100 * contracts
+        current_value = market_price * 100 * contracts
+        pnl = (current_value - cost) if position == "long" else (cost - current_value)
+        pnl_pct = (pnl / cost * 100) if cost else 0
+
+        details.append({
+            "id": o["id"], "ticker": ticker, "type": opt_type, "position": position,
+            "strike": strike, "expiry": o["expiry"], "dte": dte,
+            "contracts": contracts, "premium": premium, "cost": round(cost, 2),
+            "current_price": current, "intrinsic": round(intrinsic, 2),
+            "market_price": round(market_price, 2),
+            "bid": round(market.get("bid", 0), 2) if market else 0,
+            "ask": round(market.get("ask", 0), 2) if market else 0,
+            "iv": round(iv * 100, 1), "volume": volume, "open_interest": oi,
+            "est_value": round(market_price, 2),
+            "pnl": round(pnl, 2), "pnl_pct": round(pnl_pct, 2),
         })
 
-    result = _legacy_options_summary(current_prices, options_list=legacy_opts)
-
-    # Add DB IDs to the result
-    for i, detail in enumerate(result.get("options", [])):
-        if i < len(options):
-            detail["id"] = options[i]["id"]
-    return result
+    total_cost = sum(d["cost"] for d in details)
+    total_pnl = sum(d["pnl"] for d in details)
+    total_market = sum(d["market_price"] * d["contracts"] * 100 for d in details)
+    return {
+        "total_cost": round(total_cost, 2),
+        "total_value": round(total_market, 2),
+        "total_pnl": round(total_pnl, 2),
+        "total_pnl_pct": round((total_pnl / total_cost * 100) if total_cost else 0, 2),
+        "options": details,
+    }
 
 
 @app.post("/api/portfolio/options/buy")
@@ -506,7 +660,8 @@ class ChatRequest(BaseModel):
 
 
 @app.get("/api/stock/{ticker}/why-moving")
-def why_moving(ticker: str):
+@limiter.limit("10/minute")
+def why_moving(request: Request, ticker: str):
     """AI explanation of why a stock is moving today."""
     ticker = _valid_ticker(ticker)
     try:
@@ -543,7 +698,8 @@ In 2-3 short sentences, explain the most likely reason for today's move using on
 
 
 @app.get("/api/stock/{ticker}/bull-bear")
-def bull_bear(ticker: str):
+@limiter.limit("10/minute")
+def bull_bear(request: Request, ticker: str):
     """Structured bull vs bear case."""
     ticker = _valid_ticker(ticker)
     try:
@@ -647,7 +803,8 @@ Return ONLY valid JSON, no markdown fences."""
 
 
 @app.post("/api/stock/{ticker}/chat")
-def stock_chat(ticker: str, req: ChatRequest):
+@limiter.limit("15/minute")
+def stock_chat(request: Request, ticker: str, req: ChatRequest):
     """AI chat with per-ticker context."""
     ticker = _valid_ticker(ticker)
     try:
@@ -682,7 +839,8 @@ Answer questions about this stock concisely. Always add a disclaimer that this i
 
 
 @app.get("/api/stock/{ticker}/peers")
-def stock_peers(ticker: str):
+@limiter.limit("10/minute")
+def stock_peers(request: Request, ticker: str):
     """Return peer/competitor metrics for comparison."""
     ticker = _valid_ticker(ticker)
     try:

@@ -37,7 +37,7 @@ def _release(conn):
     if USE_PG:
         _pg_pool.putconn(conn)
     else:
-        _release(conn)
+        conn.close()
 
 
 def _fetchone(cur):
@@ -153,6 +153,15 @@ def init_db():
                 closed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS refresh_tokens (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id),
+                token TEXT UNIQUE NOT NULL,
+                expires_at TIMESTAMPTZ NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
         conn.commit()
     else:
         # SQLite schema
@@ -231,6 +240,14 @@ def init_db():
                 closed_at TEXT NOT NULL DEFAULT (datetime('now')),
                 FOREIGN KEY (user_id) REFERENCES users(id)
             );
+            CREATE TABLE IF NOT EXISTS refresh_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                token TEXT UNIQUE NOT NULL,
+                expires_at TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            );
         """)
         conn.commit()
 
@@ -244,6 +261,8 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_watchlist_user ON watchlist(user_id)",
         "CREATE INDEX IF NOT EXISTS idx_closed_trades_user ON closed_trades(user_id)",
         "CREATE INDEX IF NOT EXISTS idx_closed_options_user ON closed_options(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_refresh_tokens_token ON refresh_tokens(token)",
     ]
     for stmt in idx_stmts:
         idx.execute(stmt)
@@ -275,6 +294,15 @@ def get_user_by_username(username: str) -> dict | None:
     conn = get_db()
     cur = conn.cursor()
     cur.execute(f"SELECT * FROM users WHERE username = {PH}", (username,))
+    result = _fetchone(cur)
+    _release(conn)
+    return result
+
+
+def get_user_by_username_by_id(user_id: int) -> dict | None:
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(f"SELECT * FROM users WHERE id = {PH}", (user_id,))
     result = _fetchone(cur)
     _release(conn)
     return result
@@ -608,6 +636,53 @@ def get_closed_options(user_id: int) -> list[dict]:
     rows = _fetchall(cur)
     _release(conn)
     return rows
+
+
+# ── Refresh token operations ─────────────────────────────────────────────
+
+def store_refresh_token(user_id: int, token: str, expires_at: str) -> None:
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        f"INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES ({PH}, {PH}, {PH})",
+        (user_id, token, expires_at),
+    )
+    conn.commit()
+    _release(conn)
+
+
+def get_refresh_token(token: str) -> dict | None:
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(f"SELECT * FROM refresh_tokens WHERE token = {PH}", (token,))
+    row = _fetchone(cur)
+    _release(conn)
+    return row
+
+
+def delete_refresh_token(token: str) -> None:
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(f"DELETE FROM refresh_tokens WHERE token = {PH}", (token,))
+    conn.commit()
+    _release(conn)
+
+
+def delete_user_refresh_tokens(user_id: int) -> None:
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(f"DELETE FROM refresh_tokens WHERE user_id = {PH}", (user_id,))
+    conn.commit()
+    _release(conn)
+
+
+def cleanup_expired_refresh_tokens() -> None:
+    conn = get_db()
+    cur = conn.cursor()
+    now = datetime.utcnow().isoformat()
+    cur.execute(f"DELETE FROM refresh_tokens WHERE expires_at < {PH}", (now,))
+    conn.commit()
+    _release(conn)
 
 
 # Initialize DB on import
