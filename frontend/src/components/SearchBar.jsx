@@ -1,7 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
-export default function SearchBar({ onSearch, loading }) {
-  const [ticker, setTicker] = useState('AAPL');
+export default function SearchBar({ onSearch, loading, activeTicker }) {
+  const [ticker, setTicker] = useState(activeTicker || 'AAPL');
+
+  useEffect(() => {
+    if (activeTicker) setTicker(activeTicker);
+  }, [activeTicker]);
 
   const handleSubmit = (e) => {
     e.preventDefault();

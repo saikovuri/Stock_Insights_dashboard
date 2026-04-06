@@ -135,7 +135,7 @@ function AppShell() {
       {activeTab === 'dashboard' && (
         <div className="dashboard-layout">
           <div className="dashboard-main">
-            <SearchBar onSearch={(t) => handleSearch(t)} loading={loading} />
+            <SearchBar onSearch={(t) => handleSearch(t)} loading={loading} activeTicker={ticker} />
             {error && <div className="error-banner">{error}</div>}
             {!ticker && !loading && (
               <div className="dashboard-welcome">
