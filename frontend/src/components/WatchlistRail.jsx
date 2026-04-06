@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '../AuthContext';
 
 import { API_BASE } from '../api/config';
@@ -15,14 +15,30 @@ export default function WatchlistRail({ activeTicker, onSelect, onGoToScreener }
   const { token, user } = useAuth();
   const isGuest = !user;
 
-  const [tickers, setTickers] = useState([]);
+  const [rawTickers, setRawTickers] = useState([]);
   const [quotes, setQuotes] = useState({});
   const [loading, setLoading] = useState(false);
+
+  // Force re-sort when screener order changes
+  const [orderVersion, setOrderVersion] = useState(0);
+
+  // Apply screener sort order if available
+  const tickers = useMemo(() => {
+    try {
+      const order = JSON.parse(sessionStorage.getItem('screener_order') || 'null');
+      if (order && Array.isArray(order) && order.length) {
+        const orderMap = {};
+        order.forEach((t, i) => { orderMap[t] = i; });
+        return [...rawTickers].sort((a, b) => (orderMap[a] ?? 999) - (orderMap[b] ?? 999));
+      }
+    } catch { /* ignore */ }
+    return rawTickers;
+  }, [rawTickers, orderVersion]);
 
   // Load ticker list from the right source
   const loadTickers = useCallback(async () => {
     if (isGuest) {
-      setTickers(getGuestList());
+      setRawTickers(getGuestList());
     } else {
       try {
         const res = await fetch(`${BASE}/watchlist`, {
@@ -30,7 +46,7 @@ export default function WatchlistRail({ activeTicker, onSelect, onGoToScreener }
         });
         if (res.ok) {
           const data = await res.json();
-          setTickers(data.tickers || []);
+          setRawTickers(data.tickers || []);
         }
       } catch { /* ignore */ }
     }
@@ -38,10 +54,15 @@ export default function WatchlistRail({ activeTicker, onSelect, onGoToScreener }
 
   useEffect(() => {
     loadTickers();
-    // Poll for watchlist changes every 30s (lightweight DB-only call)
     const id = setInterval(loadTickers, 30000);
+    const onOrderChange = () => setOrderVersion(n => n + 1);
     window.addEventListener('storage', loadTickers);
-    return () => { clearInterval(id); window.removeEventListener('storage', loadTickers); };
+    window.addEventListener('screener-order-changed', onOrderChange);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener('storage', loadTickers);
+      window.removeEventListener('screener-order-changed', onOrderChange);
+    };
   }, [loadTickers]);
 
   // Fetch mini-quotes for all tickers in one batch request
@@ -93,7 +114,7 @@ export default function WatchlistRail({ activeTicker, onSelect, onGoToScreener }
       </div>
 
       <div className="rail-list">
-        {tickers.slice(0, 10).map((t) => {
+        {tickers.map((t) => {
           const q = quotes[t];
           const isActive = activeTicker && activeTicker.toUpperCase() === t.toUpperCase();
           const changeClass = q?.change >= 0 ? 'positive' : 'negative';
