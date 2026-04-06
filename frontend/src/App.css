@@ -293,6 +293,7 @@ body {
   .rail-list::-webkit-scrollbar { display: none; }
   .rail-ticker {
     white-space: nowrap;
+    width: auto;
     min-width: max-content;
     flex-shrink: 0;
     padding: 0.18rem 0.3rem;
