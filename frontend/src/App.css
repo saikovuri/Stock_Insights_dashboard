@@ -288,7 +288,11 @@ body {
   .rail-list {
     flex-direction: row;
     gap: 0.1rem;
-    overflow: visible;
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
   }
   .rail-list::-webkit-scrollbar { display: none; }
   .rail-ticker {
