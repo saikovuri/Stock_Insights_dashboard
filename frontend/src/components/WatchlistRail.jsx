@@ -93,7 +93,7 @@ export default function WatchlistRail({ activeTicker, onSelect, onGoToScreener }
       </div>
 
       <div className="rail-list">
-        {tickers.map((t) => {
+        {tickers.slice(0, 10).map((t) => {
           const q = quotes[t];
           const isActive = activeTicker && activeTicker.toUpperCase() === t.toUpperCase();
           const changeClass = q?.change >= 0 ? 'positive' : 'negative';

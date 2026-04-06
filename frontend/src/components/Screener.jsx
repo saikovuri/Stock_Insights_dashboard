@@ -76,9 +76,10 @@ export default function Screener() {
   const [loading, setLoading] = useState(false);
   const [addTicker, setAddTicker] = useState('');
   const [addMsg, setAddMsg] = useState('');
-  const [sortCol, setSortCol] = useState('ticker');
+  const [sortCol, setSortCol] = useState('custom');
   const [sortDir, setSortDir] = useState(1);
   const [lastUpdated, setLastUpdated] = useState(null);
+  const [customOrder, setCustomOrder] = useState([]);
 
   // ── Alert state ────────────────────────────────────────────────
   const [screenerAlerts, setScreenerAlerts] = useState(getAlerts);
@@ -251,18 +252,94 @@ export default function Screener() {
     });
   }, [triggered, triggeredMap]);
 
+  // ── Sync customOrder with stocks ─────────────────────────────
+  useEffect(() => {
+    if (stocks.length && customOrder.length === 0) {
+      setCustomOrder(stocks.map(s => s.ticker));
+    } else if (stocks.length) {
+      // Add any new tickers, remove deleted ones
+      const current = new Set(stocks.map(s => s.ticker));
+      const ordered = customOrder.filter(t => current.has(t));
+      stocks.forEach(s => { if (!ordered.includes(s.ticker)) ordered.push(s.ticker); });
+      if (ordered.join(',') !== customOrder.join(',')) setCustomOrder(ordered);
+    }
+  }, [stocks]);
+
+  // ── Drag and Drop ──────────────────────────────────────────────
+  const dragIdxRef = useRef(null);
+  const dragOverIdxRef = useRef(null);
+
+  const handleDragStart = (idx) => { dragIdxRef.current = idx; };
+  const handleDragOver = (e, idx) => { e.preventDefault(); dragOverIdxRef.current = idx; };
+  const handleDrop = () => {
+    const from = dragIdxRef.current;
+    const to = dragOverIdxRef.current;
+    if (from == null || to == null || from === to) return;
+    const list = sortCol === 'custom' ? [...customOrder] : sorted.map(s => s.ticker);
+    const [moved] = list.splice(from, 1);
+    list.splice(to, 0, moved);
+    setCustomOrder(list);
+    setSortCol('custom');
+    dragIdxRef.current = null;
+    dragOverIdxRef.current = null;
+  };
+
+  // ── Touch drag support ─────────────────────────────────────────
+  const touchStartRef = useRef(null);
+  const handleTouchStart = (idx, e) => {
+    touchStartRef.current = { idx, y: e.touches[0].clientY };
+  };
+  const handleTouchEnd = (e) => {
+    if (!touchStartRef.current) return;
+    const endY = e.changedTouches[0].clientY;
+    const rows = document.querySelectorAll('.screener-table tbody tr:not(.alert-panel-row)');
+    let targetIdx = null;
+    rows.forEach((row, i) => {
+      const rect = row.getBoundingClientRect();
+      if (endY >= rect.top && endY <= rect.bottom) targetIdx = i;
+    });
+    if (targetIdx != null && targetIdx !== touchStartRef.current.idx) {
+      dragIdxRef.current = touchStartRef.current.idx;
+      dragOverIdxRef.current = targetIdx;
+      handleDrop();
+    }
+    touchStartRef.current = null;
+  };
+
   const doSort = (col) => {
+    if (col === 'custom') { setSortCol('custom'); setSortDir(1); return; }
     if (sortCol === col) setSortDir(-sortDir);
     else { setSortCol(col); setSortDir(1); }
   };
 
-  const sorted = [...stocks].sort((a, b) => {
-    let va = a[sortCol], vb = b[sortCol];
-    if (va == null) return 1;
-    if (vb == null) return -1;
-    if (typeof va === 'string') return va.localeCompare(vb) * sortDir;
-    return (va - vb) * sortDir;
-  });
+  const SORT_OPTIONS = [
+    { value: 'custom', label: 'Manual Order' },
+    { value: 'ticker', label: 'Ticker' },
+    { value: 'name', label: 'Name' },
+    { value: 'price', label: 'Price' },
+    { value: 'change_pct', label: 'Change %' },
+    { value: 'market_cap', label: 'Market Cap' },
+    { value: 'pe_ratio', label: 'P/E Ratio' },
+    { value: 'rsi', label: 'RSI' },
+    { value: 'volume', label: 'Volume' },
+    { value: 'dividend_yield', label: 'Dividend %' },
+    { value: 'sector', label: 'Sector' },
+  ];
+
+  const sorted = useMemo(() => {
+    if (sortCol === 'custom') {
+      const orderMap = {};
+      customOrder.forEach((t, i) => { orderMap[t] = i; });
+      return [...stocks].sort((a, b) => (orderMap[a.ticker] ?? 999) - (orderMap[b.ticker] ?? 999));
+    }
+    return [...stocks].sort((a, b) => {
+      let va = a[sortCol], vb = b[sortCol];
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      if (typeof va === 'string') return va.localeCompare(vb) * sortDir;
+      return (va - vb) * sortDir;
+    });
+  }, [stocks, sortCol, sortDir, customOrder]);
 
   const arrow = (col) => sortCol === col ? (sortDir === 1 ? ' ▲' : ' ▼') : '';
 
@@ -293,6 +370,24 @@ export default function Screener() {
           >
             {loading ? '⟳' : '↻'} Refresh
           </button>
+          <div className="screener-sort-dropdown">
+            <label>Sort:</label>
+            <select
+              value={sortCol}
+              onChange={e => { setSortCol(e.target.value); setSortDir(1); }}
+            >
+              {SORT_OPTIONS.map(o => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+            {sortCol !== 'custom' && (
+              <button
+                className="btn-sort-dir"
+                onClick={() => setSortDir(-sortDir)}
+                title="Toggle sort direction"
+              >{sortDir === 1 ? '▲' : '▼'}</button>
+            )}
+          </div>
           {screenerAlerts.length > 0 && typeof Notification !== 'undefined' && Notification.permission === 'default' && (
             <button className="btn-notify" onClick={() => Notification.requestPermission()} title="Get browser notifications when an alert triggers">
               🔔 Enable notifications
@@ -343,6 +438,7 @@ export default function Screener() {
           <table className="portfolio-table screener-table">
             <thead>
               <tr>
+                <th className="drag-handle-col"></th>
                 <th onClick={() => doSort('ticker')}>Ticker{arrow('ticker')}</th>
                 <th onClick={() => doSort('name')}>Name{arrow('name')}</th>
                 <th onClick={() => doSort('price')}>Price{arrow('price')}</th>
@@ -360,13 +456,22 @@ export default function Screener() {
               </tr>
             </thead>
             <tbody>
-              {sorted.map(s => {
+              {sorted.map((s, idx) => {
                 const rowAlerts = tickerAlerts(s.ticker);
                 const isTriggered = triggered.has(s.ticker);
                 const panelOpen = alertPanelTicker === s.ticker;
                 return (
                   <React.Fragment key={s.ticker}>
-                    <tr className={isTriggered ? 'alert-triggered' : ''}>
+                    <tr
+                      className={isTriggered ? 'alert-triggered' : ''}
+                      draggable
+                      onDragStart={() => handleDragStart(idx)}
+                      onDragOver={(e) => handleDragOver(e, idx)}
+                      onDrop={handleDrop}
+                      onTouchStart={(e) => handleTouchStart(idx, e)}
+                      onTouchEnd={handleTouchEnd}
+                    >
+                      <td className="drag-handle" title="Drag to reorder">⠿</td>
                       <td><strong>{s.ticker}</strong></td>
                       <td className="screener-name">{s.name}</td>
                       <td>${s.price?.toFixed(2) ?? '—'}</td>
@@ -397,7 +502,7 @@ export default function Screener() {
                     </tr>
                     {panelOpen && (
                       <tr className="alert-panel-row">
-                        <td colSpan={14}>
+                        <td colSpan={15}>
                           <div className="alert-panel">
                             <span className="alert-panel-title">Alerts for <strong>{s.ticker}</strong></span>
                             {rowAlerts.length > 0 && (
