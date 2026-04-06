@@ -263,14 +263,18 @@ body {
   .watchlist-rail {
     position: static;
     flex-direction: row;
+    flex-wrap: nowrap;
     align-items: center;
     max-height: none;
-    overflow-x: auto;
+    max-width: 100vw;
+    width: 100%;
+    overflow-x: scroll;
     overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
     gap: 0.15rem;
     padding: 0.25rem 0.35rem;
+    box-sizing: border-box;
   }
   .watchlist-rail::-webkit-scrollbar { display: none; }
   .rail-header {
@@ -286,10 +290,7 @@ body {
     flex-shrink: 0;
   }
   .rail-list {
-    flex-direction: row;
-    gap: 0.1rem;
-    flex-shrink: 0;
-    overflow: visible;
+    display: contents;
   }
   .rail-list::-webkit-scrollbar { display: none; }
   .rail-ticker {
