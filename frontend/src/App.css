@@ -3439,7 +3439,7 @@ tr.alert-triggered {
 [data-theme="light"] .realized-pnl-banner { color: var(--text-primary); }
 [data-theme="light"] .portfolio-tabs h3 { color: var(--text-primary); }
 [data-theme="light"] .chart-toggle button { color: var(--text-secondary); }
-[data-theme="light"] .chart-toggle button.active { color: var(--accent); }
+[data-theme="light"] .chart-toggle button.active { color: #fff; }
 
 /* Screener */
 [data-theme="light"] .screener-controls { color: var(--text-primary); }
