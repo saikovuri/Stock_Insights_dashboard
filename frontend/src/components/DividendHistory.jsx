@@ -19,14 +19,6 @@ export default function DividendHistory({ ticker }) {
       .finally(() => setLoading(false));
   };
 
-  if (!ticker) return null;
-
-  if (!opened) return (
-    <div className="glass-card dividend-card collapsed-section" onClick={load}>
-      <h3>💰 Dividends <span className="expand-hint">▸ Click to load</span></h3>
-    </div>
-  );
-
   // Annual aggregation for chart
   const annualData = useMemo(() => {
     if (!data?.history?.length) return [];
@@ -48,6 +40,13 @@ export default function DividendHistory({ ticker }) {
   }, [data]);
 
   if (!ticker) return null;
+
+  if (!opened) return (
+    <div className="glass-card dividend-card collapsed-section" onClick={load}>
+      <h3>💰 Dividends <span className="expand-hint">▸ Click to load</span></h3>
+    </div>
+  );
+
   if (loading) return <div className="glass-card dividend-card"><p className="loading-text">Loading dividend data…</p></div>;
   if (!data) return null;
 

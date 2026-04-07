@@ -36,14 +36,6 @@ export default function Financials({ ticker }) {
       .finally(() => setLoading(false));
   };
 
-  if (!ticker) return null;
-
-  if (!opened) return (
-    <div className="glass-card financials-card collapsed-section" onClick={load}>
-      <h3>📑 Financial Statements <span className="expand-hint">▸ Click to load</span></h3>
-    </div>
-  );
-
   const tableData = useMemo(() => {
     if (!data) return null;
     const key = activeTab === 'income'
@@ -55,7 +47,6 @@ export default function Financials({ ticker }) {
     if (!sheet || Object.keys(sheet).length === 0) return null;
 
     const periods = Object.keys(sheet).sort().reverse();
-    // Collect all row labels across all periods
     const rowSet = new Set();
     periods.forEach(p => Object.keys(sheet[p]).forEach(k => rowSet.add(k)));
     const rows = Array.from(rowSet);
@@ -64,6 +55,13 @@ export default function Financials({ ticker }) {
   }, [data, activeTab, quarterly]);
 
   if (!ticker) return null;
+
+  if (!opened) return (
+    <div className="glass-card financials-card collapsed-section" onClick={load}>
+      <h3>📑 Financial Statements <span className="expand-hint">▸ Click to load</span></h3>
+    </div>
+  );
+
   if (loading) return <div className="glass-card financials-card"><p className="loading-text">Loading financials…</p></div>;
   if (!data) return null;
 
