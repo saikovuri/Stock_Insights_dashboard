@@ -14,6 +14,7 @@ from stock_data import get_stock_data, get_key_metrics, format_large_number, com
 from news_sentiment import fetch_news, aggregate_sentiment
 from ai_summary import get_ai_summary
 from alerts import check_alerts
+from cache import get_or_fetch, stats as cache_stats, clear as cache_clear
 from auth import hash_password, verify_password, create_token, decode_token, create_refresh_token, REFRESH_EXPIRE_DAYS
 from database import (
     create_user, get_user_by_username, get_user_by_username_by_id,
@@ -37,6 +38,10 @@ async def health_check():
 @app.api_route("/api/health", methods=["GET", "HEAD"])
 async def api_health_check():
     return {"status": "ok"}
+
+@app.get("/api/cache/stats")
+def cache_stats_endpoint():
+    return cache_stats()
 
 # ── Rate limiting ───────────────────────────────────────────────────────────
 
@@ -300,11 +305,13 @@ def stock_history(
 @limiter.limit("60/minute")
 def stock_news(request: Request, ticker: str):
     ticker = _valid_ticker(ticker)
-    try:
+    def _fetch():
         metrics = get_key_metrics(ticker)
         news = fetch_news(ticker, company_name=metrics.get("name", ""))
         sentiment = aggregate_sentiment(news)
         return {"articles": news, "sentiment": sentiment}
+    try:
+        return get_or_fetch(f"news:{ticker}", _fetch, ttl=300)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -313,12 +320,14 @@ def stock_news(request: Request, ticker: str):
 @limiter.limit("60/minute")
 def stock_summary(request: Request, ticker: str):
     ticker = _valid_ticker(ticker)
-    try:
+    def _fetch():
         metrics = get_key_metrics(ticker)
         news = fetch_news(ticker, company_name=metrics.get("name", ""))
         sentiment = aggregate_sentiment(news)
         summary = get_ai_summary(metrics, sentiment, news)
         return {"summary": summary}
+    try:
+        return get_or_fetch(f"summary:{ticker}", _fetch, ttl=300)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -739,7 +748,7 @@ class ChatRequest(BaseModel):
 def why_moving(request: Request, ticker: str):
     """AI explanation of why a stock is moving today."""
     ticker = _valid_ticker(ticker)
-    try:
+    def _fetch():
         from openai import OpenAI
         from config import OPENAI_API_KEY
         metrics = get_key_metrics(ticker)
@@ -748,7 +757,6 @@ def why_moving(request: Request, ticker: str):
         change_pct = metrics.get("change_pct", 0)
         direction = "up" if change_pct >= 0 else "down"
         if not OPENAI_API_KEY:
-            direction = "up" if change_pct >= 0 else "down"
             top_headline = news[0]['title'] if news else None
             explanation = f"{metrics['name']} ({ticker.upper()}) is {direction} {abs(change_pct):.2f}% today at ${metrics['price']:.2f}."
             if top_headline:
@@ -768,6 +776,8 @@ In 2-3 short sentences, explain the most likely reason for today's move using on
             max_tokens=150, temperature=0.5,
         )
         return {"explanation": resp.choices[0].message.content.strip(), "change_pct": change_pct}
+    try:
+        return get_or_fetch(f"why-moving:{ticker}", _fetch, ttl=300)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -777,7 +787,7 @@ In 2-3 short sentences, explain the most likely reason for today's move using on
 def bull_bear(request: Request, ticker: str):
     """Structured bull vs bear case."""
     ticker = _valid_ticker(ticker)
-    try:
+    def _fetch():
         from openai import OpenAI
         from config import OPENAI_API_KEY
         import json
@@ -786,7 +796,6 @@ def bull_bear(request: Request, ticker: str):
         sentiment = aggregate_sentiment(news)
         headlines = "\n".join(f"- {a['title']}" for a in news[:8])
         if not OPENAI_API_KEY:
-            # Build dynamic fallback from real metrics
             name = metrics.get('name', ticker.upper())
             price = metrics.get('price', 0)
             change = metrics.get('change_pct', 0)
@@ -805,7 +814,6 @@ def bull_bear(request: Request, ticker: str):
             bull = []
             bear = []
 
-            # Bull points
             if pct_from_low is not None and pct_from_low < 30:
                 bull.append(f"Trading {pct_from_low:.1f}% above its 52-week low — potential value entry")
             elif pct_from_low is not None:
@@ -823,7 +831,6 @@ def bull_bear(request: Request, ticker: str):
             else:
                 bull.append("Established brand with scale advantages over smaller competitors")
 
-            # Bear points
             if pct_from_high is not None and pct_from_high < -15:
                 bear.append(f"Down {abs(pct_from_high):.1f}% from its 52-week high of ${high_52:.2f} — trend is weak")
             elif pct_from_high is not None and pct_from_high > -5:
@@ -873,6 +880,8 @@ Return ONLY valid JSON, no markdown fences."""
         text = resp.choices[0].message.content.strip()
         text = text.replace("```json", "").replace("```", "").strip()
         return json.loads(text)
+    try:
+        return get_or_fetch(f"bull-bear:{ticker}", _fetch, ttl=600)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -918,22 +927,17 @@ Answer questions about this stock concisely. Always add a disclaimer that this i
 def stock_peers(request: Request, ticker: str):
     """Return peer/competitor metrics for comparison."""
     ticker = _valid_ticker(ticker)
-    try:
+    def _fetch():
         import yfinance as yf
         stock = yf.Ticker(ticker)
         info = stock.info
 
-        # Try to discover peers dynamically from yfinance
         peer_tickers = []
 
-        # 1. Check if yfinance exposes a recommendations or peers field
         try:
-            # Some yfinance versions expose info["companyOfficers"] or sector peers
-            # Try the screener approach: find tickers in same industry
             industry = info.get("industry", "")
             sector = info.get("sector", "")
             if industry:
-                # Use yfinance Screener to find peers in same industry
                 try:
                     import yfinance.screener as screener
                     s = yf.Screener()
@@ -945,7 +949,6 @@ def stock_peers(request: Request, ticker: str):
                 except Exception:
                     pass
 
-            # 2. Fallback: use well-known sector ETF constituents or manual lookup
             if not peer_tickers:
                 sector_peers = {
                     "Technology": ["AAPL", "MSFT", "GOOGL", "META", "NVDA", "AMZN", "CRM", "ADBE", "ORCL", "INTC", "AMD", "QCOM", "AVGO", "TSM", "IBM"],
@@ -989,6 +992,8 @@ def stock_peers(request: Request, ticker: str):
                          "market_cap": base.get("market_cap"), "market_cap_fmt": format_large_number(base.get("market_cap")),
                          "eps": base.get("eps"), "beta": base.get("beta"), "dividend_yield": base.get("dividend_yield")},
                 "peers": peers_out}
+    try:
+        return get_or_fetch(f"peers:{ticker}", _fetch, ttl=600)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -997,7 +1002,7 @@ def stock_peers(request: Request, ticker: str):
 def stock_events(ticker: str):
     """Return upcoming earnings date, past earnings, dividends, and key macro events."""
     ticker = _valid_ticker(ticker)
-    try:
+    def _fetch():
         import yfinance as yf
         stock = yf.Ticker(ticker)
         earnings_date = None
@@ -1052,6 +1057,8 @@ def stock_events(ticker: str):
             "past_earnings": past_earnings,
             "dividends": dividends,
         }
+    try:
+        return get_or_fetch(f"events:{ticker}", _fetch, ttl=600)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1076,22 +1083,20 @@ def stock_history_returns(ticker: str, period: str = Query("3mo")):
 def stock_analyst(request: Request, ticker: str):
     """Analyst recommendations, price targets, and upgrade/downgrade history."""
     ticker = _valid_ticker(ticker)
-    try:
+    def _fetch():
         import yfinance as yf
         import math
         stock = yf.Ticker(ticker)
-        info = stock.info
+        info = stock.info or {}
 
-        # Price targets
         target_high = info.get("targetHighPrice")
         target_low = info.get("targetLowPrice")
         target_mean = info.get("targetMeanPrice")
         target_median = info.get("targetMedianPrice")
         num_analysts = info.get("numberOfAnalystOpinions", 0)
         recommendation = info.get("recommendationKey", "")
-        recommendation_mean = info.get("recommendationMean")  # 1=Strong Buy, 5=Sell
+        recommendation_mean = info.get("recommendationMean")
 
-        # Recommendation breakdown from recommendations_summary
         breakdown = {"strongBuy": 0, "buy": 0, "hold": 0, "sell": 0, "strongSell": 0}
         try:
             recs = stock.recommendations
@@ -1105,7 +1110,6 @@ def stock_analyst(request: Request, ticker: str):
         except Exception:
             pass
 
-        # Upgrade/downgrade history
         upgrades = []
         try:
             ug = stock.upgrades_downgrades
@@ -1124,18 +1128,14 @@ def stock_analyst(request: Request, ticker: str):
             pass
 
         return {
-            "price_targets": {
-                "high": target_high,
-                "low": target_low,
-                "mean": target_mean,
-                "median": target_median,
-                "num_analysts": num_analysts,
-            },
+            "price_targets": {"high": target_high, "low": target_low, "mean": target_mean, "median": target_median, "num_analysts": num_analysts},
             "recommendation": recommendation,
             "recommendation_mean": recommendation_mean,
             "breakdown": breakdown,
             "upgrades_downgrades": upgrades[-10:],
         }
+    try:
+        return get_or_fetch(f"analyst:{ticker}", _fetch, ttl=600)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1147,7 +1147,7 @@ def stock_analyst(request: Request, ticker: str):
 def stock_financials(request: Request, ticker: str):
     """Income statement, balance sheet, cash flow (annual + quarterly)."""
     ticker = _valid_ticker(ticker)
-    try:
+    def _fetch():
         import yfinance as yf
         import math
         stock = yf.Ticker(ticker)
@@ -1174,6 +1174,8 @@ def stock_financials(request: Request, ticker: str):
             "cash_flow": _df_to_dict(stock.cashflow),
             "cash_flow_quarterly": _df_to_dict(stock.quarterly_cashflow),
         }
+    try:
+        return get_or_fetch(f"financials:{ticker}", _fetch, ttl=600)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1185,7 +1187,7 @@ def stock_financials(request: Request, ticker: str):
 def stock_ownership(request: Request, ticker: str):
     """Top institutional holders and insider transactions."""
     ticker = _valid_ticker(ticker)
-    try:
+    def _fetch():
         import yfinance as yf
         import math
         stock = yf.Ticker(ticker)
@@ -1241,6 +1243,8 @@ def stock_ownership(request: Request, ticker: str):
             "institutional_holders": institutions,
             "insider_transactions": insiders,
         }
+    try:
+        return get_or_fetch(f"ownership:{ticker}", _fetch, ttl=600)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1252,7 +1256,7 @@ def stock_ownership(request: Request, ticker: str):
 def stock_dividends(request: Request, ticker: str):
     """Dividend history, yield, payout details."""
     ticker = _valid_ticker(ticker)
-    try:
+    def _fetch():
         import yfinance as yf
         stock = yf.Ticker(ticker)
         info = stock.info
@@ -1292,6 +1296,8 @@ def stock_dividends(request: Request, ticker: str):
             "five_year_avg_yield": five_yr_avg,
             "history": history,
         }
+    try:
+        return get_or_fetch(f"dividends:{ticker}", _fetch, ttl=600)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
