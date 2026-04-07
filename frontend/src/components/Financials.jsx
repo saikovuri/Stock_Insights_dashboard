@@ -22,16 +22,27 @@ export default function Financials({ ticker }) {
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('income');
   const [quarterly, setQuarterly] = useState(false);
+  const [opened, setOpened] = useState(false);
 
-  useEffect(() => {
-    if (!ticker) return;
+  useEffect(() => { setData(null); setOpened(false); }, [ticker]);
+
+  const load = () => {
+    if (!ticker || loading) return;
+    setOpened(true);
     setLoading(true);
-    setData(null);
     fetchFinancials(ticker)
       .then(setData)
       .catch(() => setData(null))
       .finally(() => setLoading(false));
-  }, [ticker]);
+  };
+
+  if (!ticker) return null;
+
+  if (!opened) return (
+    <div className="glass-card financials-card collapsed-section" onClick={load}>
+      <h3>📑 Financial Statements <span className="expand-hint">▸ Click to load</span></h3>
+    </div>
+  );
 
   const tableData = useMemo(() => {
     if (!data) return null;

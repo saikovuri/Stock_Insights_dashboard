@@ -5,16 +5,27 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recha
 export default function DividendHistory({ ticker }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [opened, setOpened] = useState(false);
 
-  useEffect(() => {
-    if (!ticker) return;
+  useEffect(() => { setData(null); setOpened(false); }, [ticker]);
+
+  const load = () => {
+    if (!ticker || loading) return;
+    setOpened(true);
     setLoading(true);
-    setData(null);
     fetchDividends(ticker)
       .then(setData)
       .catch(() => setData(null))
       .finally(() => setLoading(false));
-  }, [ticker]);
+  };
+
+  if (!ticker) return null;
+
+  if (!opened) return (
+    <div className="glass-card dividend-card collapsed-section" onClick={load}>
+      <h3>💰 Dividends <span className="expand-hint">▸ Click to load</span></h3>
+    </div>
+  );
 
   // Annual aggregation for chart
   const annualData = useMemo(() => {

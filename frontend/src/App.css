@@ -3268,6 +3268,23 @@ tr.alert-triggered {
    LIGHT THEME  (data-theme="light")
    ══════════════════════════════════════════════════════════════════ */
 
+/* ── Collapsed / lazy-load sections ─────────────────────────────── */
+.collapsed-section {
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.collapsed-section:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.collapsed-section h3 { margin: 0; display: flex; align-items: center; gap: 0.5rem; }
+.expand-hint {
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
 [data-theme="light"] {
   /* Override ORIGINAL :root variables so every component flips automatically */
   --bg: #f5f7fa;
