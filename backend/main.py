@@ -31,6 +31,7 @@ app = FastAPI(title="Stock Insights API", version="2.0.0")
 # ── Health check (used by UptimeRobot / monitoring) ─────────────────────────
 
 @app.get("/health")
+@app.get("/api/health")
 async def health_check():
     return {"status": "ok"}
 
