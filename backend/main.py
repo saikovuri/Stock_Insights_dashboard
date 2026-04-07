@@ -28,6 +28,12 @@ from config import CORS_ORIGINS
 
 app = FastAPI(title="Stock Insights API", version="2.0.0")
 
+# ── Health check (used by UptimeRobot / monitoring) ─────────────────────────
+
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
+
 # ── Rate limiting ───────────────────────────────────────────────────────────
 
 limiter = Limiter(key_func=get_remote_address)
