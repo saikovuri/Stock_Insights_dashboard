@@ -20,12 +20,12 @@ export default function PortfolioChart({ holdings, closedTrades }) {
     // If we have closed trades, show P&L progression
     if (closedTrades?.trades?.length) {
       const sorted = [...closedTrades.trades].sort((a, b) =>
-        (a.sold_at || a.date || '').localeCompare(b.sold_at || b.date || '')
+        (a.closed_at || a.sold_at || a.date || '').localeCompare(b.closed_at || b.sold_at || b.date || '')
       );
       sorted.forEach(t => {
         runningPnl += (t.pnl || 0);
         events.push({
-          date: t.sold_at || t.date || 'Unknown',
+          date: (t.closed_at || t.sold_at || t.date || 'Unknown').slice(0, 10),
           realized_pnl: +runningPnl.toFixed(2),
         });
       });
