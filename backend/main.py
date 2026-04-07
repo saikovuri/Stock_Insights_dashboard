@@ -40,7 +40,14 @@ async def api_health_check():
 
 # ── Rate limiting ───────────────────────────────────────────────────────────
 
-limiter = Limiter(key_func=get_remote_address)
+def _get_real_ip(request: Request) -> str:
+    """Use X-Forwarded-For behind reverse proxies (Render, etc.), else remote address."""
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return get_remote_address(request)
+
+limiter = Limiter(key_func=_get_real_ip)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -214,7 +221,7 @@ def auth_me(user: dict = Depends(get_current_user)):
 # ── Stock endpoints (no auth needed) ───────────────────────────────────────
 
 @app.get("/api/stock/{ticker}/metrics")
-@limiter.limit("120/minute")
+@limiter.limit("200/minute")
 def stock_metrics(request: Request, ticker: str):
     ticker = _valid_ticker(ticker)
     try:
@@ -230,7 +237,7 @@ class BatchMetricsRequest(BaseModel):
 
 
 @app.post("/api/stock/batch-metrics")
-@limiter.limit("30/minute")
+@limiter.limit("60/minute")
 def batch_metrics(request: Request, req: BatchMetricsRequest):
     """Fetch metrics for multiple tickers in one request (max 30)."""
     from concurrent.futures import ThreadPoolExecutor
@@ -247,7 +254,7 @@ def batch_metrics(request: Request, req: BatchMetricsRequest):
 
 
 @app.get("/api/stock/{ticker}/history")
-@limiter.limit("60/minute")
+@limiter.limit("120/minute")
 def stock_history(
     request: Request,
     ticker: str,
@@ -290,7 +297,7 @@ def stock_history(
 
 
 @app.get("/api/stock/{ticker}/news")
-@limiter.limit("30/minute")
+@limiter.limit("60/minute")
 def stock_news(request: Request, ticker: str):
     ticker = _valid_ticker(ticker)
     try:
@@ -303,7 +310,7 @@ def stock_news(request: Request, ticker: str):
 
 
 @app.get("/api/stock/{ticker}/summary")
-@limiter.limit("30/minute")
+@limiter.limit("60/minute")
 def stock_summary(request: Request, ticker: str):
     ticker = _valid_ticker(ticker)
     try:
@@ -907,7 +914,7 @@ Answer questions about this stock concisely. Always add a disclaimer that this i
 
 
 @app.get("/api/stock/{ticker}/peers")
-@limiter.limit("30/minute")
+@limiter.limit("60/minute")
 def stock_peers(request: Request, ticker: str):
     """Return peer/competitor metrics for comparison."""
     ticker = _valid_ticker(ticker)
@@ -1065,7 +1072,7 @@ def stock_history_returns(ticker: str, period: str = Query("3mo")):
 # ── Analyst Ratings & Price Targets ─────────────────────────────────────────
 
 @app.get("/api/stock/{ticker}/analyst")
-@limiter.limit("60/minute")
+@limiter.limit("120/minute")
 def stock_analyst(request: Request, ticker: str):
     """Analyst recommendations, price targets, and upgrade/downgrade history."""
     ticker = _valid_ticker(ticker)
@@ -1136,7 +1143,7 @@ def stock_analyst(request: Request, ticker: str):
 # ── Financial Statements ────────────────────────────────────────────────────
 
 @app.get("/api/stock/{ticker}/financials")
-@limiter.limit("30/minute")
+@limiter.limit("60/minute")
 def stock_financials(request: Request, ticker: str):
     """Income statement, balance sheet, cash flow (annual + quarterly)."""
     ticker = _valid_ticker(ticker)
@@ -1174,7 +1181,7 @@ def stock_financials(request: Request, ticker: str):
 # ── Institutional & Insider Activity ────────────────────────────────────────
 
 @app.get("/api/stock/{ticker}/ownership")
-@limiter.limit("30/minute")
+@limiter.limit("60/minute")
 def stock_ownership(request: Request, ticker: str):
     """Top institutional holders and insider transactions."""
     ticker = _valid_ticker(ticker)
@@ -1241,7 +1248,7 @@ def stock_ownership(request: Request, ticker: str):
 # ── Dividend Details ────────────────────────────────────────────────────────
 
 @app.get("/api/stock/{ticker}/dividends")
-@limiter.limit("30/minute")
+@limiter.limit("60/minute")
 def stock_dividends(request: Request, ticker: str):
     """Dividend history, yield, payout details."""
     ticker = _valid_ticker(ticker)
@@ -1295,7 +1302,7 @@ class SparklineRequest(BaseModel):
     tickers: list[str]
 
 @app.post("/api/stock/batch-sparklines")
-@limiter.limit("30/minute")
+@limiter.limit("60/minute")
 def batch_sparklines(request: Request, req: SparklineRequest):
     """Return 5-day close prices for tiny sparkline charts."""
     from concurrent.futures import ThreadPoolExecutor
