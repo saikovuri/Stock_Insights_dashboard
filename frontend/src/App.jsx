@@ -106,7 +106,7 @@ function AppShell() {
     <div className="app">
       <header className="app-header">
         <div className="header-top">
-          <h1><span className="header-emoji">📈</span><span className="header-title-text">Stock Insights</span></h1>
+          <h1 onClick={() => { setActiveTab('dashboard'); window.location.hash = 'dashboard'; }} style={{ cursor: 'pointer' }}><span className="header-emoji">📈</span><span className="header-title-text">Stock Insights</span></h1>
           <div className="user-menu">
             {user ? (
               <>
