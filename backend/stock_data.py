@@ -88,7 +88,7 @@ def get_key_metrics(ticker: str) -> dict:
                 return cached
 
     stock = yf.Ticker(ticker)
-    info = stock.info
+    info = stock.info or {}
 
     price = info.get("currentPrice") or info.get("regularMarketPrice", 0)
     prev_close = info.get("previousClose", 0)

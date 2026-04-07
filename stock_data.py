@@ -14,7 +14,7 @@ def get_stock_data(ticker: str, period: str = "6mo", interval: str = "1d") -> pd
 def get_key_metrics(ticker: str) -> dict:
     """Return key financial metrics for a ticker."""
     stock = yf.Ticker(ticker)
-    info = stock.info
+    info = stock.info or {}
 
     price = info.get("currentPrice") or info.get("regularMarketPrice", 0)
     prev_close = info.get("previousClose", 0)

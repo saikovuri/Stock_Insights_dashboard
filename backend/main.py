@@ -509,7 +509,7 @@ def options_summary_endpoint(user: dict = Depends(get_current_user)):
         if key not in chain_cache:
             try:
                 t = yf.Ticker(yf_sym)
-                available = t.options
+                available = t.options or []
                 if expiry in available:
                     chain = t.option_chain(expiry)
                 else:
