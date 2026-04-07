@@ -21,9 +21,11 @@ def get_key_metrics(ticker: str) -> dict:
     change = price - prev_close if price and prev_close else 0
     change_pct = (change / prev_close * 100) if prev_close else 0
 
+    # Resolve sector: stocks have sector, ETFs have category
+    raw_sector = info.get("sector") or info.get("category") or "N/A"
     return {
         "name": info.get("shortName", ticker),
-        "sector": info.get("sector", "N/A"),
+        "sector": raw_sector,
         "industry": info.get("industry", "N/A"),
         "price": price,
         "previous_close": prev_close,
