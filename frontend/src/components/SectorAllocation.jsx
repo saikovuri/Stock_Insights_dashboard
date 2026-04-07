@@ -12,7 +12,7 @@ export default function SectorAllocation({ holdings }) {
     if (!holdings?.length) return [];
     const bySector = {};
     holdings.forEach(h => {
-      const sector = h.sector || 'Unknown';
+      const sector = (h.sector && h.sector !== 'N/A') ? h.sector : 'Unknown';
       const value = (h.current_price || h.buy_price) * h.shares;
       bySector[sector] = (bySector[sector] || 0) + value;
     });
@@ -55,7 +55,7 @@ export default function SectorAllocation({ holdings }) {
               formatter={(val) => [`$${val.toLocaleString()}`, 'Value']}
             />
             <Legend
-              formatter={(value) => <span style={{ color: '#b0b8c8', fontSize: 12 }}>{value}</span>}
+              formatter={(value) => <span className="chart-legend-text">{value}</span>}
             />
           </PieChart>
         </ResponsiveContainer>

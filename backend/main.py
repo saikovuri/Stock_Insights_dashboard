@@ -381,7 +381,8 @@ def portfolio_summary_endpoint(user: dict = Depends(get_current_user)):
         sector = "Unknown"
         try:
             m = get_key_metrics(ticker)
-            sector = m.get("sector") or "Unknown"
+            s = m.get("sector", "")
+            sector = s if (s and s != "N/A") else "Unknown"
         except Exception:
             pass
         details.append({

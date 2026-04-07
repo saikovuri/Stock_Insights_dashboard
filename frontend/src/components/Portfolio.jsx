@@ -53,9 +53,10 @@ export default function Portfolio() {
           const res = await fetch(`${API_BASE}/stock/${h.ticker}/metrics`);
           const m = res.ok ? await res.json() : {};
           const current_price = m.price ?? h.buy_price;
+          const sector = m.sector || 'Unknown';
           const pnl = (current_price - h.buy_price) * h.shares;
           const pnl_pct = h.buy_price > 0 ? ((current_price - h.buy_price) / h.buy_price) * 100 : 0;
-          return { ...h, current_price, pnl, pnl_pct };
+          return { ...h, current_price, sector, pnl, pnl_pct };
         } catch { return { ...h, current_price: h.buy_price, pnl: 0, pnl_pct: 0 }; }
       }));
       const total_invested = holdings.reduce((s, h) => s + h.buy_price * h.shares, 0);

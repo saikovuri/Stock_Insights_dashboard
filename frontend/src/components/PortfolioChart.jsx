@@ -72,8 +72,8 @@ export default function PortfolioChart({ holdings, closedTrades }) {
               <stop offset="100%" stopColor={isUp ? '#00c853' : '#ef5350'} stopOpacity={0} />
             </linearGradient>
           </defs>
-          <XAxis dataKey="date" tick={{ fill: '#b0b8c8', fontSize: 10 }} />
-          <YAxis tick={{ fill: '#b0b8c8', fontSize: 11 }} tickFormatter={v => `$${v.toLocaleString()}`} width={70} />
+          <XAxis dataKey="date" tick={{ fill: 'var(--chart-text, #b0b8c8)', fontSize: 10 }} />
+          <YAxis tick={{ fill: 'var(--chart-text, #b0b8c8)', fontSize: 11 }} tickFormatter={v => `$${v.toLocaleString()}`} width={70} />
           <Tooltip
             contentStyle={{ background: 'rgba(30,30,50,0.95)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, color: '#fff' }}
             formatter={(v) => [`$${v.toLocaleString()}`, isSimple ? 'Value' : 'Cumulative P&L']}
