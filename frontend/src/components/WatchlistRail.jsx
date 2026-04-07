@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '../AuthContext';
 
 import { API_BASE } from '../api/config';
+import { fetchBatchSparklines } from '../api/stockApi';
 
 const BASE = API_BASE;
 const GUEST_KEY = 'guest_watchlist';
@@ -11,12 +12,28 @@ function getGuestList() {
   catch { return []; }
 }
 
+function MiniSparkline({ data, up }) {
+  if (!data || data.length < 2) return null;
+  const w = 48, h = 20;
+  const min = Math.min(...data), max = Math.max(...data);
+  const range = max - min || 1;
+  const points = data.map((v, i) =>
+    `${(i / (data.length - 1)) * w},${h - ((v - min) / range) * h}`
+  ).join(' ');
+  return (
+    <svg className="rail-sparkline" width={w} height={h} viewBox={`0 0 ${w} ${h}`}>
+      <polyline points={points} fill="none" stroke={up ? '#00c853' : '#ef5350'} strokeWidth="1.5" />
+    </svg>
+  );
+}
+
 export default function WatchlistRail({ activeTicker, onSelect, onGoToScreener }) {
   const { token, user } = useAuth();
   const isGuest = !user;
 
   const [rawTickers, setRawTickers] = useState([]);
   const [quotes, setQuotes] = useState({});
+  const [sparklines, setSparklines] = useState({});
   const [loading, setLoading] = useState(false);
 
   // Force re-sort when screener order changes
@@ -94,6 +111,14 @@ export default function WatchlistRail({ activeTicker, onSelect, onGoToScreener }
     return () => clearInterval(id);
   }, [fetchQuotes]);
 
+  // Fetch sparkline data
+  useEffect(() => {
+    if (!tickers.length) { setSparklines({}); return; }
+    fetchBatchSparklines(tickers)
+      .then(d => setSparklines(d.sparklines || {}))
+      .catch(() => {});
+  }, [tickers.join(',')]);
+
   if (!tickers.length) {
     return (
       <aside className="watchlist-rail">
@@ -126,6 +151,9 @@ export default function WatchlistRail({ activeTicker, onSelect, onGoToScreener }
               onClick={() => onSelect(t)}
             >
               <div className="rail-ticker-symbol">{t}</div>
+              {sparklines[t]?.length > 1 && (
+                <MiniSparkline data={sparklines[t]} up={q?.change >= 0} />
+              )}
               {q ? (
                 <div className="rail-ticker-data">
                   <span className="rail-price">${q.price?.toFixed(2)}</span>

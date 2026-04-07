@@ -1,0 +1,175 @@
+
+Stock Insights Dashboard — Complete Feature List
+1. UI Tabs & Navigation
+Tab	Description
+Dashboard	Main stock analysis view with search, charts, AI, and news
+Screener	Watchlist management with sortable metrics table
+Portfolio	Stock & options portfolio tracker with P&L
+Tools	Trading calculators and simulators
+Hash-based routing (#dashboard, #screener, etc.) with clickable header logo to return to dashboard.
+
+2. Authentication & User System
+Registration with username, password, display name (rate-limited 5/min)
+Login with JWT access tokens (rate-limited 10/min)
+Refresh token rotation (auto-refresh on 401 in frontend)
+Logout (server-side token invalidation)
+Guest mode — all read-only features + localStorage-based portfolio/watchlist work without an account
+/api/auth/me — session validation endpoint
+3. Dashboard Tab — Stock Analysis
+Search & Metrics (SearchBar.jsx, KeyMetrics.jsx)
+Ticker search with instant data load
+12 key metrics: Price, Change%, Market Cap, P/E, EPS, 52W High/Low, Volume, Avg Volume, 50D/200D Avg, Beta, Dividend Yield
+52-week range bar — visual gauge showing current price within 52W range
+Alerts (Alerts.jsx)
+Automatic alert detection on every stock lookup:
+Price change alert (large daily moves)
+Volume spike alert (vs average volume)
+Near 52W high / near 52W low warnings
+Golden Cross / Death Cross (50D vs 200D MA)
+Severity levels: high (red), warning (orange), medium (yellow), info (blue)
+Why Moving (WhyMoving.jsx)
+AI-generated explanation of today's price move
+Uses recent headlines + metrics as context
+Fallback text when no OpenAI key is configured
+Price Chart (PriceChart.jsx)
+Interactive candlestick chart (Recharts)
+3 candle styles: Standard, Hollow, Heikin Ashi
+Chart types: Candle vs Area
+9 time periods: 1D, 5D, 1M, 3M, 6M, 1Y, 2Y, 5Y, Max
+8 intervals: 1m, 5m, 15m, 30m, 1H, 1D, 1W, 1M
+Pre/post-market data toggle
+11 overlay indicators: SMA (10/20/50/100/200), EMA (9/21/50), VWAP, Bollinger Bands upper/lower
+4 sub-chart indicators: RSI, MACD (with histogram), Stochastic Oscillator, ATR
+Volume bars toggle
+Log scale toggle
+Earnings markers on chart (earnings dates with surprise %)
+Dividend markers on chart
+Chart expand mode (larger view)
+Brush/zoom control
+Peer Benchmark (PeerBenchmark.jsx)
+Compare stock against 4 sector peers
+Comparison table: Price, Change%, P/E, Market Cap, EPS, Beta, Dividend%
+Visual bar charts for P/E, Market Cap, Beta
+Peers auto-discovered via sector mapping
+News & Sentiment (NewsSentiment.jsx)
+Article list with sentiment labels (Positive/Negative/Neutral)
+Sentiment gauge — visual bearish-to-bullish bar
+Sentiment counts — positive/negative/neutral tallies
+Contrarian indicator badges — warns when extreme optimism (6/8+ positive) or extreme fear (6/8+ negative) detected
+Paginated articles (5 per page)
+AI Summary (AiSummary.jsx)
+Auto-generated AI analysis on stock search (OpenAI GPT-4o-mini)
+Renders markdown-style bold text and bullet points
+Regenerate button
+Skeleton loading animation
+Bull vs Bear (BullBear.jsx)
+Structured bull/bear case — 3 points each + verdict
+AI-powered (OpenAI) with metrics-based fallback when no API key
+On-demand generation
+AI Chat (AiChat.jsx)
+Multi-turn conversational AI about the selected stock
+Pre-built suggestion chips (bear case, peer comparison, catalysts, revenue trends)
+Context-aware — receives live metrics as system prompt context
+Chat history with clear button
+Collapsible panel
+Watchlist Rail (WatchlistRail.jsx)
+Sidebar with live mini-quotes for all watchlist tickers
+Shows price + daily change% per ticker
+Click to load any ticker
+Batch-fetched via POST /api/stock/batch-metrics
+Auto-refreshes every 60 seconds
+Syncs with screener sort order
+4. Screener Tab (Screener.jsx)
+Watchlist-backed screener table with sortable columns
+Add/remove tickers (validates ticker exists via API)
+Columns: Ticker, Name, Price, Change%, 52W High/Low, P/E, EPS, Market Cap, Volume, Avg Volume, Dividend%, Beta, Sector, RSI
+Screener alerts system — set threshold alerts per ticker:
+Price above/below
+Daily change above/below
+RSI above/below (auth-only)
+Browser notification on trigger
+Stale-while-revalidate caching (60s TTL in sessionStorage)
+Guest mode: uses localStorage watchlist, fetches metrics individually
+Auth mode: uses server-side watchlist with batch screener endpoint
+Correlation Heatmap (CorrelationHeatmap.jsx)
+Pearson correlation matrix across all screener tickers
+Uses 3-month daily log returns
+Color-coded heatmap (green = positive, red = negative correlation)
+Computed client-side from historical price data
+5. Portfolio Tab (Portfolio.jsx)
+Stock Portfolio
+Buy stocks — record ticker, shares, price (creates individual tax lots)
+Sell stocks — FIFO or sell from a specific lot
+Edit holdings — modify ticker, shares, buy price
+Delete holdings
+Live P&L — current price fetched, P&L and P&L% calculated
+Portfolio summary: total invested, total current value, total P&L, total P&L%
+Collapsible per-ticker grouping with individual lot details
+Closed trades view — history of sold positions with realized P&L
+Options Portfolio
+Buy options — ticker, call/put, strike, expiry, premium, contracts, long/short position
+Close options — records realized P&L
+Edit/delete options
+Live option pricing — fetches real bid/ask/last from yfinance option chains
+Greeks display: IV, volume, open interest, intrinsic value, market price, DTE
+Closed options view — history of closed option trades
+Guest Mode Portfolio
+Full portfolio features using localStorage (no account required)
+Separate tax lots, sold history, all tracked locally
+6. Tools Tab
+Position Size Calculator (PositionCalculator.jsx)
+Portfolio allocation calc: enter portfolio value, cash available, target allocation %
+Live ticker lookup — fetches current price for selected stock
+Calculates: ideal shares, cash-constrained shares, capital deployed, actual allocation %
+Stop-loss scenario: risk per share, max loss, portfolio risk %
+Profit target scenario: gain per share, portfolio gain %, reward-to-risk ratio
+DCA Simulator (DcaSimulator.jsx)
+Dollar-cost averaging backtest for any stock
+Inputs: ticker, monthly investment amount, start month/year
+Uses real monthly historical prices
+Shows: total invested, current value, return %, average cost basis, total shares
+Month-by-month breakdown table
+7. Backend API Endpoints Summary
+Endpoint	Method	Auth	Description
+/health	GET/HEAD	No	Health check
+/api/stock/{ticker}/metrics	GET	No	Key financial metrics
+/api/stock/batch-metrics	POST	No	Batch metrics for multiple tickers
+/api/stock/{ticker}/history	GET	No	OHLCV + 20 technical indicators
+/api/stock/{ticker}/news	GET	No	News articles + sentiment
+/api/stock/{ticker}/summary	GET	No	AI analysis summary
+/api/stock/{ticker}/alerts	GET	No	Auto-detected alerts
+/api/stock/{ticker}/why-moving	GET	No	AI explanation of daily move
+/api/stock/{ticker}/bull-bear	GET	No	Structured bull/bear case
+/api/stock/{ticker}/chat	POST	No	Multi-turn AI chat
+/api/stock/{ticker}/peers	GET	No	Peer comparison data
+/api/stock/{ticker}/events	GET	No	Earnings dates, dividends
+/api/stock/{ticker}/history-returns	GET	No	Close prices for correlation
+/api/auth/register	POST	No	Create account
+/api/auth/login	POST	No	Sign in
+/api/auth/refresh	POST	No	Rotate refresh token
+/api/auth/logout	POST	Yes	Invalidate tokens
+/api/auth/me	GET	Yes	Current user info
+/api/portfolio/summary	GET	Yes	Portfolio with live prices
+/api/portfolio/buy	POST	Yes	Buy stock
+/api/portfolio/sell	POST	Yes	Sell stock (FIFO)
+/api/portfolio/sell-lot/{id}	POST	Yes	Sell specific tax lot
+/api/portfolio/{id}	PUT	Yes	Edit holding
+/api/portfolio/{id}	DELETE	Yes	Delete holding
+/api/portfolio/history	GET	Yes	Transaction history
+/api/portfolio/closed	GET	Yes	Closed stock trades
+/api/portfolio/options/summary	GET	Yes	Options portfolio + live pricing
+/api/portfolio/options/buy	POST	Yes	Open option position
+/api/portfolio/options/close	POST	Yes	Close option position
+/api/portfolio/options/{id}	PUT	Yes	Edit option
+/api/portfolio/options/{id}	DELETE	Yes	Delete option
+/api/portfolio/options/closed	GET	Yes	Closed option trades
+/api/watchlist	GET	Yes	Get watchlist
+/api/watchlist	POST	Yes	Add to watchlist
+/api/watchlist/{ticker}	DELETE	Yes	Remove from watchlist
+/api/screener	GET	Yes	Batch screener data
+8. Technical Infrastructure
+Backend: FastAPI + yfinance + OpenAI + Supabase (PostgreSQL)
+Frontend: React + Vite + Recharts
+Security: JWT auth, refresh token rotation, rate limiting (slowapi), security headers (HSTS, X-Frame-Options, CSP-adjacent), ticker input validation, CORS
+Caching: 60s TTL in-memory metrics cache (backend), sessionStorage stale-while-revalidate (frontend)
+Deployment: Render (backend), Vercel (frontend), Oracle Cloud deploy scripts

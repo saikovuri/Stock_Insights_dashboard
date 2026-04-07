@@ -7,6 +7,8 @@ import {
   editHolding, deleteHolding, editOption, deleteOption,
   fetchClosedTrades, fetchClosedOptions,
 } from '../api/stockApi';
+import PortfolioChart from './PortfolioChart';
+import SectorAllocation from './SectorAllocation';
 
 const GUEST_HOLDINGS_KEY = 'guest_holdings';
 
@@ -302,6 +304,14 @@ export default function Portfolio() {
               Options: <span className={realizedOptPnl >= 0 ? 'positive' : 'negative'}>${realizedOptPnl.toLocaleString()}</span>
             </span>
           )}
+        </div>
+      )}
+
+      {/* ── Performance Chart & Sector Allocation ──── */}
+      {portfolio?.holdings?.length > 0 && (
+        <div className="portfolio-charts-row">
+          <PortfolioChart holdings={portfolio.holdings} closedTrades={closedStocks} />
+          <SectorAllocation holdings={portfolio.holdings} />
         </div>
       )}
 

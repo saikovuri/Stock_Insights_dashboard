@@ -219,3 +219,37 @@ export async function fetchReturns(ticker, period = '3mo') {
   if (!res.ok) throw new Error((await res.json()).detail || 'Failed');
   return res.json();
 }
+
+export async function fetchAnalyst(ticker) {
+  const res = await fetch(`${BASE}/stock/${ticker}/analyst`);
+  if (!res.ok) throw new Error((await res.json()).detail || 'Failed');
+  return res.json();
+}
+
+export async function fetchFinancials(ticker) {
+  const res = await fetch(`${BASE}/stock/${ticker}/financials`);
+  if (!res.ok) throw new Error((await res.json()).detail || 'Failed');
+  return res.json();
+}
+
+export async function fetchOwnership(ticker) {
+  const res = await fetch(`${BASE}/stock/${ticker}/ownership`);
+  if (!res.ok) throw new Error((await res.json()).detail || 'Failed');
+  return res.json();
+}
+
+export async function fetchDividends(ticker) {
+  const res = await fetch(`${BASE}/stock/${ticker}/dividends`);
+  if (!res.ok) throw new Error((await res.json()).detail || 'Failed');
+  return res.json();
+}
+
+export async function fetchBatchSparklines(tickers) {
+  const res = await fetch(`${BASE}/stock/batch-sparklines`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tickers }),
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || 'Failed');
+  return res.json();
+}

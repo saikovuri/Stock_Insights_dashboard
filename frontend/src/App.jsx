@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './AuthContext';
+import { ThemeProvider, useTheme } from './ThemeContext';
 import LoginPage from './components/LoginPage';
 import SearchBar from './components/SearchBar';
 import KeyMetrics from './components/KeyMetrics';
@@ -16,6 +17,10 @@ import PeerBenchmark from './components/PeerBenchmark';
 import PositionCalculator from './components/PositionCalculator';
 import DcaSimulator from './components/DcaSimulator';
 import WatchlistRail from './components/WatchlistRail';
+import AnalystRatings from './components/AnalystRatings';
+import Financials from './components/Financials';
+import Ownership from './components/Ownership';
+import DividendHistory from './components/DividendHistory';
 import { fetchMetrics, fetchHistory, fetchNews, fetchAlerts, fetchEvents } from './api/stockApi';
 
 const VALID_TABS = ['dashboard', 'screener', 'portfolio', 'tools'];
@@ -26,6 +31,7 @@ function getInitialTab() {
 
 function AppShell() {
   const { user, logout, loading: authLoading } = useAuth();
+  const { theme, toggle: toggleTheme } = useTheme();
   const [activeTab, setActiveTab] = useState(getInitialTab);
   const [showLogin, setShowLogin] = useState(false);
   const [ticker, setTicker] = useState(null);
@@ -108,6 +114,9 @@ function AppShell() {
         <div className="header-top">
           <h1 onClick={() => { setActiveTab('dashboard'); window.location.hash = 'dashboard'; }} style={{ cursor: 'pointer' }}><span className="header-emoji">📈</span><span className="header-title-text">Stock Insights</span></h1>
           <div className="user-menu">
+            <button className="btn-theme" onClick={toggleTheme} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>
+              {theme === 'dark' ? '☀️' : '🌙'}
+            </button>
             {user ? (
               <>
                 <span className="user-greeting">Hi, {user.display_name}</span>
@@ -162,10 +171,18 @@ function AppShell() {
               }}
             />
             {ticker && <PeerBenchmark ticker={ticker} />}
+            {ticker && <AnalystRatings ticker={ticker} />}
             <div className="two-column">
               <NewsSentiment newsData={newsData} />
               {ticker && <AiSummary ticker={ticker} dataReady={!loading} />}
             </div>
+            {ticker && <Financials ticker={ticker} />}
+            {ticker && (
+              <div className="two-column">
+                <Ownership ticker={ticker} />
+                <DividendHistory ticker={ticker} />
+              </div>
+            )}
             {ticker && (
               <div className="two-column">
                 <BullBear ticker={ticker} />
@@ -209,8 +226,10 @@ export default function App() {
 
 export function AppRoot() {
   return (
-    <AuthProvider>
-      <App />
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <App />
+      </AuthProvider>
+    </ThemeProvider>
   );
 }

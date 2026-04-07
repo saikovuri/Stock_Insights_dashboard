@@ -377,11 +377,19 @@ def portfolio_summary_endpoint(user: dict = Depends(get_current_user)):
         pnl_pct = (pnl / invested * 100) if invested else 0
         total_invested += invested
         total_current += current_val
+        # Get sector from cached metrics
+        sector = "Unknown"
+        try:
+            m = get_key_metrics(ticker)
+            sector = m.get("sector") or "Unknown"
+        except Exception:
+            pass
         details.append({
             "id": h["id"], "ticker": ticker, "shares": shares,
             "buy_price": buy_price, "current_price": current,
             "invested": round(invested, 2), "current_value": round(current_val, 2),
             "pnl": round(pnl, 2), "pnl_pct": round(pnl_pct, 2),
+            "sector": sector,
         })
     total_pnl = total_current - total_invested
     return {
@@ -1051,3 +1059,255 @@ def stock_history_returns(ticker: str, period: str = Query("3mo")):
         return records
     except Exception as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+# ── Analyst Ratings & Price Targets ─────────────────────────────────────────
+
+@app.get("/api/stock/{ticker}/analyst")
+@limiter.limit("60/minute")
+def stock_analyst(request: Request, ticker: str):
+    """Analyst recommendations, price targets, and upgrade/downgrade history."""
+    ticker = _valid_ticker(ticker)
+    try:
+        import yfinance as yf
+        import math
+        stock = yf.Ticker(ticker)
+        info = stock.info
+
+        # Price targets
+        target_high = info.get("targetHighPrice")
+        target_low = info.get("targetLowPrice")
+        target_mean = info.get("targetMeanPrice")
+        target_median = info.get("targetMedianPrice")
+        num_analysts = info.get("numberOfAnalystOpinions", 0)
+        recommendation = info.get("recommendationKey", "")
+        recommendation_mean = info.get("recommendationMean")  # 1=Strong Buy, 5=Sell
+
+        # Recommendation breakdown from recommendations_summary
+        breakdown = {"strongBuy": 0, "buy": 0, "hold": 0, "sell": 0, "strongSell": 0}
+        try:
+            recs = stock.recommendations
+            if recs is not None and not recs.empty:
+                latest = recs.iloc[-1] if len(recs) > 0 else None
+                if latest is not None:
+                    for col in ["strongBuy", "buy", "hold", "sell", "strongSell"]:
+                        val = latest.get(col)
+                        if val is not None and not (isinstance(val, float) and math.isnan(val)):
+                            breakdown[col] = int(val)
+        except Exception:
+            pass
+
+        # Upgrade/downgrade history
+        upgrades = []
+        try:
+            ug = stock.upgrades_downgrades
+            if ug is not None and not ug.empty:
+                recent = ug.tail(10)
+                for idx, row in recent.iterrows():
+                    d = str(idx)[:10] if hasattr(idx, 'strftime') else str(idx)[:10]
+                    upgrades.append({
+                        "date": d,
+                        "firm": str(row.get("Firm", "")),
+                        "toGrade": str(row.get("ToGrade", "")),
+                        "fromGrade": str(row.get("FromGrade", "")),
+                        "action": str(row.get("Action", "")),
+                    })
+        except Exception:
+            pass
+
+        return {
+            "price_targets": {
+                "high": target_high,
+                "low": target_low,
+                "mean": target_mean,
+                "median": target_median,
+                "num_analysts": num_analysts,
+            },
+            "recommendation": recommendation,
+            "recommendation_mean": recommendation_mean,
+            "breakdown": breakdown,
+            "upgrades_downgrades": upgrades[-10:],
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Financial Statements ────────────────────────────────────────────────────
+
+@app.get("/api/stock/{ticker}/financials")
+@limiter.limit("30/minute")
+def stock_financials(request: Request, ticker: str):
+    """Income statement, balance sheet, cash flow (annual + quarterly)."""
+    ticker = _valid_ticker(ticker)
+    try:
+        import yfinance as yf
+        import math
+        stock = yf.Ticker(ticker)
+
+        def _df_to_dict(df):
+            if df is None or df.empty:
+                return {}
+            result = {}
+            for col in df.columns:
+                period_key = str(col)[:10]
+                items = {}
+                for idx, val in df[col].items():
+                    if val is not None and not (isinstance(val, float) and math.isnan(val)):
+                        items[str(idx)] = float(val)
+                if items:
+                    result[period_key] = items
+            return result
+
+        return {
+            "income_statement": _df_to_dict(stock.financials),
+            "income_statement_quarterly": _df_to_dict(stock.quarterly_financials),
+            "balance_sheet": _df_to_dict(stock.balance_sheet),
+            "balance_sheet_quarterly": _df_to_dict(stock.quarterly_balance_sheet),
+            "cash_flow": _df_to_dict(stock.cashflow),
+            "cash_flow_quarterly": _df_to_dict(stock.quarterly_cashflow),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Institutional & Insider Activity ────────────────────────────────────────
+
+@app.get("/api/stock/{ticker}/ownership")
+@limiter.limit("30/minute")
+def stock_ownership(request: Request, ticker: str):
+    """Top institutional holders and insider transactions."""
+    ticker = _valid_ticker(ticker)
+    try:
+        import yfinance as yf
+        import math
+        stock = yf.Ticker(ticker)
+        info = stock.info
+
+        # Institutional holders
+        institutions = []
+        try:
+            ih = stock.institutional_holders
+            if ih is not None and not ih.empty:
+                for _, row in ih.head(15).iterrows():
+                    holder = {}
+                    for col in ih.columns:
+                        val = row[col]
+                        if val is not None and not (isinstance(val, float) and math.isnan(val)):
+                            if hasattr(val, 'strftime'):
+                                holder[col] = val.strftime("%Y-%m-%d")
+                            elif isinstance(val, (int, float)):
+                                holder[col] = float(val)
+                            else:
+                                holder[col] = str(val)
+                    institutions.append(holder)
+        except Exception:
+            pass
+
+        # Insider transactions
+        insiders = []
+        try:
+            it = stock.insider_transactions
+            if it is not None and not it.empty:
+                for _, row in it.head(20).iterrows():
+                    txn = {}
+                    for col in it.columns:
+                        val = row[col]
+                        if val is not None and not (isinstance(val, float) and math.isnan(val)):
+                            if hasattr(val, 'strftime'):
+                                txn[col] = val.strftime("%Y-%m-%d")
+                            elif isinstance(val, (int, float)):
+                                txn[col] = float(val)
+                            else:
+                                txn[col] = str(val)
+                    insiders.append(txn)
+        except Exception:
+            pass
+
+        # Summary stats
+        held_pct_insiders = info.get("heldPercentInsiders")
+        held_pct_institutions = info.get("heldPercentInstitutions")
+
+        return {
+            "held_pct_insiders": round(held_pct_insiders * 100, 2) if held_pct_insiders else None,
+            "held_pct_institutions": round(held_pct_institutions * 100, 2) if held_pct_institutions else None,
+            "institutional_holders": institutions,
+            "insider_transactions": insiders,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Dividend Details ────────────────────────────────────────────────────────
+
+@app.get("/api/stock/{ticker}/dividends")
+@limiter.limit("30/minute")
+def stock_dividends(request: Request, ticker: str):
+    """Dividend history, yield, payout details."""
+    ticker = _valid_ticker(ticker)
+    try:
+        import yfinance as yf
+        stock = yf.Ticker(ticker)
+        info = stock.info
+
+        # Dividend info from info
+        div_rate = info.get("dividendRate")
+        div_yield = info.get("dividendYield")
+        ex_date = info.get("exDividendDate")
+        payout_ratio = info.get("payoutRatio")
+        five_yr_avg = info.get("fiveYearAvgDividendYield")
+
+        # Convert epoch ex_date to readable
+        ex_date_str = None
+        if ex_date:
+            try:
+                from datetime import datetime as _dt
+                ex_date_str = _dt.fromtimestamp(ex_date).strftime("%Y-%m-%d")
+            except Exception:
+                ex_date_str = str(ex_date)
+
+        # Historical dividends
+        history = []
+        try:
+            divs = stock.dividends
+            if divs is not None and len(divs) > 0:
+                for ts, amount in divs.items():
+                    d = str(ts.date()) if hasattr(ts, "date") else str(ts)[:10]
+                    history.append({"date": d, "amount": round(float(amount), 4)})
+        except Exception:
+            pass
+
+        return {
+            "dividend_rate": div_rate,
+            "dividend_yield": round(div_yield * 100, 2) if div_yield else None,
+            "ex_dividend_date": ex_date_str,
+            "payout_ratio": round(payout_ratio * 100, 1) if payout_ratio else None,
+            "five_year_avg_yield": five_yr_avg,
+            "history": history,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Sparkline data for watchlist ────────────────────────────────────────────
+
+class SparklineRequest(BaseModel):
+    tickers: list[str]
+
+@app.post("/api/stock/batch-sparklines")
+@limiter.limit("30/minute")
+def batch_sparklines(request: Request, req: SparklineRequest):
+    """Return 5-day close prices for tiny sparkline charts."""
+    from concurrent.futures import ThreadPoolExecutor
+    tickers = [_valid_ticker(t) for t in req.tickers[:30]]
+
+    def _fetch_spark(t):
+        try:
+            df = get_stock_data(t, period="5d", interval="1d")
+            closes = [round(float(row["Close"]), 2) for _, row in df.iterrows()]
+            return {"ticker": t, "closes": closes}
+        except Exception:
+            return {"ticker": t, "closes": []}
+
+    with ThreadPoolExecutor(max_workers=min(len(tickers), 8)) as pool:
+        results = list(pool.map(_fetch_spark, tickers))
+    return {"sparklines": {r["ticker"]: r["closes"] for r in results}}

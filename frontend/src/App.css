@@ -3263,3 +3263,467 @@ tr.alert-triggered {
   border-radius: 4px;
   background: linear-gradient(to right, rgb(209,50,50), rgb(50,50,50), rgb(50,184,50));
 }
+
+/* ══════════════════════════════════════════════════════════════════
+   LIGHT THEME  (data-theme="light")
+   ══════════════════════════════════════════════════════════════════ */
+
+[data-theme="light"] {
+  --bg-primary: #f5f7fa;
+  --bg-secondary: #ffffff;
+  --glass: rgba(255,255,255,0.85);
+  --glass-border: rgba(0,0,0,0.08);
+  --text-primary: #1a1a2e;
+  --text-secondary: #555;
+  --text-muted: #888;
+  --accent: #6366f1;
+  --positive: #16a34a;
+  --negative: #dc2626;
+  --card-shadow: 0 2px 16px rgba(0,0,0,0.06);
+}
+
+[data-theme="light"] body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+[data-theme="light"] .app-header {
+  background: rgba(255,255,255,0.9);
+  border-bottom-color: var(--glass-border);
+}
+
+[data-theme="light"] .glass-card,
+[data-theme="light"] .card,
+[data-theme="light"] .tool-card {
+  background: var(--glass);
+  border-color: var(--glass-border);
+  box-shadow: var(--card-shadow);
+  color: var(--text-primary);
+}
+
+[data-theme="light"] .main-tab {
+  color: var(--text-secondary);
+}
+[data-theme="light"] .main-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+[data-theme="light"] input,
+[data-theme="light"] select,
+[data-theme="light"] textarea {
+  background: #f0f2f5;
+  border-color: #ddd;
+  color: var(--text-primary);
+}
+
+[data-theme="light"] .rail-ticker {
+  background: rgba(0,0,0,0.03);
+  border-color: rgba(0,0,0,0.06);
+  color: var(--text-primary);
+}
+[data-theme="light"] .rail-ticker:hover {
+  background: rgba(0,0,0,0.06);
+}
+[data-theme="light"] .rail-ticker-active {
+  background: rgba(99,102,241,0.1);
+  border-color: var(--accent);
+}
+
+[data-theme="light"] .watchlist-rail {
+  background: rgba(255,255,255,0.9);
+  border-color: var(--glass-border);
+}
+
+[data-theme="light"] table th {
+  background: rgba(0,0,0,0.04);
+  color: var(--text-secondary);
+}
+[data-theme="light"] table td {
+  border-color: rgba(0,0,0,0.06);
+  color: var(--text-primary);
+}
+
+[data-theme="light"] .app-footer {
+  color: var(--text-muted);
+}
+
+[data-theme="light"] .dashboard-welcome {
+  color: var(--text-secondary);
+}
+
+[data-theme="light"] .btn-theme {
+  background: rgba(0,0,0,0.05);
+  color: var(--text-primary);
+}
+
+/* ── Theme toggle button ───────────────────────────────────────── */
+.btn-theme {
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1;
+  transition: background 0.2s;
+}
+.btn-theme:hover {
+  background: rgba(255,255,255,0.15);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   ANALYST RATINGS
+   ══════════════════════════════════════════════════════════════════ */
+
+.analyst-card h3 { margin-bottom: 1rem; }
+
+.analyst-top-row {
+  display: flex;
+  gap: 2rem;
+  align-items: center;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.analyst-consensus {
+  text-align: center;
+  min-width: 100px;
+}
+.analyst-consensus-label {
+  font-size: 1.4rem;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+.analyst-mean-score {
+  font-size: 0.9rem;
+  color: #b0b8c8;
+  margin-top: 2px;
+}
+.analyst-count {
+  font-size: 0.8rem;
+  color: #888;
+  margin-top: 2px;
+}
+
+.analyst-targets {
+  display: flex;
+  gap: 1.2rem;
+  flex-wrap: wrap;
+}
+.analyst-target-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.target-label {
+  font-size: 0.75rem;
+  color: #888;
+  text-transform: uppercase;
+}
+.target-value {
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+.target-low { color: #ef5350; }
+.target-mean { color: #66bb6a; }
+.target-high { color: #42a5f5; }
+.target-mean-row .target-value { font-size: 1.3rem; }
+
+/* Breakdown bar */
+.analyst-breakdown { margin-bottom: 1rem; }
+.analyst-bar {
+  display: flex;
+  height: 24px;
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+.analyst-bar-seg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #fff;
+  min-width: 0;
+  transition: width 0.3s;
+}
+.analyst-bar-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  font-size: 0.78rem;
+  color: #b0b8c8;
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+/* Upgrades table */
+.analyst-upgrades { margin-top: 0.75rem; }
+.analyst-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+  margin-top: 0.5rem;
+}
+.analyst-table th {
+  text-align: left;
+  padding: 6px 8px;
+  background: rgba(255,255,255,0.04);
+  color: #b0b8c8;
+  font-weight: 600;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.analyst-table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.action-upgrade { color: #66bb6a; }
+.action-downgrade { color: #ef5350; }
+.action-init, .action-initiated { color: #42a5f5; }
+.action-reiterated { color: #ffa726; }
+
+.btn-toggle-sm {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: #b0b8c8;
+  padding: 4px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: all 0.2s;
+}
+.btn-toggle-sm:hover, .btn-toggle-sm.active {
+  background: rgba(99,102,241,0.2);
+  color: #fff;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   FINANCIAL STATEMENTS
+   ══════════════════════════════════════════════════════════════════ */
+
+.financials-card h3 { margin-bottom: 0.75rem; }
+
+.financials-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.financials-tabs {
+  display: flex;
+  gap: 4px;
+}
+.fin-tab {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: #b0b8c8;
+  padding: 5px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.82rem;
+  transition: all 0.2s;
+}
+.fin-tab.active {
+  background: rgba(99,102,241,0.25);
+  color: #fff;
+  border-color: rgba(99,102,241,0.4);
+}
+.fin-tab:hover:not(.active) {
+  background: rgba(255,255,255,0.08);
+}
+
+.financials-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.financials-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+.financials-table th {
+  text-align: right;
+  padding: 6px 10px;
+  background: rgba(255,255,255,0.04);
+  color: #b0b8c8;
+  font-weight: 600;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  position: sticky;
+  top: 0;
+}
+.financials-table td {
+  text-align: right;
+  padding: 5px 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  font-variant-numeric: tabular-nums;
+}
+.financials-table td.negative { color: #ef5350; }
+.fin-row-label {
+  text-align: left !important;
+  font-weight: 500;
+  color: #ccc;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.no-data-text {
+  text-align: center;
+  color: #888;
+  padding: 2rem 0;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   OWNERSHIP / INSIDER
+   ══════════════════════════════════════════════════════════════════ */
+
+.ownership-card h3 { margin-bottom: 0.75rem; }
+
+.ownership-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+.ownership-stat {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.ownership-label {
+  font-size: 0.82rem;
+  color: #b0b8c8;
+  min-width: 80px;
+}
+.ownership-bar-track {
+  flex: 1;
+  height: 10px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 5px;
+  overflow: hidden;
+}
+.ownership-bar-fill {
+  height: 100%;
+  border-radius: 5px;
+  transition: width 0.5s ease;
+}
+.ownership-bar-fill.institutional { background: linear-gradient(90deg, #6366f1, #818cf8); }
+.ownership-bar-fill.insider { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+.ownership-pct {
+  font-size: 0.9rem;
+  font-weight: 600;
+  min-width: 50px;
+  text-align: right;
+}
+
+.ownership-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 0.75rem;
+}
+
+.positive { color: #66bb6a; }
+.negative { color: #ef5350; }
+
+/* ══════════════════════════════════════════════════════════════════
+   DIVIDEND HISTORY
+   ══════════════════════════════════════════════════════════════════ */
+
+.dividend-card h3 { margin-bottom: 0.75rem; }
+
+.dividend-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.2rem;
+  margin-bottom: 1rem;
+}
+.div-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.div-stat-val {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #66bb6a;
+}
+.div-stat-label {
+  font-size: 0.72rem;
+  color: #888;
+  text-transform: uppercase;
+}
+
+.dividend-chart { margin-bottom: 1rem; }
+.dividend-chart h4 {
+  font-size: 0.85rem;
+  color: #b0b8c8;
+  margin-bottom: 0.5rem;
+}
+
+.dividend-recent h4 {
+  font-size: 0.85rem;
+  color: #b0b8c8;
+  margin-bottom: 0.5rem;
+}
+.dividend-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.dividend-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 8px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+.div-date { color: #b0b8c8; }
+.div-amount { color: #66bb6a; font-weight: 600; }
+
+/* ══════════════════════════════════════════════════════════════════
+   WATCHLIST SPARKLINES
+   ══════════════════════════════════════════════════════════════════ */
+
+.rail-sparkline {
+  flex-shrink: 0;
+  margin: 0 4px;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   SECTOR ALLOCATION PIE
+   ══════════════════════════════════════════════════════════════════ */
+
+.sector-card h3 { margin-bottom: 0.5rem; }
+.sector-chart-wrap { min-height: 260px; }
+
+/* ══════════════════════════════════════════════════════════════════
+   PORTFOLIO CHART + LAYOUT
+   ══════════════════════════════════════════════════════════════════ */
+
+.portfolio-chart-card h3 { margin-bottom: 0.5rem; }
+
+.portfolio-charts-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+@media (max-width: 860px) {
+  .portfolio-charts-row { grid-template-columns: 1fr; }
+}
