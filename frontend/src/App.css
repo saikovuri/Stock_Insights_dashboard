@@ -1652,6 +1652,43 @@ body {
   opacity: 0.6;
 }
 
+/* ── Dashboard Sub-tabs ─────────────────────────────────────────── */
+.sub-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 1.25rem;
+  padding: 4px;
+  background: rgba(255,255,255,0.03);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+
+.sub-tab {
+  flex: 1;
+  padding: 0.5rem 0.75rem;
+  background: transparent;
+  color: var(--text-muted);
+  border: none;
+  border-radius: calc(var(--radius) - 2px);
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.82rem;
+  transition: all 0.18s;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.sub-tab.active {
+  background: rgba(99,102,241,0.18);
+  color: var(--accent);
+  box-shadow: 0 1px 4px rgba(99,102,241,0.15);
+}
+
+.sub-tab:not(.active):hover {
+  background: rgba(255,255,255,0.06);
+  color: var(--text);
+}
+
 /* ── Screener ──────────────────────────────────────────────────── */
 .screener-card { overflow: visible; }
 
@@ -3350,6 +3387,23 @@ tr.alert-triggered {
   border-bottom-color: var(--accent);
 }
 
+/* Sub-tabs (light) */
+[data-theme="light"] .sub-tabs {
+  background: rgba(0,0,0,0.02);
+  border-color: var(--glass-border);
+}
+[data-theme="light"] .sub-tab {
+  color: var(--text-secondary);
+}
+[data-theme="light"] .sub-tab.active {
+  background: rgba(99,102,241,0.1);
+  color: var(--accent);
+}
+[data-theme="light"] .sub-tab:not(.active):hover {
+  background: rgba(0,0,0,0.04);
+  color: var(--text-primary);
+}
+
 /* Inputs */
 [data-theme="light"] input,
 [data-theme="light"] select,
@@ -3874,6 +3928,19 @@ tr.alert-triggered {
    MOBILE RESPONSIVE — NEW FEATURES (≤600px)
    ══════════════════════════════════════════════════════════════════ */
 @media (max-width: 600px) {
+
+  /* ── Sub-tabs mobile ──────────────────────────────────────── */
+  .sub-tabs {
+    gap: 3px;
+    padding: 3px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .sub-tab {
+    padding: 0.4rem 0.5rem;
+    font-size: 0.7rem;
+    min-width: 0;
+  }
 
   /* ── Analyst Ratings ──────────────────────────────────────── */
   .analyst-top-row {

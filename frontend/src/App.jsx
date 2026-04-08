@@ -45,6 +45,7 @@ function AppShell() {
   const [period, setPeriod] = useState('6mo');
   const [interval, setChartInterval] = useState('1d');
   const [prepost, setPrepost] = useState(false);
+  const [subTab, setSubTab] = useState('overview');
 
   useEffect(() => {
     const onHashChange = () => {
@@ -153,41 +154,79 @@ function AppShell() {
                 <p>Enter any ticker symbol above, or click one from your watchlist on the right.</p>
               </div>
             )}
-            <Alerts alerts={alerts} />
-            <KeyMetrics metrics={metrics} />
+
             {ticker && metrics && (
-              <WhyMoving ticker={ticker} changePct={metrics.change_pct} />
-            )}
-            <PriceChart data={history} events={events}
-              period={period} interval={interval} prepost={prepost}
-              onSettingsChange={({ period: p, interval: i, prepost: pp }) => {
-                const newPeriod = p ?? period;
-                const newInterval = i ?? interval;
-                const newPrepost = pp ?? prepost;
-                if (p !== undefined) setPeriod(p);
-                if (i !== undefined) setChartInterval(i);
-                if (pp !== undefined) setPrepost(pp);
-                if (ticker) handleSearch(ticker, newPeriod, newInterval, newPrepost);
-              }}
-            />
-            {ticker && <PeerBenchmark ticker={ticker} />}
-            {ticker && <AnalystRatings ticker={ticker} />}
-            <div className="two-column">
-              <NewsSentiment newsData={newsData} />
-              {ticker && <AiSummary ticker={ticker} dataReady={!loading} />}
-            </div>
-            {ticker && <Financials ticker={ticker} />}
-            {ticker && (
-              <div className="two-column">
-                <Ownership ticker={ticker} />
-                <DividendHistory ticker={ticker} />
-              </div>
-            )}
-            {ticker && (
-              <div className="two-column">
-                <BullBear ticker={ticker} />
-                <AiChat ticker={ticker} context={metrics} />
-              </div>
+              <>
+                {/* ── Sub-tab navigation ──────────────────────── */}
+                <nav className="sub-tabs">
+                  {[
+                    { id: 'overview', label: '📋 Overview' },
+                    { id: 'analysis', label: '🔬 Analysis' },
+                    { id: 'fundamentals', label: '📑 Fundamentals' },
+                    { id: 'news', label: '📰 News & AI' },
+                  ].map(t => (
+                    <button
+                      key={t.id}
+                      className={`sub-tab ${subTab === t.id ? 'active' : ''}`}
+                      onClick={() => setSubTab(t.id)}
+                    >{t.label}</button>
+                  ))}
+                </nav>
+
+                {/* ── Overview ────────────────────────────────── */}
+                {subTab === 'overview' && (
+                  <>
+                    <Alerts alerts={alerts} />
+                    <KeyMetrics metrics={metrics} />
+                    <WhyMoving ticker={ticker} changePct={metrics.change_pct} />
+                    <PriceChart data={history} events={events}
+                      period={period} interval={interval} prepost={prepost}
+                      onSettingsChange={({ period: p, interval: i, prepost: pp }) => {
+                        const newPeriod = p ?? period;
+                        const newInterval = i ?? interval;
+                        const newPrepost = pp ?? prepost;
+                        if (p !== undefined) setPeriod(p);
+                        if (i !== undefined) setChartInterval(i);
+                        if (pp !== undefined) setPrepost(pp);
+                        if (ticker) handleSearch(ticker, newPeriod, newInterval, newPrepost);
+                      }}
+                    />
+                  </>
+                )}
+
+                {/* ── Analysis ────────────────────────────────── */}
+                {subTab === 'analysis' && (
+                  <>
+                    <AnalystRatings ticker={ticker} />
+                    <PeerBenchmark ticker={ticker} />
+                    <div className="two-column">
+                      <BullBear ticker={ticker} />
+                      <AiChat ticker={ticker} context={metrics} />
+                    </div>
+                  </>
+                )}
+
+                {/* ── Fundamentals ────────────────────────────── */}
+                {subTab === 'fundamentals' && (
+                  <>
+                    <Financials ticker={ticker} />
+                    <div className="two-column">
+                      <Ownership ticker={ticker} />
+                      <DividendHistory ticker={ticker} />
+                    </div>
+                  </>
+                )}
+
+                {/* ── News & AI ───────────────────────────────── */}
+                {subTab === 'news' && (
+                  <>
+                    <div className="two-column">
+                      <NewsSentiment newsData={newsData} />
+                      <AiSummary ticker={ticker} dataReady={!loading} />
+                    </div>
+                  </>
+                )}
+              </>
             )}
           </div>
           <WatchlistRail
