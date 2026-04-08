@@ -59,8 +59,10 @@ export default function AnalystRatings({ ticker }) {
           <div className="analyst-consensus-label" style={{ color: recColor }}>
             {recLabel}
           </div>
-          {recommendation_mean && (
-            <div className="analyst-mean-score">{recommendation_mean.toFixed(1)} / 5.0</div>
+          {totalRatings > 0 && (
+            <div className="analyst-mean-score">
+              {Math.round(((breakdown.strongBuy + breakdown.buy) / totalRatings) * 100)}% bullish
+            </div>
           )}
           <div className="analyst-count">{pt.num_analysts || totalRatings} analyst{(pt.num_analysts || totalRatings) !== 1 ? 's' : ''}</div>
         </div>

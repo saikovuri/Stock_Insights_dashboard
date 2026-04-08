@@ -3635,7 +3635,7 @@ tr.alert-triggered {
 .target-low { color: #ef5350; }
 .target-mean { color: #66bb6a; }
 .target-high { color: #42a5f5; }
-.target-mean-row .target-value { font-size: 1.3rem; }
+.target-mean-row .target-value { font-size: 1.05rem; }
 
 /* Breakdown bar */
 .analyst-breakdown { margin-bottom: 1rem; }
@@ -3974,7 +3974,7 @@ tr.alert-triggered {
     min-width: 0;
   }
   .target-mean-row .target-value {
-    font-size: 1.1rem;
+    font-size: 0.95rem;
   }
   .analyst-bar-legend {
     gap: 0.4rem;
