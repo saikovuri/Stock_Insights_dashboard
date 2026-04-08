@@ -7,7 +7,19 @@ const COLORS = [
   '#84cc16', '#e879f9',
 ];
 
+function useIsMobile(breakpoint = 600) {
+  const [mobile, setMobile] = useState(window.innerWidth <= breakpoint);
+  useEffect(() => {
+    const handler = () => setMobile(window.innerWidth <= breakpoint);
+    window.addEventListener('resize', handler);
+    return () => window.removeEventListener('resize', handler);
+  }, [breakpoint]);
+  return mobile;
+}
+
 export default function SectorAllocation({ holdings }) {
+  const isMobile = useIsMobile();
+
   const sectorData = useMemo(() => {
     if (!holdings?.length) return [];
     const bySector = {};
@@ -32,7 +44,7 @@ export default function SectorAllocation({ holdings }) {
     <div className="glass-card sector-card">
       <h3>🥧 Sector Allocation</h3>
       <div className="sector-chart-wrap">
-        <ResponsiveContainer width="100%" height={260}>
+        <ResponsiveContainer width="100%" height={isMobile ? 220 : 260}>
           <PieChart>
             <Pie
               data={sectorData}
@@ -40,10 +52,10 @@ export default function SectorAllocation({ holdings }) {
               nameKey="sector"
               cx="50%"
               cy="50%"
-              outerRadius={90}
-              innerRadius={50}
+              outerRadius={isMobile ? 65 : 90}
+              innerRadius={isMobile ? 35 : 50}
               paddingAngle={2}
-              label={({ sector, pct }) => `${pct}%`}
+              label={isMobile ? false : ({ pct }) => `${pct}%`}
               labelLine={false}
             >
               {sectorData.map((_, i) => (

@@ -3869,3 +3869,196 @@ tr.alert-triggered {
 @media (max-width: 860px) {
   .portfolio-charts-row { grid-template-columns: 1fr; }
 }
+
+/* ══════════════════════════════════════════════════════════════════
+   MOBILE RESPONSIVE — NEW FEATURES (≤600px)
+   ══════════════════════════════════════════════════════════════════ */
+@media (max-width: 600px) {
+
+  /* ── Analyst Ratings ──────────────────────────────────────── */
+  .analyst-top-row {
+    flex-direction: column;
+    gap: 1rem;
+    align-items: flex-start;
+  }
+  .analyst-consensus {
+    text-align: left;
+    min-width: unset;
+  }
+  .analyst-consensus-label {
+    font-size: 1.15rem;
+  }
+  .analyst-targets {
+    gap: 0.75rem;
+    width: 100%;
+  }
+  .analyst-target-row {
+    flex: 1;
+    min-width: 0;
+  }
+  .target-mean-row .target-value {
+    font-size: 1.1rem;
+  }
+  .analyst-bar-legend {
+    gap: 0.4rem;
+    font-size: 0.7rem;
+  }
+  .analyst-table {
+    font-size: 0.72rem;
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .analyst-table th,
+  .analyst-table td {
+    padding: 4px 6px;
+    white-space: nowrap;
+  }
+  .analyst-upgrades .btn-toggle-sm {
+    font-size: 0.72rem;
+    padding: 3px 8px;
+  }
+
+  /* ── Financial Statements ─────────────────────────────────── */
+  .financials-controls {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+  .financials-tabs {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .fin-tab {
+    padding: 5px 10px;
+    font-size: 0.72rem;
+    white-space: nowrap;
+  }
+  .financials-table {
+    font-size: 0.7rem;
+  }
+  .financials-table th,
+  .financials-table td {
+    padding: 4px 6px;
+  }
+  .fin-row-label {
+    max-width: 120px;
+    font-size: 0.7rem;
+  }
+
+  /* ── Ownership ────────────────────────────────────────────── */
+  .ownership-stat {
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+  .ownership-label {
+    min-width: 70px;
+    font-size: 0.75rem;
+  }
+  .ownership-pct {
+    font-size: 0.8rem;
+    min-width: 42px;
+  }
+  .ownership-tabs {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .ownership-tabs .fin-tab {
+    font-size: 0.72rem;
+    white-space: nowrap;
+  }
+  .ownership-card .analyst-table {
+    font-size: 0.7rem;
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .ownership-card .analyst-table th,
+  .ownership-card .analyst-table td {
+    padding: 4px 5px;
+    white-space: nowrap;
+  }
+
+  /* ── Dividends ────────────────────────────────────────────── */
+  .dividend-stats {
+    gap: 0.6rem;
+    justify-content: space-between;
+  }
+  .div-stat {
+    flex: 1;
+    min-width: 60px;
+  }
+  .div-stat-val {
+    font-size: 0.95rem;
+  }
+  .div-stat-label {
+    font-size: 0.62rem;
+  }
+  .dividend-chart {
+    margin-left: -0.5rem;
+    margin-right: -0.5rem;
+  }
+  .dividend-item {
+    font-size: 0.78rem;
+  }
+
+  /* ── Sector Allocation Pie ────────────────────────────────── */
+  .sector-chart-wrap {
+    min-height: 220px;
+  }
+  .sector-card .recharts-legend-wrapper {
+    font-size: 0.7rem !important;
+  }
+
+  /* ── Portfolio Chart ──────────────────────────────────────── */
+  .portfolio-chart-card .recharts-wrapper {
+    font-size: 0.7rem;
+  }
+
+  /* ── Collapsed sections ───────────────────────────────────── */
+  .collapsed-section h3 {
+    font-size: 0.9rem;
+  }
+  .expand-hint {
+    font-size: 0.72rem;
+  }
+
+  /* ── Button toggles ───────────────────────────────────────── */
+  .btn-toggle-sm {
+    font-size: 0.72rem;
+    padding: 3px 8px;
+  }
+
+  /* ── Glass card padding compression ───────────────────────── */
+  .analyst-card,
+  .financials-card,
+  .ownership-card,
+  .dividend-card,
+  .sector-card,
+  .portfolio-chart-card {
+    padding: 0.75rem;
+  }
+}
+
+/* ── Tablet tweaks for new features (601–900px) ─────────────── */
+@media (min-width: 601px) and (max-width: 900px) {
+  .analyst-top-row {
+    gap: 1.2rem;
+  }
+  .financials-table {
+    font-size: 0.75rem;
+  }
+  .analyst-table {
+    font-size: 0.78rem;
+  }
+  .dividend-stats {
+    gap: 0.8rem;
+  }
+  .analyst-card,
+  .financials-card,
+  .ownership-card,
+  .dividend-card {
+    padding: 1rem;
+  }
+}
