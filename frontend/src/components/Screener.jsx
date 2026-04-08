@@ -327,26 +327,27 @@ export default function Screener() {
   ];
 
   const sorted = useMemo(() => {
-    let result;
     if (sortCol === 'custom') {
       const orderMap = {};
       customOrder.forEach((t, i) => { orderMap[t] = i; });
-      result = [...stocks].sort((a, b) => (orderMap[a.ticker] ?? 999) - (orderMap[b.ticker] ?? 999));
-    } else {
-      result = [...stocks].sort((a, b) => {
-        let va = a[sortCol], vb = b[sortCol];
-        if (va == null) return 1;
-        if (vb == null) return -1;
-        if (typeof va === 'string') return va.localeCompare(vb) * sortDir;
-        return (va - vb) * sortDir;
-      });
+      return [...stocks].sort((a, b) => (orderMap[a.ticker] ?? 999) - (orderMap[b.ticker] ?? 999));
     }
-    // Broadcast order to WatchlistRail
-    const order = result.map(s => s.ticker);
+    return [...stocks].sort((a, b) => {
+      let va = a[sortCol], vb = b[sortCol];
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      if (typeof va === 'string') return va.localeCompare(vb) * sortDir;
+      return (va - vb) * sortDir;
+    });
+  }, [stocks, sortCol, sortDir, customOrder]);
+
+  // Broadcast order to WatchlistRail (must be in useEffect, not useMemo, to avoid
+  // triggering setState in WatchlistRail during Screener's render phase)
+  useEffect(() => {
+    const order = sorted.map(s => s.ticker);
     sessionStorage.setItem('screener_order', JSON.stringify(order));
     window.dispatchEvent(new Event('screener-order-changed'));
-    return result;
-  }, [stocks, sortCol, sortDir, customOrder]);
+  }, [sorted]);
 
   const arrow = (col) => sortCol === col ? (sortDir === 1 ? ' ▲' : ' ▼') : '';
 
