@@ -15,28 +15,18 @@ export default function Ownership({ ticker }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState('institutional');
-  const [opened, setOpened] = useState(false);
 
-  useEffect(() => { setData(null); setOpened(false); }, [ticker]);
-
-  const load = () => {
-    if (!ticker || loading) return;
-    setOpened(true);
+  useEffect(() => {
+    if (!ticker) return;
+    setData(null);
     setLoading(true);
     fetchOwnership(ticker)
       .then(setData)
       .catch(() => setData(null))
       .finally(() => setLoading(false));
-  };
+  }, [ticker]);
 
   if (!ticker) return null;
-
-  if (!opened) return (
-    <div className="glass-card ownership-card collapsed-section" onClick={load}>
-      <h3>🏛️ Institutional & Insider Activity <span className="expand-hint">▸ Click to load</span></h3>
-    </div>
-  );
-
   if (loading) return <div className="glass-card ownership-card"><p className="loading-text">Loading ownership data…</p></div>;
   if (!data) return null;
 

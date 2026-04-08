@@ -5,29 +5,18 @@ export default function AnalystRatings({ ticker }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [showUpgrades, setShowUpgrades] = useState(false);
-  const [opened, setOpened] = useState(false);
 
-  // Reset when ticker changes
-  useEffect(() => { setData(null); setOpened(false); }, [ticker]);
-
-  const load = () => {
-    if (!ticker || loading) return;
-    setOpened(true);
+  useEffect(() => {
+    if (!ticker) return;
+    setData(null);
     setLoading(true);
     fetchAnalyst(ticker)
       .then(setData)
       .catch(() => setData(null))
       .finally(() => setLoading(false));
-  };
+  }, [ticker]);
 
   if (!ticker) return null;
-
-  if (!opened) return (
-    <div className="glass-card analyst-card collapsed-section" onClick={load}>
-      <h3>📊 Analyst Ratings & Price Targets <span className="expand-hint">▸ Click to load</span></h3>
-    </div>
-  );
-
   if (loading) return <div className="glass-card analyst-card"><p className="loading-text">Loading analyst data…</p></div>;
   if (!data) return null;
 
