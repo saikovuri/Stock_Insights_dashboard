@@ -4,7 +4,6 @@ import { fetchAnalyst } from '../api/stockApi';
 export default function AnalystRatings({ ticker }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [showUpgrades, setShowUpgrades] = useState(false);
 
   useEffect(() => {
     if (!ticker) return;
@@ -126,10 +125,7 @@ export default function AnalystRatings({ ticker }) {
       {/* Upgrades / Downgrades */}
       {upgrades_downgrades?.length > 0 && (
         <div className="analyst-upgrades">
-          <button className="btn-toggle-sm" onClick={() => setShowUpgrades(!showUpgrades)}>
-            {showUpgrades ? 'Hide' : 'Show'} Recent Upgrades/Downgrades ({upgrades_downgrades.length})
-          </button>
-          {showUpgrades && (
+          <h4 style={{ margin: '0 0 8px' }}>Recent Upgrades/Downgrades</h4>
             <table className="analyst-table">
               <thead>
                 <tr><th>Date</th><th>Firm</th><th>Action</th><th>From</th><th>To</th><th>Price Target</th></tr>
@@ -154,7 +150,6 @@ export default function AnalystRatings({ ticker }) {
                 })}
               </tbody>
             </table>
-          )}
         </div>
       )}
     </div>

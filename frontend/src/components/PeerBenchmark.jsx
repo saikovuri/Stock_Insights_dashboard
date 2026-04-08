@@ -29,39 +29,20 @@ export default function PeerBenchmark({ ticker }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [open, setOpen] = useState(false);
 
   useEffect(() => {
+    if (!ticker) return;
     setData(null);
-    setOpen(false);
-  }, [ticker]);
-
-  const load = async () => {
-    if (open && data) { setOpen(false); return; }
-    setOpen(true);
-    if (data) return;
     setLoading(true);
     setError(null);
-    try {
-      const d = await fetchPeers(ticker);
-      if (!d.peers || d.peers.length === 0) { setError(`No peer data available for ${ticker}`); }
-      else setData(d);
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  if (!open) {
-    return (
-      <div className="peer-benchmark-collapsed">
-        <button className="btn-peer-expand" onClick={load}>
-          📊 Compare to peers
-        </button>
-      </div>
-    );
-  }
+    fetchPeers(ticker)
+      .then(d => {
+        if (!d.peers || d.peers.length === 0) setError(`No peer data available for ${ticker}`);
+        else setData(d);
+      })
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false));
+  }, [ticker]);
 
   if (loading) return <div className="card"><p className="loading-text">Loading peer data…</p></div>;
   if (error) return <div className="card"><p className="error-text">{error}</p></div>;
@@ -76,7 +57,7 @@ export default function PeerBenchmark({ ticker }) {
     <div className="card peer-card">
       <div className="peer-header">
         <h3 style={{ margin: 0 }}>📊 Peer Comparison</h3>
-        <button className="btn-secondary btn-sm" onClick={() => setOpen(false)}>Close</button>
+
       </div>
       <div className="peer-table-wrap">
         <table className="peer-table">
