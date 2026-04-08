@@ -132,18 +132,26 @@ export default function AnalystRatings({ ticker }) {
           {showUpgrades && (
             <table className="analyst-table">
               <thead>
-                <tr><th>Date</th><th>Firm</th><th>Action</th><th>From</th><th>To</th></tr>
+                <tr><th>Date</th><th>Firm</th><th>Action</th><th>From</th><th>To</th><th>Price Target</th></tr>
               </thead>
               <tbody>
-                {upgrades_downgrades.map((u, i) => (
-                  <tr key={i}>
-                    <td>{u.date}</td>
-                    <td>{u.firm}</td>
-                    <td className={`action-${u.action?.toLowerCase()}`}>{u.action}</td>
-                    <td>{u.fromGrade || '—'}</td>
-                    <td>{u.toGrade}</td>
-                  </tr>
-                ))}
+                {upgrades_downgrades.map((u, i) => {
+                  const ptText = u.currentPriceTarget != null
+                    ? u.priorPriceTarget != null && u.priorPriceTarget !== u.currentPriceTarget
+                      ? `$${u.priorPriceTarget.toFixed(0)} → $${u.currentPriceTarget.toFixed(0)}`
+                      : `$${u.currentPriceTarget.toFixed(0)}`
+                    : '—';
+                  return (
+                    <tr key={i}>
+                      <td>{u.date}</td>
+                      <td>{u.firm}</td>
+                      <td className={`action-${u.action?.toLowerCase()}`}>{u.action}</td>
+                      <td>{u.fromGrade || '—'}</td>
+                      <td>{u.toGrade}</td>
+                      <td>{ptText}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}

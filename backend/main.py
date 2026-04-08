@@ -1114,15 +1114,20 @@ def stock_analyst(request: Request, ticker: str):
         try:
             ug = stock.upgrades_downgrades
             if ug is not None and not ug.empty:
-                recent = ug.tail(10)
+                recent = ug.head(10)
                 for idx, row in recent.iterrows():
                     d = str(idx)[:10] if hasattr(idx, 'strftime') else str(idx)[:10]
+                    cur_pt = row.get("currentPriceTarget")
+                    prior_pt = row.get("priorPriceTarget")
                     upgrades.append({
                         "date": d,
                         "firm": str(row.get("Firm", "")),
                         "toGrade": str(row.get("ToGrade", "")),
                         "fromGrade": str(row.get("FromGrade", "")),
                         "action": str(row.get("Action", "")),
+                        "priceTargetAction": str(row.get("priceTargetAction", "")),
+                        "currentPriceTarget": None if (cur_pt is None or (isinstance(cur_pt, float) and math.isnan(cur_pt))) else float(cur_pt),
+                        "priorPriceTarget": None if (prior_pt is None or (isinstance(prior_pt, float) and math.isnan(prior_pt))) else float(prior_pt),
                     })
         except Exception:
             pass
