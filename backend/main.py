@@ -764,7 +764,7 @@ def why_moving(request: Request, ticker: str):
             explanation = f"{metrics['name']} ({ticker.upper()}) is {direction} {abs(change_pct):.2f}% today at ${metrics['price']:.2f}."
             if top_headline:
                 explanation += f" Most recent headline: \"{top_headline}\"."
-            explanation += " No AI analysis available — add a GEMINI_API_KEY to your .env to enable full explanations."
+            explanation += " No AI analysis available — add a GROQ_API_KEY to your .env to enable full explanations."
             return {"explanation": explanation, "change_pct": change_pct}
         client = _get_ai_client()
         prompt = f"""{metrics['name']} ({ticker.upper()}) is {direction} {abs(change_pct):.2f}% today (price: ${metrics['price']}).
@@ -773,16 +773,80 @@ Recent headlines:
 {headlines}
 
 In 2-3 short sentences, explain the most likely reason for today's move using only the available context. Be specific. If no clear catalyst is visible, say so clearly. Do not fabricate reasons."""
-        resp = client.chat.completions.create(
-            model=AI_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=150, temperature=0.5,
-        )
-        return {"explanation": resp.choices[0].message.content.strip(), "change_pct": change_pct}
+        try:
+            resp = client.chat.completions.create(
+                model=AI_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=150, temperature=0.5,
+            )
+            return {"explanation": resp.choices[0].message.content.strip(), "change_pct": change_pct}
+        except Exception:
+            top_headline = news[0]['title'] if news else None
+            explanation = f"{metrics['name']} ({ticker.upper()}) is {direction} {abs(change_pct):.2f}% today at ${metrics['price']:.2f}."
+            if top_headline:
+                explanation += f' Most recent headline: "{top_headline}".'
+            explanation += " AI analysis temporarily unavailable."
+            return {"explanation": explanation, "change_pct": change_pct}
     try:
         return get_or_fetch(f"why-moving:{ticker}", _fetch, ttl=300)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def _offline_bull_bear(metrics, news, sentiment):
+    """Data-driven bull/bear fallback when AI is unavailable."""
+    name = metrics.get('name', 'Stock')
+    price = metrics.get('price', 0)
+    change = metrics.get('change_pct', 0)
+    pe = metrics.get('pe_ratio')
+    beta = metrics.get('beta')
+    high_52 = metrics.get('52w_high')
+    low_52 = metrics.get('52w_low')
+    div = metrics.get('dividend_yield')
+    fwd_pe = metrics.get('forward_pe')
+    sent_label = sentiment.get('label', 'Neutral')
+    pct_from_high = ((price - high_52) / high_52 * 100) if high_52 else None
+    pct_from_low = ((price - low_52) / low_52 * 100) if low_52 else None
+    bull, bear = [], []
+    if pct_from_low is not None and pct_from_low < 30:
+        bull.append(f"Trading {pct_from_low:.1f}% above its 52-week low — potential value entry")
+    elif pct_from_low is not None:
+        bull.append(f"Strong momentum — up {pct_from_low:.1f}% from 52-week low at ${low_52:.2f}")
+    if pe and pe < 20:
+        bull.append(f"P/E of {pe:.1f} looks attractive vs typical market multiples")
+    elif fwd_pe and fwd_pe < 18:
+        bull.append(f"Forward P/E of {fwd_pe:.1f} suggests reasonable valuation on future earnings")
+    else:
+        bull.append(f"{'Profitable company' if pe else 'Growth-stage company'} in a large addressable market")
+    if div and div > 0.01:
+        bull.append(f"Pays a {div*100:.2f}% dividend yield, providing income alongside potential upside")
+    elif sent_label in ('Positive', 'Very Bullish', 'Bullish'):
+        bull.append(f"Recent news sentiment is {sent_label.lower()} — positive near-term momentum")
+    else:
+        bull.append("Established brand with scale advantages over smaller competitors")
+    if pct_from_high is not None and pct_from_high < -15:
+        bear.append(f"Down {abs(pct_from_high):.1f}% from its 52-week high of ${high_52:.2f} — trend is weak")
+    elif pct_from_high is not None and pct_from_high > -5:
+        bear.append(f"Near 52-week high (${high_52:.2f}) — limited near-term upside, potential resistance")
+    else:
+        bear.append("Price has pulled back from highs — unclear if this is a reversal or a dip")
+    if pe and pe > 30:
+        bear.append(f"P/E of {pe:.1f} demands continued growth execution — leaves little margin for error")
+    elif pe and pe < 0:
+        bear.append("Currently unprofitable — relies on future growth to justify valuation")
+    else:
+        bear.append("Valuation depends on growth assumptions that may be challenged in a rising-rate environment")
+    if beta and beta > 1.3:
+        bear.append(f"High beta of {beta:.2f} means amplified downside in broader market sell-offs")
+    elif sent_label in ('Negative', 'Bearish', 'Very Bearish'):
+        bear.append(f"Recent news sentiment is {sent_label.lower()} — near-term headwinds possible")
+    else:
+        bear.append("Macro uncertainty and sector rotation could weigh on the stock near-term")
+    verdict = (
+        f"{name} shows {'positive' if change >= 0 else 'negative'} momentum today "
+        f"({change:+.2f}%). Weigh the above factors against your own risk tolerance."
+    )
+    return {"bull": bull[:3], "bear": bear[:3], "verdict": verdict}
 
 
 @app.get("/api/stock/{ticker}/bull-bear")
@@ -799,65 +863,7 @@ def bull_bear(request: Request, ticker: str):
         sentiment = aggregate_sentiment(news)
         headlines = "\n".join(f"- {a['title']}" for a in news[:8])
         if not AI_API_KEY:
-            name = metrics.get('name', ticker.upper())
-            price = metrics.get('price', 0)
-            change = metrics.get('change_pct', 0)
-            pe = metrics.get('pe_ratio')
-            beta = metrics.get('beta')
-            high_52 = metrics.get('52w_high')
-            low_52 = metrics.get('52w_low')
-            mktcap = metrics.get('market_cap', 0)
-            div = metrics.get('dividend_yield')
-            fwd_pe = metrics.get('forward_pe')
-            sent_label = sentiment.get('label', 'Neutral')
-
-            pct_from_high = ((price - high_52) / high_52 * 100) if high_52 else None
-            pct_from_low = ((price - low_52) / low_52 * 100) if low_52 else None
-
-            bull = []
-            bear = []
-
-            if pct_from_low is not None and pct_from_low < 30:
-                bull.append(f"Trading {pct_from_low:.1f}% above its 52-week low — potential value entry")
-            elif pct_from_low is not None:
-                bull.append(f"Strong momentum — up {pct_from_low:.1f}% from 52-week low at ${low_52:.2f}")
-            if pe and pe < 20:
-                bull.append(f"P/E of {pe:.1f} looks attractive vs typical market multiples")
-            elif fwd_pe and fwd_pe < 18:
-                bull.append(f"Forward P/E of {fwd_pe:.1f} suggests reasonable valuation on future earnings")
-            else:
-                bull.append(f"{'Profitable company' if pe else 'Growth-stage company'} in a large addressable market")
-            if div and div > 0.01:
-                bull.append(f"Pays a {div*100:.2f}% dividend yield, providing income alongside potential upside")
-            elif sent_label in ('Positive', 'Very Bullish', 'Bullish'):
-                bull.append(f"Recent news sentiment is {sent_label.lower()} — positive near-term momentum")
-            else:
-                bull.append("Established brand with scale advantages over smaller competitors")
-
-            if pct_from_high is not None and pct_from_high < -15:
-                bear.append(f"Down {abs(pct_from_high):.1f}% from its 52-week high of ${high_52:.2f} — trend is weak")
-            elif pct_from_high is not None and pct_from_high > -5:
-                bear.append(f"Near 52-week high (${high_52:.2f}) — limited near-term upside, potential resistance")
-            else:
-                bear.append(f"Price has pulled back from highs — unclear if this is a reversal or a dip")
-            if pe and pe > 30:
-                bear.append(f"P/E of {pe:.1f} demands continued growth execution — leaves little margin for error")
-            elif pe and pe < 0:
-                bear.append("Currently unprofitable — relies on future growth to justify valuation")
-            else:
-                bear.append("Valuation depends on growth assumptions that may be challenged in a rising-rate environment")
-            if beta and beta > 1.3:
-                bear.append(f"High beta of {beta:.2f} means amplified downside in broader market sell-offs")
-            elif sent_label in ('Negative', 'Bearish', 'Very Bearish'):
-                bear.append(f"Recent news sentiment is {sent_label.lower()} — near-term headwinds possible")
-            else:
-                bear.append("Macro uncertainty and sector rotation could weigh on the stock near-term")
-
-            verdict = (
-                f"{name} shows {'positive' if change >= 0 else 'negative'} momentum today "
-                f"({change:+.2f}%). Weigh the above factors against your own risk tolerance."
-            )
-            return {"bull": bull[:3], "bear": bear[:3], "verdict": verdict}
+            return _offline_bull_bear(metrics, news, sentiment)
         client = _get_ai_client()
         prompt = f"""Analyze {metrics['name']} ({ticker.upper()}) and return a JSON object with exactly this structure:
 {{
@@ -874,15 +880,25 @@ Data:
 - News sentiment: {sentiment['label']} ({sentiment['positive']} pos, {sentiment['negative']} neg)
 - Headlines: {headlines}
 
-Return ONLY valid JSON, no markdown fences."""
-        resp = client.chat.completions.create(
-            model=AI_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=300, temperature=0.6,
-        )
-        text = resp.choices[0].message.content.strip()
-        text = text.replace("```json", "").replace("```", "").strip()
-        return json.loads(text)
+Return ONLY valid JSON, no markdown fences, no trailing commas."""
+        for attempt in range(2):
+            try:
+                resp = client.chat.completions.create(
+                    model=AI_MODEL,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=300, temperature=0.4 if attempt == 0 else 0.2,
+                )
+                text = resp.choices[0].message.content.strip()
+                text = text.replace("```json", "").replace("```", "").strip()
+                return json.loads(text)
+            except json.JSONDecodeError:
+                if attempt == 1:
+                    raise
+                continue
+            except Exception:
+                break  # rate limit or network error — fall through to offline
+        # Fallback: return the offline version
+        return _offline_bull_bear(metrics, news, sentiment)
     try:
         return get_or_fetch(f"bull-bear:{ticker}", _fetch, ttl=600)
     except Exception as e:
@@ -901,7 +917,7 @@ def stock_chat(request: Request, ticker: str, req: ChatRequest):
             metrics = get_key_metrics(ticker)
             last_q = req.messages[-1].content if req.messages else ""
             reply = (
-                f"AI Chat requires an API key (add GEMINI_API_KEY to your .env file). "
+                f"AI Chat requires an API key (add GROQ_API_KEY to your .env file). "
                 f"Here's what I can tell you about {ticker.upper()} from live data: "
                 f"Price ${metrics.get('price','N/A')}, {metrics.get('change_pct',0):+.2f}% today, "
                 f"P/E {metrics.get('pe_ratio','N/A')}, Market Cap {metrics.get('market_cap_fmt','N/A')}, "
@@ -915,10 +931,18 @@ Available context: Price=${ctx.get('price','N/A')}, Change={ctx.get('change_pct'
 Answer questions about this stock concisely. Always add a disclaimer that this is not financial advice."""
         messages = [{"role": "system", "content": sys_prompt}]
         messages += [{"role": m.role, "content": m.content} for m in req.messages]
-        resp = client.chat.completions.create(
-            model=AI_MODEL, messages=messages, max_tokens=400, temperature=0.7,
-        )
-        return {"reply": resp.choices[0].message.content.strip()}
+        try:
+            resp = client.chat.completions.create(
+                model=AI_MODEL, messages=messages, max_tokens=400, temperature=0.7,
+            )
+            return {"reply": resp.choices[0].message.content.strip()}
+        except Exception:
+            metrics = get_key_metrics(ticker)
+            return {"reply": (
+                f"AI temporarily unavailable. Here's live data for {ticker.upper()}: "
+                f"Price ${metrics.get('price','N/A')}, {metrics.get('change_pct',0):+.2f}% today, "
+                f"P/E {metrics.get('pe_ratio','N/A')}, Market Cap {metrics.get('market_cap_fmt','N/A')}."
+            )}
     except HTTPException:
         raise
     except Exception as e:

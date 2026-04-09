@@ -253,7 +253,7 @@ function AppShell() {
       )}
 
       <footer className="app-footer">
-        Data from Yahoo Finance &middot; News from NewsAPI &middot; AI by OpenAI &middot; Not financial advice
+        Data from Yahoo Finance &middot; News from NewsAPI &middot; AI by Groq &middot; Not financial advice
       </footer>
     </div>
   );

@@ -129,6 +129,6 @@ def _offline_summary(metrics: dict, sentiment: dict) -> str:
         "",
         f"### Recommendation: {rec}",
         "",
-        "_Note: Add GEMINI_API_KEY to .env for AI-powered analysis. This is not financial advice._",
+        "_Note: Add GROQ_API_KEY to .env for AI-powered analysis. This is not financial advice._",
     ]
     return "\n".join(lines)
