@@ -104,7 +104,19 @@ body {
   gap: 1rem;
   align-items: start;
 }
-.dashboard-main { min-width: 0; overflow-x: hidden; }
+.dashboard-main {
+  min-width: 0;
+  overflow-x: hidden;
+  max-width: 100%;
+  width: 100%;
+}
+
+/* Ensure all glass/card containers don't overflow on mobile */
+.glass-card,
+.card {
+  max-width: 100%;
+  overflow-x: auto;
+}
 
 /* ── Watchlist Rail ────────────────────────────────────────────── */
 .watchlist-rail {
@@ -3681,17 +3693,16 @@ tr.alert-triggered {
 
 /* Upgrades table */
 .analyst-upgrades { margin-top: 0.75rem; }
+.analyst-upgrades {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .analyst-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.82rem;
   margin-top: 0.5rem;
-  table-layout: auto;
-}
-
-.analyst-upgrades {
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
 }
 .analyst-table th {
   text-align: left;
@@ -3966,6 +3977,29 @@ tr.alert-triggered {
     font-size: 0.72rem;
     min-width: max-content;
     white-space: nowrap;
+  }
+
+  /* ── Contain wide components on mobile ──────────────────── */
+  .glass-card,
+  .card {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .analyst-card,
+  .financials-card,
+  .peer-card,
+  .ownership-card,
+  .dividend-card {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  .analyst-top-row,
+  .analyst-breakdown,
+  .analyst-bar-legend {
+    max-width: 100%;
+    overflow-x: auto;
   }
 
   /* ── Analyst Ratings ──────────────────────────────────────── */
