@@ -880,20 +880,32 @@ Data:
 - News sentiment: {sentiment['label']} ({sentiment['positive']} pos, {sentiment['negative']} neg)
 - Headlines: {headlines}
 
-Return ONLY valid JSON, no markdown fences, no trailing commas."""
+Return ONLY valid JSON, no markdown fences, no trailing commas. Keep each point under 120 characters."""
         for attempt in range(2):
             try:
                 resp = client.chat.completions.create(
                     model=AI_MODEL,
                     messages=[{"role": "user", "content": prompt}],
-                    max_tokens=300, temperature=0.4 if attempt == 0 else 0.2,
+                    max_tokens=300, temperature=0.3 if attempt == 0 else 0.1,
                 )
                 text = resp.choices[0].message.content.strip()
                 text = text.replace("```json", "").replace("```", "").strip()
-                return json.loads(text)
+                # Repair common JSON issues from LLMs
+                import re as _re
+                text = _re.sub(r',\s*([}\]])', r'\1', text)  # trailing commas
+                text = _re.sub(r'(?<!\\)\n', ' ', text)  # unescaped newlines inside strings
+                # Try to extract JSON object if there's extra text around it
+                m = _re.search(r'\{.*\}', text, _re.DOTALL)
+                if m:
+                    text = m.group(0)
+                parsed = json.loads(text)
+                # Validate structure
+                if isinstance(parsed.get("bull"), list) and isinstance(parsed.get("bear"), list):
+                    return parsed
+                raise json.JSONDecodeError("bad structure", text, 0)
             except json.JSONDecodeError:
                 if attempt == 1:
-                    raise
+                    break
                 continue
             except Exception:
                 break  # rate limit or network error — fall through to offline
