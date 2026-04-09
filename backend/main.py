@@ -39,10 +39,6 @@ async def health_check():
 async def api_health_check():
     return {"status": "ok"}
 
-@app.get("/api/cache/stats")
-def cache_stats_endpoint(user: dict = Depends(get_current_user)):
-    return cache_stats()
-
 # ── Rate limiting ───────────────────────────────────────────────────────────
 
 def _get_real_ip(request: Request) -> str:
@@ -102,6 +98,11 @@ def get_current_user(authorization: Optional[str] = Header(None)) -> dict:
     if not payload:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
     return {"user_id": payload["sub"], "username": payload["username"]}
+
+
+@app.get("/api/cache/stats")
+def cache_stats_endpoint(user: dict = Depends(get_current_user)):
+    return cache_stats()
 
 
 # ── Request models ──────────────────────────────────────────────────────────
