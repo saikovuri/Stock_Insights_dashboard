@@ -751,21 +751,21 @@ def why_moving(request: Request, ticker: str):
     """AI explanation of why a stock is moving today."""
     ticker = _valid_ticker(ticker)
     def _fetch():
-        from openai import OpenAI
-        from config import OPENAI_API_KEY
+        from config import AI_API_KEY, AI_MODEL
+        from ai_summary import _get_ai_client
         metrics = get_key_metrics(ticker)
         news = fetch_news(ticker, company_name=metrics.get("name", ""))
         headlines = "\n".join(f"- {a['title']}" for a in news[:6])
         change_pct = metrics.get("change_pct", 0)
         direction = "up" if change_pct >= 0 else "down"
-        if not OPENAI_API_KEY:
+        if not AI_API_KEY:
             top_headline = news[0]['title'] if news else None
             explanation = f"{metrics['name']} ({ticker.upper()}) is {direction} {abs(change_pct):.2f}% today at ${metrics['price']:.2f}."
             if top_headline:
                 explanation += f" Most recent headline: \"{top_headline}\"."
-            explanation += " No AI analysis available — add an OPENAI_API_KEY to your .env to enable full explanations."
+            explanation += " No AI analysis available — add a GEMINI_API_KEY to your .env to enable full explanations."
             return {"explanation": explanation, "change_pct": change_pct}
-        client = OpenAI(api_key=OPENAI_API_KEY)
+        client = _get_ai_client()
         prompt = f"""{metrics['name']} ({ticker.upper()}) is {direction} {abs(change_pct):.2f}% today (price: ${metrics['price']}).
 
 Recent headlines:
@@ -773,7 +773,7 @@ Recent headlines:
 
 In 2-3 short sentences, explain the most likely reason for today's move using only the available context. Be specific. If no clear catalyst is visible, say so clearly. Do not fabricate reasons."""
         resp = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=AI_MODEL,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=150, temperature=0.5,
         )
@@ -790,14 +790,14 @@ def bull_bear(request: Request, ticker: str):
     """Structured bull vs bear case."""
     ticker = _valid_ticker(ticker)
     def _fetch():
-        from openai import OpenAI
-        from config import OPENAI_API_KEY
+        from config import AI_API_KEY, AI_MODEL
+        from ai_summary import _get_ai_client
         import json
         metrics = get_key_metrics(ticker)
         news = fetch_news(ticker, company_name=metrics.get("name", ""))
         sentiment = aggregate_sentiment(news)
         headlines = "\n".join(f"- {a['title']}" for a in news[:8])
-        if not OPENAI_API_KEY:
+        if not AI_API_KEY:
             name = metrics.get('name', ticker.upper())
             price = metrics.get('price', 0)
             change = metrics.get('change_pct', 0)
@@ -857,7 +857,7 @@ def bull_bear(request: Request, ticker: str):
                 f"({change:+.2f}%). Weigh the above factors against your own risk tolerance."
             )
             return {"bull": bull[:3], "bear": bear[:3], "verdict": verdict}
-        client = OpenAI(api_key=OPENAI_API_KEY)
+        client = _get_ai_client()
         prompt = f"""Analyze {metrics['name']} ({ticker.upper()}) and return a JSON object with exactly this structure:
 {{
   "bull": ["point 1", "point 2", "point 3"],
@@ -875,7 +875,7 @@ Data:
 
 Return ONLY valid JSON, no markdown fences."""
         resp = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=AI_MODEL,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=300, temperature=0.6,
         )
@@ -894,20 +894,20 @@ def stock_chat(request: Request, ticker: str, req: ChatRequest):
     """AI chat with per-ticker context."""
     ticker = _valid_ticker(ticker)
     try:
-        from openai import OpenAI
-        from config import OPENAI_API_KEY
-        if not OPENAI_API_KEY:
+        from config import AI_API_KEY, AI_MODEL
+        from ai_summary import _get_ai_client
+        if not AI_API_KEY:
             metrics = get_key_metrics(ticker)
             last_q = req.messages[-1].content if req.messages else ""
             reply = (
-                f"AI Chat requires an OpenAI API key (add OPENAI_API_KEY to your .env file). "
+                f"AI Chat requires an API key (add GEMINI_API_KEY to your .env file). "
                 f"Here's what I can tell you about {ticker.upper()} from live data: "
                 f"Price ${metrics.get('price','N/A')}, {metrics.get('change_pct',0):+.2f}% today, "
                 f"P/E {metrics.get('pe_ratio','N/A')}, Market Cap {metrics.get('market_cap_fmt','N/A')}, "
                 f"Sector: {metrics.get('sector','N/A')}."
             )
             return {"reply": reply}
-        client = OpenAI(api_key=OPENAI_API_KEY)
+        client = _get_ai_client()
         ctx = req.context or {}
         sys_prompt = f"""You are a financial analyst assistant for {ticker.upper()}.
 Available context: Price=${ctx.get('price','N/A')}, Change={ctx.get('change_pct','N/A')}%, P/E={ctx.get('pe_ratio','N/A')}, Market Cap={ctx.get('market_cap','N/A')}, Sector={ctx.get('sector','N/A')}, News sentiment={ctx.get('sentiment_label','N/A')}.
@@ -915,7 +915,7 @@ Answer questions about this stock concisely. Always add a disclaimer that this i
         messages = [{"role": "system", "content": sys_prompt}]
         messages += [{"role": m.role, "content": m.content} for m in req.messages]
         resp = client.chat.completions.create(
-            model="gpt-4o-mini", messages=messages, max_tokens=400, temperature=0.7,
+            model=AI_MODEL, messages=messages, max_tokens=400, temperature=0.7,
         )
         return {"reply": resp.choices[0].message.content.strip()}
     except HTTPException:

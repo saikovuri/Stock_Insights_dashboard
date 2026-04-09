@@ -1,13 +1,21 @@
 from openai import OpenAI
-from config import OPENAI_API_KEY, OPENAI_MODEL
+from config import AI_API_KEY, AI_MODEL, AI_BASE_URL
+
+
+def _get_ai_client():
+    """Return an OpenAI-compatible client configured for the active AI provider."""
+    kwargs = {"api_key": AI_API_KEY}
+    if AI_BASE_URL:
+        kwargs["base_url"] = AI_BASE_URL
+    return OpenAI(**kwargs)
 
 
 def get_ai_summary(metrics: dict, sentiment: dict, news: list[dict]) -> str:
     """Generate an AI-powered stock summary and recommendation."""
-    if not OPENAI_API_KEY:
+    if not AI_API_KEY:
         return _offline_summary(metrics, sentiment)
 
-    client = OpenAI(api_key=OPENAI_API_KEY)
+    client = _get_ai_client()
 
     headlines = "\n".join(
         f"- {a['title']} (Sentiment: {a['sentiment_label']})" for a in news[:8]
@@ -43,7 +51,7 @@ Keep it actionable and under 300 words. Add a disclaimer that this is not financ
 
     try:
         response = client.chat.completions.create(
-            model=OPENAI_MODEL,
+            model=AI_MODEL,
             messages=[
                 {"role": "system", "content": "You are a professional stock analyst providing concise, data-driven insights."},
                 {"role": "user", "content": prompt},
@@ -121,6 +129,6 @@ def _offline_summary(metrics: dict, sentiment: dict) -> str:
         "",
         f"### Recommendation: {rec}",
         "",
-        "_Note: Add OPENAI_API_KEY to .env for AI-powered analysis. This is not financial advice._",
+        "_Note: Add GEMINI_API_KEY to .env for AI-powered analysis. This is not financial advice._",
     ]
     return "\n".join(lines)
