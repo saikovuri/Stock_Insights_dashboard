@@ -40,7 +40,7 @@ async def api_health_check():
     return {"status": "ok"}
 
 @app.get("/api/cache/stats")
-def cache_stats_endpoint():
+def cache_stats_endpoint(user: dict = Depends(get_current_user)):
     return cache_stats()
 
 # ── Rate limiting ───────────────────────────────────────────────────────────
@@ -65,6 +65,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
         if request.url.scheme == "https":
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         return response
@@ -333,7 +334,8 @@ def stock_summary(request: Request, ticker: str):
 
 
 @app.get("/api/stock/{ticker}/alerts")
-def stock_alerts(ticker: str):
+@limiter.limit("60/minute")
+def stock_alerts(request: Request, ticker: str):
     ticker = _valid_ticker(ticker)
     try:
         metrics = get_key_metrics(ticker)

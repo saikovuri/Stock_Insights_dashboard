@@ -104,7 +104,7 @@ body {
   gap: 1rem;
   align-items: start;
 }
-.dashboard-main { min-width: 0; }
+.dashboard-main { min-width: 0; overflow-x: hidden; }
 
 /* ── Watchlist Rail ────────────────────────────────────────────── */
 .watchlist-rail {
@@ -3686,6 +3686,12 @@ tr.alert-triggered {
   border-collapse: collapse;
   font-size: 0.82rem;
   margin-top: 0.5rem;
+  table-layout: auto;
+}
+
+.analyst-upgrades {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 .analyst-table th {
   text-align: left;
@@ -3948,12 +3954,18 @@ tr.alert-triggered {
     gap: 3px;
     padding: 3px;
     overflow-x: auto;
+    overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    flex-wrap: nowrap;
   }
+  .sub-tabs::-webkit-scrollbar { display: none; }
   .sub-tab {
-    padding: 0.4rem 0.5rem;
-    font-size: 0.7rem;
-    min-width: 0;
+    flex: 0 0 auto;
+    padding: 0.4rem 0.6rem;
+    font-size: 0.72rem;
+    min-width: max-content;
+    white-space: nowrap;
   }
 
   /* ── Analyst Ratings ──────────────────────────────────────── */
