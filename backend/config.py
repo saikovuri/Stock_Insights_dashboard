@@ -20,7 +20,7 @@ if AI_PROVIDER == "openai" and OPENAI_API_KEY:
     AI_BASE_URL = None  # default OpenAI endpoint
 elif GEMINI_API_KEY:
     AI_API_KEY = GEMINI_API_KEY
-    AI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+    AI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-lite")
     AI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 else:
     AI_API_KEY = OPENAI_API_KEY  # may be empty
