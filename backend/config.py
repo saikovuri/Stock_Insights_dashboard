@@ -3,10 +3,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# AI provider — supports "gemini" (default/free) or "openai"
-AI_PROVIDER = os.getenv("AI_PROVIDER", "gemini").lower()
+# AI provider — supports "groq" (default/free), "gemini", or "openai"
+AI_PROVIDER = os.getenv("AI_PROVIDER", "groq").lower()
 
-# Gemini (free tier)
+# Groq (free tier — Llama models)
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+
+# Gemini
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
 # OpenAI (legacy/fallback)
@@ -18,12 +21,16 @@ if AI_PROVIDER == "openai" and OPENAI_API_KEY:
     AI_API_KEY = OPENAI_API_KEY
     AI_MODEL = OPENAI_MODEL
     AI_BASE_URL = None  # default OpenAI endpoint
-elif GEMINI_API_KEY:
+elif AI_PROVIDER == "gemini" and GEMINI_API_KEY:
     AI_API_KEY = GEMINI_API_KEY
     AI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-lite")
     AI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+elif GROQ_API_KEY:
+    AI_API_KEY = GROQ_API_KEY
+    AI_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+    AI_BASE_URL = "https://api.groq.com/openai/v1"
 else:
-    AI_API_KEY = OPENAI_API_KEY  # may be empty
+    AI_API_KEY = GEMINI_API_KEY or OPENAI_API_KEY  # may be empty
     AI_MODEL = OPENAI_MODEL
     AI_BASE_URL = None
 
