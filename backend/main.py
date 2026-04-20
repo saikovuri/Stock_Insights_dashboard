@@ -37,7 +37,18 @@ async def health_check():
 
 @app.api_route("/api/health", methods=["GET", "HEAD"])
 async def api_health_check():
-    return {"status": "ok"}
+    """Health check that pings the DB to keep Supabase alive."""
+    try:
+        from database import get_db, _release, USE_PG
+        if USE_PG:
+            conn = get_db()
+            cur = conn.cursor()
+            cur.execute("SELECT 1")
+            cur.close()
+            _release(conn)
+        return {"status": "ok", "db": "connected"}
+    except Exception as e:
+        return {"status": "ok", "db": f"error: {e}"}
 
 # ── Rate limiting ───────────────────────────────────────────────────────────
 
