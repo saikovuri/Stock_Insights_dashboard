@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { fetchSummary } from '../api/stockApi';
 
+const summaryCache = new Map();
+
 // Render a single line with **bold** support and bullet detection
 function AiLine({ text }) {
   const isBullet = /^[\u2022\-\*]\s/.test(text.trimStart());
@@ -36,8 +38,13 @@ export default function AiSummary({ ticker, dataReady }) {
   useEffect(() => {
     if (!ticker || !dataReady || ticker === lastTicker.current) return;
     lastTicker.current = ticker;
+    if (summaryCache.has(ticker)) {
+      setSummary(summaryCache.get(ticker));
+      setError(null);
+      return;
+    }
     generate();
-  });
+  }, [ticker, dataReady]);
 
   const generate = async () => {
     if (!ticker) return;
@@ -46,6 +53,7 @@ export default function AiSummary({ ticker, dataReady }) {
     setSummary(null);
     try {
       const data = await fetchSummary(ticker);
+      summaryCache.set(ticker, data.summary);
       setSummary(data.summary);
     } catch (e) {
       setError(e.message);

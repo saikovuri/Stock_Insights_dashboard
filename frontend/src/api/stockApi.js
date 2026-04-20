@@ -2,6 +2,22 @@ import { API_BASE } from './config';
 
 const BASE = API_BASE;
 
+async function readError(res, fallback) {
+  let payload = null;
+
+  try {
+    payload = await res.json();
+  } catch {
+    payload = null;
+  }
+
+  if (res.status === 429) {
+    return payload?.detail || 'Rate limited. Try again in a minute.';
+  }
+
+  return payload?.detail || payload?.message || fallback;
+}
+
 function authHeaders() {
   const token = localStorage.getItem('token');
   const h = { 'Content-Type': 'application/json' };
@@ -67,7 +83,7 @@ export async function fetchNews(ticker) {
 
 export async function fetchSummary(ticker) {
   const res = await fetch(`${BASE}/stock/${ticker}/summary`);
-  if (!res.ok) throw new Error((await res.json()).detail || 'Failed to fetch summary');
+  if (!res.ok) throw new Error(await readError(res, 'Failed to fetch summary'));
   return res.json();
 }
 
@@ -182,13 +198,13 @@ export async function fetchClosedOptions() {
 // ── New AI / analytical endpoints ────────────────────────────────
 export async function fetchWhyMoving(ticker) {
   const res = await fetch(`${BASE}/stock/${ticker}/why-moving`);
-  if (!res.ok) throw new Error((await res.json()).detail || 'Failed');
+  if (!res.ok) throw new Error(await readError(res, 'Failed'));
   return res.json();
 }
 
 export async function fetchBullBear(ticker) {
   const res = await fetch(`${BASE}/stock/${ticker}/bull-bear`);
-  if (!res.ok) throw new Error((await res.json()).detail || 'Failed');
+  if (!res.ok) throw new Error(await readError(res, 'Failed'));
   return res.json();
 }
 
@@ -198,7 +214,7 @@ export async function sendChat(ticker, messages, context) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ messages, context }),
   });
-  if (!res.ok) throw new Error((await res.json()).detail || 'Failed');
+  if (!res.ok) throw new Error(await readError(res, 'Failed'));
   return res.json();
 }
 

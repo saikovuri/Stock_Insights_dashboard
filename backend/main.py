@@ -5,6 +5,7 @@ from starlette.responses import Response
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, date as _date
+import json
 import re
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -860,6 +861,36 @@ def _offline_bull_bear(metrics, news, sentiment):
     return {"bull": bull[:3], "bear": bear[:3], "verdict": verdict}
 
 
+def _parse_bull_bear_response(text: str) -> dict:
+    """Parse and normalize LLM JSON for the bull/bear endpoint."""
+    cleaned = (text or "").strip().replace("```json", "").replace("```", "").strip()
+    cleaned = re.sub(r',\s*([}\]])', r'\1', cleaned)
+    cleaned = re.sub(r'(?<!\\)\n', ' ', cleaned)
+
+    match = re.search(r'\{.*\}', cleaned, re.DOTALL)
+    if match:
+        cleaned = match.group(0)
+
+    parsed = json.loads(cleaned)
+    bull = parsed.get("bull")
+    bear = parsed.get("bear")
+    verdict = parsed.get("verdict")
+
+    if not isinstance(bull, list) or not isinstance(bear, list):
+        raise ValueError("Invalid bull/bear structure")
+
+    normalized = {
+        "bull": [str(item).strip() for item in bull if str(item).strip()][:3],
+        "bear": [str(item).strip() for item in bear if str(item).strip()][:3],
+        "verdict": str(verdict).strip() if verdict else "",
+    }
+
+    if not normalized["bull"] or not normalized["bear"]:
+        raise ValueError("Missing bull/bear content")
+
+    return normalized
+
+
 @app.get("/api/stock/{ticker}/bull-bear")
 @limiter.limit("30/minute")
 def bull_bear(request: Request, ticker: str):
@@ -868,7 +899,6 @@ def bull_bear(request: Request, ticker: str):
     def _fetch():
         from config import AI_API_KEY, AI_MODEL
         from ai_summary import _get_ai_client
-        import json
         metrics = get_key_metrics(ticker)
         news = fetch_news(ticker, company_name=metrics.get("name", ""))
         sentiment = aggregate_sentiment(news)
@@ -897,29 +927,17 @@ Return ONLY valid JSON, no markdown fences, no trailing commas. Keep each point 
                 resp = client.chat.completions.create(
                     model=AI_MODEL,
                     messages=[{"role": "user", "content": prompt}],
+                    response_format={"type": "json_object"},
                     max_tokens=300, temperature=0.3 if attempt == 0 else 0.1,
                 )
-                text = resp.choices[0].message.content.strip()
-                text = text.replace("```json", "").replace("```", "").strip()
-                # Repair common JSON issues from LLMs
-                import re as _re
-                text = _re.sub(r',\s*([}\]])', r'\1', text)  # trailing commas
-                text = _re.sub(r'(?<!\\)\n', ' ', text)  # unescaped newlines inside strings
-                # Try to extract JSON object if there's extra text around it
-                m = _re.search(r'\{.*\}', text, _re.DOTALL)
-                if m:
-                    text = m.group(0)
-                parsed = json.loads(text)
-                # Validate structure
-                if isinstance(parsed.get("bull"), list) and isinstance(parsed.get("bear"), list):
-                    return parsed
-                raise json.JSONDecodeError("bad structure", text, 0)
-            except json.JSONDecodeError:
+                text = resp.choices[0].message.content or ""
+                return _parse_bull_bear_response(text)
+            except (json.JSONDecodeError, ValueError, TypeError):
                 if attempt == 1:
                     break
                 continue
             except Exception:
-                break  # rate limit or network error — fall through to offline
+                break  # provider/network issue — fall through to offline
         # Fallback: return the offline version
         return _offline_bull_bear(metrics, news, sentiment)
     try:
