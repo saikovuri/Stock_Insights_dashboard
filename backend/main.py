@@ -1398,3 +1398,308 @@ def batch_sparklines(request: Request, req: SparklineRequest):
     with ThreadPoolExecutor(max_workers=min(len(tickers), 8)) as pool:
         results = list(pool.map(_fetch_spark, tickers))
     return {"sparklines": {r["ticker"]: r["closes"] for r in results}}
+
+
+# ── Options analytics: IV rank, expected move, suggested structures ─────────
+
+def _nearest_expiry(expirations: list[str], min_days: int = 5, max_days: int = 60) -> Optional[str]:
+    """Pick the soonest expiry within [min_days, max_days] days from today."""
+    today = _date.today()
+    candidates = []
+    for e in expirations or []:
+        try:
+            d = datetime.strptime(e, "%Y-%m-%d").date()
+            dte = (d - today).days
+            if min_days <= dte <= max_days:
+                candidates.append((dte, e))
+        except Exception:
+            continue
+    if not candidates:
+        return None
+    candidates.sort()
+    return candidates[0][1]
+
+
+def _atm_row(df, target_strike: float):
+    """Return the row in an option-chain dataframe whose strike is closest to target."""
+    if df is None or df.empty:
+        return None
+    idx = (df["strike"] - target_strike).abs().idxmin()
+    return df.loc[idx]
+
+
+def _mid_price(row) -> Optional[float]:
+    """Mid (or last) price for an option-chain row."""
+    if row is None:
+        return None
+    try:
+        bid = float(row.get("bid") or 0)
+        ask = float(row.get("ask") or 0)
+        if bid > 0 and ask > 0:
+            return (bid + ask) / 2
+        last = float(row.get("lastPrice") or 0)
+        return last if last > 0 else None
+    except Exception:
+        return None
+
+
+@app.get("/api/stock/{ticker}/iv-rank")
+@limiter.limit("30/minute")
+def stock_iv_rank(request: Request, ticker: str):
+    """Implied volatility rank and expected move for the nearest expiry.
+
+    IV rank uses 1-year realized volatility distribution as a proxy
+    (yfinance does not expose historical IV). Returned values are clearly
+    labelled so the UI can show the caveat.
+    """
+    ticker = _valid_ticker(ticker)
+
+    def _fetch():
+        import yfinance as yf
+        import numpy as np
+
+        stock = yf.Ticker(ticker)
+        info = stock.info or {}
+        spot = info.get("currentPrice") or info.get("regularMarketPrice")
+        if not spot:
+            raise HTTPException(status_code=404, detail="Spot price unavailable")
+
+        # 1-year realized vol distribution (used as IV-rank proxy)
+        try:
+            hist = get_stock_data(ticker, period="1y", interval="1d")
+        except Exception:
+            hist = None
+
+        rv_current = rv_low = rv_high = rv_rank = None
+        if hist is not None and len(hist) > 30:
+            log_ret = np.log(hist["Close"] / hist["Close"].shift(1)).dropna()
+            rolling_rv = log_ret.rolling(20).std() * (252 ** 0.5)
+            rolling_rv = rolling_rv.dropna()
+            if not rolling_rv.empty:
+                rv_current = float(rolling_rv.iloc[-1])
+                rv_low = float(rolling_rv.min())
+                rv_high = float(rolling_rv.max())
+                if rv_high > rv_low:
+                    rv_rank = max(0.0, min(1.0, (rv_current - rv_low) / (rv_high - rv_low)))
+
+        try:
+            expirations = list(stock.options or [])
+        except Exception:
+            expirations = []
+        expiry = _nearest_expiry(expirations, min_days=5, max_days=45) or (expirations[0] if expirations else None)
+
+        atm_iv = call_iv = put_iv = None
+        expected_move_dollars = expected_move_pct = None
+        dte = None
+
+        if expiry:
+            try:
+                chain = stock.option_chain(expiry)
+                call_row = _atm_row(chain.calls, spot)
+                put_row = _atm_row(chain.puts, spot)
+                if call_row is not None:
+                    civ = float(call_row.get("impliedVolatility") or 0)
+                    call_iv = civ if civ > 0 else None
+                if put_row is not None:
+                    piv = float(put_row.get("impliedVolatility") or 0)
+                    put_iv = piv if piv > 0 else None
+                ivs = [v for v in (call_iv, put_iv) if v]
+                if ivs:
+                    atm_iv = sum(ivs) / len(ivs)
+
+                call_mid = _mid_price(call_row)
+                put_mid = _mid_price(put_row)
+                if call_mid and put_mid:
+                    expected_move_dollars = call_mid + put_mid
+                    expected_move_pct = expected_move_dollars / spot * 100
+
+                exp_date = datetime.strptime(expiry, "%Y-%m-%d").date()
+                dte = (exp_date - _date.today()).days
+            except Exception:
+                pass
+
+        verdict = None
+        if rv_rank is not None:
+            if rv_rank >= 0.7:
+                verdict = "high"
+            elif rv_rank <= 0.3:
+                verdict = "low"
+            else:
+                verdict = "mid"
+
+        earnings_date = None
+        try:
+            cal = stock.calendar
+            if isinstance(cal, dict):
+                ed = cal.get("Earnings Date") or cal.get("earningsDate")
+                if isinstance(ed, list) and ed:
+                    ed = ed[0]
+                if ed is not None:
+                    if hasattr(ed, "strftime"):
+                        earnings_date = ed.strftime("%Y-%m-%d")
+                    else:
+                        earnings_date = str(ed)[:10]
+        except Exception:
+            pass
+
+        def _pct(x):
+            return None if x is None else round(x * 100, 1)
+
+        return {
+            "spot": round(float(spot), 2),
+            "expiry": expiry,
+            "dte": dte,
+            "atm_iv_pct": _pct(atm_iv),
+            "call_iv_pct": _pct(call_iv),
+            "put_iv_pct": _pct(put_iv),
+            "rv_current_pct": _pct(rv_current),
+            "rv_low_pct": _pct(rv_low),
+            "rv_high_pct": _pct(rv_high),
+            "rv_rank": None if rv_rank is None else round(rv_rank * 100, 0),
+            "verdict": verdict,
+            "expected_move_dollars": None if expected_move_dollars is None else round(expected_move_dollars, 2),
+            "expected_move_pct": None if expected_move_pct is None else round(expected_move_pct, 2),
+            "earnings_date": earnings_date,
+            "note": "IV rank uses realized volatility as a proxy (yfinance does not expose IV history).",
+        }
+
+    try:
+        return get_or_fetch(f"iv-rank:{ticker}", _fetch, ttl=300)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/stock/{ticker}/structures")
+@limiter.limit("30/minute")
+def stock_structures(
+    request: Request,
+    ticker: str,
+    direction: str = Query("bull"),
+    budget: float = Query(500.0, ge=50.0, le=100000.0),
+):
+    """Compare a long single-leg trade against a defined-risk debit spread.
+
+    Both legs use the soonest expiry between 14 and 45 days out.
+    Structures returned: long ATM call/put, and an ATM/+5% debit call spread
+    (or ATM/-5% debit put spread for bears).
+    """
+    ticker = _valid_ticker(ticker)
+    direction = direction.lower().strip()
+    if direction not in ("bull", "bear"):
+        raise HTTPException(status_code=400, detail="direction must be 'bull' or 'bear'")
+
+    def _fetch():
+        import yfinance as yf
+
+        stock = yf.Ticker(ticker)
+        info = stock.info or {}
+        spot = info.get("currentPrice") or info.get("regularMarketPrice")
+        if not spot:
+            raise HTTPException(status_code=404, detail="Spot price unavailable")
+
+        try:
+            expirations = list(stock.options or [])
+        except Exception:
+            expirations = []
+        expiry = _nearest_expiry(expirations, min_days=14, max_days=45) or (expirations[0] if expirations else None)
+        if not expiry:
+            raise HTTPException(status_code=404, detail="No options available")
+
+        try:
+            chain = stock.option_chain(expiry)
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Option chain unavailable: {e}")
+
+        df = chain.calls if direction == "bull" else chain.puts
+        if df is None or df.empty:
+            raise HTTPException(status_code=404, detail="Empty option chain")
+
+        long_row = _atm_row(df, spot)
+        long_strike = float(long_row.get("strike"))
+        long_mid = _mid_price(long_row)
+
+        short_target = spot * (1.05 if direction == "bull" else 0.95)
+        short_row = _atm_row(df, short_target)
+        short_strike = float(short_row.get("strike"))
+        short_mid = _mid_price(short_row)
+
+        exp_date = datetime.strptime(expiry, "%Y-%m-%d").date()
+        dte = (exp_date - _date.today()).days
+        leg_label = "Call" if direction == "bull" else "Put"
+        spread_label = "Bull Call" if direction == "bull" else "Bear Put"
+
+        structures = []
+
+        # 1) Long single-leg
+        if long_mid:
+            cost_per = long_mid * 100
+            contracts = max(0, int(budget // cost_per))
+            if contracts > 0:
+                if direction == "bull":
+                    breakeven = long_strike + long_mid
+                    move_needed_pct = (breakeven - spot) / spot * 100
+                    max_profit = "Unlimited"
+                else:
+                    breakeven = long_strike - long_mid
+                    move_needed_pct = (spot - breakeven) / spot * 100
+                    max_profit = round((long_strike - long_mid) * 100 * contracts, 2)
+                structures.append({
+                    "type": f"Long {leg_label}",
+                    "legs": [{"action": "BUY", "strike": long_strike, "mid": round(long_mid, 2)}],
+                    "contracts": contracts,
+                    "cost": round(cost_per * contracts, 2),
+                    "max_loss": round(cost_per * contracts, 2),
+                    "max_profit": max_profit,
+                    "breakeven": round(breakeven, 2),
+                    "move_needed_pct": round(move_needed_pct, 2),
+                    "notes": "Pure directional bet. Pays for full IV + theta. Needs direction AND timing.",
+                })
+
+        # 2) Debit spread (defined risk)
+        if long_mid and short_mid and short_strike != long_strike:
+            net_debit = long_mid - short_mid
+            if net_debit > 0:
+                width = abs(short_strike - long_strike)
+                cost_per = net_debit * 100
+                max_profit_per = (width - net_debit) * 100
+                contracts = max(0, int(budget // cost_per))
+                if contracts > 0:
+                    if direction == "bull":
+                        breakeven = long_strike + net_debit
+                        move_needed_pct = (breakeven - spot) / spot * 100
+                    else:
+                        breakeven = long_strike - net_debit
+                        move_needed_pct = (spot - breakeven) / spot * 100
+                    structures.append({
+                        "type": f"{spread_label} Debit Spread",
+                        "legs": [
+                            {"action": "BUY", "strike": long_strike, "mid": round(long_mid, 2)},
+                            {"action": "SELL", "strike": short_strike, "mid": round(short_mid, 2)},
+                        ],
+                        "contracts": contracts,
+                        "cost": round(cost_per * contracts, 2),
+                        "max_loss": round(cost_per * contracts, 2),
+                        "max_profit": round(max_profit_per * contracts, 2),
+                        "breakeven": round(breakeven, 2),
+                        "move_needed_pct": round(move_needed_pct, 2),
+                        "notes": "Capped profit, but cheaper, lower theta bleed, and survives a sluggish move.",
+                    })
+
+        return {
+            "ticker": ticker,
+            "spot": round(float(spot), 2),
+            "direction": direction,
+            "expiry": expiry,
+            "dte": dte,
+            "budget": budget,
+            "structures": structures,
+        }
+
+    try:
+        return get_or_fetch(f"structures:{ticker}:{direction}:{int(budget)}", _fetch, ttl=120)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

@@ -21,6 +21,9 @@ import AnalystRatings from './components/AnalystRatings';
 import Financials from './components/Financials';
 import Ownership from './components/Ownership';
 import DividendHistory from './components/DividendHistory';
+import IvRank from './components/IvRank';
+import Structures from './components/Structures';
+import PreTradeChecklist from './components/PreTradeChecklist';
 import { fetchMetrics, fetchHistory, fetchNews, fetchAlerts, fetchEvents } from './api/stockApi';
 
 const VALID_TABS = ['dashboard', 'screener', 'portfolio', 'tools'];
@@ -197,6 +200,8 @@ function AppShell() {
                 {/* ── Analysis ────────────────────────────────── */}
                 {subTab === 'analysis' && (
                   <>
+                    <IvRank ticker={ticker} />
+                    <Structures ticker={ticker} />
                     <AnalystRatings ticker={ticker} />
                     <PeerBenchmark ticker={ticker} />
                     <div className="two-column">
@@ -246,6 +251,7 @@ function AppShell() {
           <h2 className="tools-heading">🧰 Trading Tools</h2>
           <p className="tools-subheading">Calculators and simulators to help plan your trades.</p>
           <div className="tools-grid">
+            <PreTradeChecklist />
             <PositionCalculator />
             <DcaSimulator />
           </div>

@@ -269,3 +269,16 @@ export async function fetchBatchSparklines(tickers) {
   if (!res.ok) throw new Error((await res.json()).detail || 'Failed');
   return res.json();
 }
+
+export async function fetchIvRank(ticker) {
+  const res = await fetch(`${BASE}/stock/${ticker}/iv-rank`);
+  if (!res.ok) throw new Error(await readError(res, 'Failed to fetch IV rank'));
+  return res.json();
+}
+
+export async function fetchStructures(ticker, direction, budget) {
+  const params = new URLSearchParams({ direction, budget: String(budget) });
+  const res = await fetch(`${BASE}/stock/${ticker}/structures?${params}`);
+  if (!res.ok) throw new Error(await readError(res, 'Failed to fetch structures'));
+  return res.json();
+}
