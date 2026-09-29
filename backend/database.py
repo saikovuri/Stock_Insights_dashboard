@@ -170,6 +170,69 @@ def init_db():
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS notifications (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id),
+                kind TEXT NOT NULL,
+                ticker TEXT,
+                title TEXT NOT NULL,
+                body TEXT,
+                data TEXT,
+                dedup_key TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                read_at TIMESTAMPTZ,
+                UNIQUE(user_id, dedup_key)
+            )
+        """)
+        cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS ntfy_topic TEXT")
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS iv_history (
+                ticker TEXT NOT NULL,
+                day TEXT NOT NULL,
+                iv DOUBLE PRECISION NOT NULL,
+                PRIMARY KEY (ticker, day)
+            )
+        """)
+        cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS trader_profile TEXT")
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS user_alerts (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id),
+                ticker TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                value DOUBLE PRECISION NOT NULL,
+                note TEXT,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                triggered_at TIMESTAMPTZ
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS journal (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id),
+                ticker TEXT NOT NULL,
+                side TEXT NOT NULL DEFAULT 'long',
+                shares DOUBLE PRECISION NOT NULL,
+                entry_date TEXT NOT NULL,
+                entry_price DOUBLE PRECISION NOT NULL,
+                exit_date TEXT,
+                exit_price DOUBLE PRECISION,
+                stop DOUBLE PRECISION,
+                target DOUBLE PRECISION,
+                setup TEXT,
+                notes TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS kv_cache (
+                key TEXT PRIMARY KEY,
+                data TEXT NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
         conn.commit()
     else:
         # SQLite schema
@@ -256,7 +319,66 @@ def init_db():
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 FOREIGN KEY (user_id) REFERENCES users(id)
             );
+            CREATE TABLE IF NOT EXISTS notifications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                kind TEXT NOT NULL,
+                ticker TEXT,
+                title TEXT NOT NULL,
+                body TEXT,
+                data TEXT,
+                dedup_key TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                read_at TEXT,
+                FOREIGN KEY (user_id) REFERENCES users(id),
+                UNIQUE(user_id, dedup_key)
+            );
+            CREATE TABLE IF NOT EXISTS iv_history (
+                ticker TEXT NOT NULL,
+                day TEXT NOT NULL,
+                iv REAL NOT NULL,
+                PRIMARY KEY (ticker, day)
+            );
+            CREATE TABLE IF NOT EXISTS user_alerts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                ticker TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                value REAL NOT NULL,
+                note TEXT,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                triggered_at TEXT,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            );
+            CREATE TABLE IF NOT EXISTS journal (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                ticker TEXT NOT NULL,
+                side TEXT NOT NULL DEFAULT 'long',
+                shares REAL NOT NULL,
+                entry_date TEXT NOT NULL,
+                entry_price REAL NOT NULL,
+                exit_date TEXT,
+                exit_price REAL,
+                stop REAL,
+                target REAL,
+                setup TEXT,
+                notes TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            );
+            CREATE TABLE IF NOT EXISTS kv_cache (
+                key TEXT PRIMARY KEY,
+                data TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
         """)
+        cols = [r[1] for r in cur.execute("PRAGMA table_info(users)").fetchall()]
+        if "ntfy_topic" not in cols:
+            cur.execute("ALTER TABLE users ADD COLUMN ntfy_topic TEXT")
+        if "trader_profile" not in cols:
+            cur.execute("ALTER TABLE users ADD COLUMN trader_profile TEXT")
         conn.commit()
 
     # ── Indexes (idempotent for both PG and SQLite) ──
@@ -271,6 +393,9 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_closed_options_user ON closed_options(user_id)",
         "CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id)",
         "CREATE INDEX IF NOT EXISTS idx_refresh_tokens_token ON refresh_tokens(token)",
+        "CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_user_alerts_active ON user_alerts(active)",
+        "CREATE INDEX IF NOT EXISTS idx_journal_user ON journal(user_id)",
     ]
     for stmt in idx_stmts:
         idx.execute(stmt)
@@ -691,6 +816,268 @@ def cleanup_expired_refresh_tokens() -> None:
     cur.execute(f"DELETE FROM refresh_tokens WHERE expires_at < {PH}", (now,))
     conn.commit()
     _release(conn)
+
+
+# ── Notifications ─────────────────────────────────────────────────────────────────
+
+def add_notification(user_id: int, kind: str, title: str, body: str, dedup_key: str,
+                     ticker: str | None = None, data: dict | None = None) -> bool:
+    """Insert unless (user_id, dedup_key) exists. Returns True if a row was inserted."""
+    conn = get_db()
+    cur = conn.cursor()
+    verb = "INSERT INTO" if USE_PG else "INSERT OR IGNORE INTO"
+    suffix = " ON CONFLICT (user_id, dedup_key) DO NOTHING" if USE_PG else ""
+    try:
+        cur.execute(
+            f"{verb} notifications (user_id, kind, ticker, title, body, data, dedup_key) "
+            f"VALUES ({PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH}){suffix}",
+            (user_id, kind, ticker, title, body, json.dumps(data) if data else None, dedup_key),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        _release(conn)
+
+
+def delete_notification(user_id: int, dedup_key: str) -> None:
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(f"DELETE FROM notifications WHERE user_id={PH} AND dedup_key={PH}", (user_id, dedup_key))
+    conn.commit()
+    _release(conn)
+
+
+def _decode_notification(row: dict) -> dict:
+    if "data" in row:
+        row["data"] = json.loads(row["data"]) if row["data"] else None
+    for k in ("created_at", "read_at"):
+        if row.get(k) is not None:
+            row[k] = str(row[k])
+    return row
+
+
+def get_notification(user_id: int, dedup_key: str) -> dict | None:
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(f"SELECT * FROM notifications WHERE user_id={PH} AND dedup_key={PH}", (user_id, dedup_key))
+    row = _fetchone(cur)
+    _release(conn)
+    return _decode_notification(row) if row else None
+
+
+def list_notifications(user_id: int, limit: int = 50) -> list[dict]:
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        f"SELECT id, kind, ticker, title, body, created_at, read_at FROM notifications "
+        f"WHERE user_id={PH} ORDER BY created_at DESC, id DESC LIMIT {PH}",
+        (user_id, limit),
+    )
+    rows = _fetchall(cur)
+    _release(conn)
+    return [_decode_notification(r) for r in rows]
+
+
+def mark_notifications_read(user_id: int) -> None:
+    conn = get_db()
+    cur = conn.cursor()
+    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    cur.execute(f"UPDATE notifications SET read_at={PH} WHERE user_id={PH} AND read_at IS NULL", (now, user_id))
+    conn.commit()
+    _release(conn)
+
+
+def delete_old_notifications(days: int = 30) -> None:
+    from datetime import timedelta
+    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(f"DELETE FROM notifications WHERE created_at < {PH}", (cutoff,))
+    conn.commit()
+    _release(conn)
+
+
+def get_all_user_tickers() -> dict[int, set[str]]:
+    """Map of user_id -> tickers they hold or watch (for scheduled alerts/briefings)."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT user_id, ticker FROM holdings UNION SELECT user_id, ticker FROM watchlist")
+    rows = _fetchall(cur)
+    _release(conn)
+    out: dict[int, set[str]] = {}
+    for r in rows:
+        out.setdefault(r["user_id"], set()).add(r["ticker"].upper())
+    return out
+
+
+def get_ntfy_topic(user_id: int) -> str | None:
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(f"SELECT ntfy_topic FROM users WHERE id={PH}", (user_id,))
+    row = _fetchone(cur)
+    _release(conn)
+    return row["ntfy_topic"] if row else None
+
+
+def set_ntfy_topic(user_id: int, topic: str | None) -> None:
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(f"UPDATE users SET ntfy_topic={PH} WHERE id={PH}", (topic, user_id))
+    conn.commit()
+    _release(conn)
+
+
+# ── Implied volatility history (for true IV rank) ─────────────────────────────────
+
+def record_iv(ticker: str, day: str, iv: float) -> None:
+    conn = get_db()
+    cur = conn.cursor()
+    sql = (f"INSERT INTO iv_history (ticker, day, iv) VALUES ({PH}, {PH}, {PH}) "
+           + ("ON CONFLICT (ticker, day) DO UPDATE SET iv = EXCLUDED.iv" if USE_PG
+              else "ON CONFLICT (ticker, day) DO UPDATE SET iv = excluded.iv"))
+    try:
+        cur.execute(sql, (ticker.upper(), day, iv))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        _release(conn)
+
+
+def get_iv_history(ticker: str, since_day: str) -> list[float]:
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(f"SELECT iv FROM iv_history WHERE ticker={PH} AND day >= {PH} ORDER BY day",
+                (ticker.upper(), since_day))
+    rows = _fetchall(cur)
+    _release(conn)
+    return [float(r["iv"]) for r in rows]
+
+
+# ── Generic helpers ──────────────────────────────────────────────────────────────────
+
+def _run(sql: str, params: tuple = (), fetch: str | None = None):
+    """Execute one statement; fetch='one'|'all' returns rows, otherwise returns rowcount/lastrowid."""
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        cur.execute(sql, params)
+        if fetch == "one":
+            result = _fetchone(cur)
+        elif fetch == "all":
+            result = _fetchall(cur)
+        else:
+            result = cur.rowcount
+        conn.commit()
+        return result
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        _release(conn)
+
+
+def _stringify(rows):
+    for r in rows:
+        for k, v in r.items():
+            if isinstance(v, datetime):
+                r[k] = v.isoformat()
+    return rows
+
+
+# ── Trader profile ───────────────────────────────────────────────────────────────────
+
+def get_trader_profile(user_id: int) -> str | None:
+    row = _run(f"SELECT trader_profile FROM users WHERE id={PH}", (user_id,), "one")
+    return row["trader_profile"] if row else None
+
+
+def set_trader_profile(user_id: int, profile: str) -> None:
+    _run(f"UPDATE users SET trader_profile={PH} WHERE id={PH}", (profile, user_id))
+
+
+# ── Custom price/indicator alerts ─────────────────────────────────────────────────
+
+def list_user_alerts(user_id: int, ticker: str | None = None) -> list[dict]:
+    if ticker:
+        rows = _run(f"SELECT * FROM user_alerts WHERE user_id={PH} AND ticker={PH} ORDER BY id DESC",
+                    (user_id, ticker.upper()), "all")
+    else:
+        rows = _run(f"SELECT * FROM user_alerts WHERE user_id={PH} ORDER BY active DESC, id DESC", (user_id,), "all")
+    return _stringify(rows)
+
+
+def count_active_alerts(user_id: int) -> int:
+    row = _run(f"SELECT COUNT(*) AS n FROM user_alerts WHERE user_id={PH} AND active=1", (user_id,), "one")
+    return int(row["n"]) if row else 0
+
+
+def add_user_alert(user_id: int, ticker: str, kind: str, value: float, note: str | None) -> None:
+    _run(f"INSERT INTO user_alerts (user_id, ticker, kind, value, note) VALUES ({PH}, {PH}, {PH}, {PH}, {PH})",
+         (user_id, ticker.upper(), kind, value, note))
+
+
+def delete_user_alert(user_id: int, alert_id: int) -> bool:
+    return _run(f"DELETE FROM user_alerts WHERE id={PH} AND user_id={PH}", (alert_id, user_id)) > 0
+
+
+def get_active_alerts() -> list[dict]:
+    return _run("SELECT * FROM user_alerts WHERE active=1", (), "all")
+
+
+def mark_alert_triggered(alert_id: int) -> bool:
+    """Returns False if another worker already triggered it."""
+    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    return _run(f"UPDATE user_alerts SET active=0, triggered_at={PH} WHERE id={PH} AND active=1",
+                (now, alert_id)) > 0
+
+
+# ── Trade journal ────────────────────────────────────────────────────────────────────
+
+_JOURNAL_FIELDS = ("ticker", "side", "shares", "entry_date", "entry_price", "exit_date", "exit_price",
+                   "stop", "target", "setup", "notes")
+
+
+def list_journal(user_id: int) -> list[dict]:
+    return _stringify(_run(f"SELECT * FROM journal WHERE user_id={PH} ORDER BY entry_date DESC, id DESC",
+                           (user_id,), "all"))
+
+
+def add_journal(user_id: int, entry: dict) -> None:
+    cols = ", ".join(_JOURNAL_FIELDS)
+    ph = ", ".join([PH] * (len(_JOURNAL_FIELDS) + 1))
+    _run(f"INSERT INTO journal (user_id, {cols}) VALUES ({ph})",
+         (user_id, *[entry.get(f) for f in _JOURNAL_FIELDS]))
+
+
+def update_journal(user_id: int, entry_id: int, entry: dict) -> bool:
+    sets = ", ".join(f"{f}={PH}" for f in _JOURNAL_FIELDS)
+    return _run(f"UPDATE journal SET {sets} WHERE id={PH} AND user_id={PH}",
+                (*[entry.get(f) for f in _JOURNAL_FIELDS], entry_id, user_id)) > 0
+
+
+def delete_journal(user_id: int, entry_id: int) -> bool:
+    return _run(f"DELETE FROM journal WHERE id={PH} AND user_id={PH}", (entry_id, user_id)) > 0
+
+
+# ── Persistent key/value cache (survives restarts; used for nightly scans) ──────────
+
+def kv_get(key: str) -> dict | None:
+    row = _run(f"SELECT data, updated_at FROM kv_cache WHERE key={PH}", (key,), "one")
+    if not row:
+        return None
+    return {"data": json.loads(row["data"]), "updated_at": str(row["updated_at"])}
+
+
+def kv_set(key: str, data) -> None:
+    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    _run(f"INSERT INTO kv_cache (key, data, updated_at) VALUES ({PH}, {PH}, {PH}) "
+         f"ON CONFLICT (key) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at",
+         (key, json.dumps(data), now))
 
 
 # Initialize DB on import

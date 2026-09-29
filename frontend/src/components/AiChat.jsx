@@ -1,7 +1,19 @@
 import { useState, useRef, useEffect } from 'react';
+import { useAuth } from '../AuthContext';
 import { sendChat } from '../api/stockApi';
 
-export default function AiChat({ ticker, context }) {
+const TOOL_LABELS = {
+  get_stock_snapshot: 'quote & technicals',
+  get_news: 'news',
+  get_analyst_view: 'analysts',
+  get_fundamentals: 'fundamentals',
+  get_sec_filings: 'SEC filings',
+  get_peers: 'peers',
+  get_my_portfolio: 'your portfolio',
+};
+
+export default function AiChat({ ticker, onSignIn }) {
+  const { user } = useAuth();
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -27,8 +39,9 @@ export default function AiChat({ ticker, context }) {
     setInput('');
     setLoading(true);
     try {
-      const data = await sendChat(ticker, newMsgs, context);
-      setMessages([...newMsgs, { role: 'assistant', content: data.reply }]);
+      // Only role/content go to the server; tool metadata stays client-side
+      const data = await sendChat(ticker, newMsgs.map(({ role, content }) => ({ role, content })).slice(-20));
+      setMessages([...newMsgs, { role: 'assistant', content: data.reply, tools: data.tools_used }]);
     } catch (e) {
       setMessages([...newMsgs, { role: 'assistant', content: `Error: ${e.message}` }]);
     } finally {
@@ -39,9 +52,19 @@ export default function AiChat({ ticker, context }) {
   const suggestions = [
     `What is the bear case for ${ticker}?`,
     `Compare ${ticker} valuation to peers`,
-    `What catalysts could move ${ticker} in the next quarter?`,
-    `Summarize the revenue growth trend`,
+    `Any insider trades or recent SEC filings for ${ticker}?`,
+    `How would adding ${ticker} change my portfolio's risk?`,
   ];
+
+  if (!user) {
+    return (
+      <div className="card ai-chat-card">
+        <h3>💬 Ask AI about {ticker}</h3>
+        <p className="empty-state">Sign in to chat with an AI analyst that pulls live quotes, news, filings and your portfolio.</p>
+        {onSignIn && <button className="btn-primary btn-sm" onClick={onSignIn}>Sign in</button>}
+      </div>
+    );
+  }
 
   return (
     <div className="card ai-chat-card">
@@ -67,6 +90,11 @@ export default function AiChat({ ticker, context }) {
               <div key={i} className={`chat-msg chat-msg-${m.role}`}>
                 <span className="chat-role">{m.role === 'user' ? 'You' : 'AI'}</span>
                 <span className="chat-content">{m.content}</span>
+                {m.tools?.length > 0 && (
+                  <span className="chat-tools">
+                    Used: {[...new Set(m.tools)].map(t => TOOL_LABELS[t] || t).join(', ')}
+                  </span>
+                )}
               </div>
             ))}
             {loading && (

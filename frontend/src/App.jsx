@@ -4,29 +4,40 @@ import { ThemeProvider, useTheme } from './ThemeContext';
 import LoginPage from './components/LoginPage';
 import SearchBar from './components/SearchBar';
 import KeyMetrics from './components/KeyMetrics';
-import PriceChart from './components/PriceChart';
+import PriceChart from './components/CandleChart';
 import NewsSentiment from './components/NewsSentiment';
-import AiSummary from './components/AiSummary';
+import AiBrief from './components/AiBrief';
 import Alerts from './components/Alerts';
 import Portfolio from './components/Portfolio';
 import Screener from './components/Screener';
-import WhyMoving from './components/WhyMoving';
-import BullBear from './components/BullBear';
 import AiChat from './components/AiChat';
 import PeerBenchmark from './components/PeerBenchmark';
 import PositionCalculator from './components/PositionCalculator';
-import DcaSimulator from './components/DcaSimulator';
 import WatchlistRail from './components/WatchlistRail';
 import AnalystRatings from './components/AnalystRatings';
 import Financials from './components/Financials';
 import Ownership from './components/Ownership';
 import DividendHistory from './components/DividendHistory';
 import IvRank from './components/IvRank';
+import IncomeIdeas from './components/IncomeIdeas';
 import Structures from './components/Structures';
 import PreTradeChecklist from './components/PreTradeChecklist';
+import NotificationBell from './components/NotificationBell';
+import DailyBriefing from './components/DailyBriefing';
+import MarketOverview from './components/MarketOverview';
+import PriceAlerts from './components/PriceAlerts';
+import EarningsIntel from './components/EarningsIntel';
+import SetupScanner from './components/SetupScanner';
+import RelativeStrength from './components/RelativeStrength';
+import Journal from './components/Journal';
+import LongTermView from './components/LongTermView';
+import { ProfileProvider, useProfile, PROFILES } from './ProfileContext';
 import { fetchMetrics, fetchHistory, fetchNews, fetchAlerts, fetchEvents } from './api/stockApi';
 
-const VALID_TABS = ['dashboard', 'screener', 'portfolio', 'tools'];
+const VALID_TABS = ['dashboard', 'setups', 'screener', 'portfolio', 'journal', 'tools'];
+const SUB_TAB_LABELS = {
+  overview: '📋 Overview', analysis: '🔬 Analysis', fundamentals: '📑 Fundamentals', news: '📰 News',
+};
 function getInitialTab() {
   const hash = window.location.hash.slice(1);
   return VALID_TABS.includes(hash) ? hash : 'dashboard';
@@ -35,6 +46,7 @@ function getInitialTab() {
 function AppShell() {
   const { user, logout, loading: authLoading } = useAuth();
   const { theme, toggle: toggleTheme } = useTheme();
+  const { profile, setProfile, config } = useProfile();
   const [activeTab, setActiveTab] = useState(getInitialTab);
   const [showLogin, setShowLogin] = useState(false);
   const [ticker, setTicker] = useState(null);
@@ -45,8 +57,8 @@ function AppShell() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [events, setEvents] = useState(null);
-  const [period, setPeriod] = useState('6mo');
-  const [interval, setChartInterval] = useState('1d');
+  const [period, setPeriod] = useState(config.chart.period);
+  const [interval, setChartInterval] = useState(config.chart.interval);
   const [prepost, setPrepost] = useState(false);
   const [subTab, setSubTab] = useState('overview');
 
@@ -105,10 +117,26 @@ function AppShell() {
     window.history.pushState(null, '', `#${tabId}`);
   };
 
+  const openTicker = (t) => {
+    handleTabClick('dashboard');
+    setSubTab('overview');
+    handleSearch(t);
+  };
+
+  const changeProfile = (p) => {
+    setProfile(p);
+    const { period: np, interval: ni } = PROFILES[p].chart;
+    setPeriod(np);
+    setChartInterval(ni);
+    if (ticker) handleSearch(ticker, np, ni, prepost);
+  };
+
   const tabs = [
     { id: 'dashboard', label: '📊 Dashboard' },
+    { id: 'setups', label: '🎯 Setups' },
     { id: 'screener', label: '🔍 Screener' },
     { id: 'portfolio', label: '💼 Portfolio' },
+    { id: 'journal', label: '📓 Journal' },
     { id: 'tools', label: '🧰 Tools' },
   ];
 
@@ -118,11 +146,16 @@ function AppShell() {
         <div className="header-top">
           <h1 onClick={() => { setActiveTab('dashboard'); window.location.hash = 'dashboard'; }} style={{ cursor: 'pointer' }}><span className="header-emoji">📈</span><span className="header-title-text">Stock Insights</span></h1>
           <div className="user-menu">
+            <select className="candle-select profile-select" value={profile} onChange={e => changeProfile(e.target.value)}
+              title="Your trading style tailors charts, layout and AI analysis">
+              {Object.entries(PROFILES).map(([k, p]) => <option key={k} value={k}>{p.icon} {p.label}</option>)}
+            </select>
             <button className="btn-theme" onClick={toggleTheme} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>
               {theme === 'dark' ? '☀️' : '🌙'}
             </button>
             {user ? (
               <>
+                <NotificationBell />
                 <span className="user-greeting">Hi, {user.display_name}</span>
                 <button className="btn-logout" onClick={logout}>Sign Out</button>
               </>
@@ -151,23 +184,17 @@ function AppShell() {
             <SearchBar onSearch={(t) => handleSearch(t)} loading={loading} activeTicker={ticker} />
             {error && <div className="error-banner">{error}</div>}
             {!ticker && !loading && (
-              <div className="dashboard-welcome">
-                <div className="dashboard-welcome-icon">📈</div>
-                <h2>Search a stock to get started</h2>
-                <p>Enter any ticker symbol above, or click one from your watchlist on the right.</p>
-              </div>
+              <>
+                {user && <DailyBriefing onSelect={(t) => handleSearch(t)} />}
+                <MarketOverview onSelect={(t) => handleSearch(t)} />
+              </>
             )}
 
             {ticker && metrics && (
               <>
-                {/* ── Sub-tab navigation ──────────────────────── */}
+                {/* ── Sub-tab navigation (ordered by trading style) ── */}
                 <nav className="sub-tabs">
-                  {[
-                    { id: 'overview', label: '📋 Overview' },
-                    { id: 'analysis', label: '🔬 Analysis' },
-                    { id: 'fundamentals', label: '📑 Fundamentals' },
-                    { id: 'news', label: '📰 News & AI' },
-                  ].map(t => (
+                  {config.subTabs.map(id => ({ id, label: SUB_TAB_LABELS[id] })).map(t => (
                     <button
                       key={t.id}
                       className={`sub-tab ${subTab === t.id ? 'active' : ''}`}
@@ -181,7 +208,7 @@ function AppShell() {
                   <>
                     <Alerts alerts={alerts} />
                     <KeyMetrics metrics={metrics} />
-                    <WhyMoving ticker={ticker} changePct={metrics.change_pct} />
+                    <AiBrief ticker={ticker} profile={profile} onSignIn={() => setShowLogin(true)} />
                     <PriceChart data={history} events={events}
                       period={period} interval={interval} prepost={prepost}
                       onSettingsChange={({ period: p, interval: i, prepost: pp }) => {
@@ -194,26 +221,28 @@ function AppShell() {
                         if (ticker) handleSearch(ticker, newPeriod, newInterval, newPrepost);
                       }}
                     />
+                    <PriceAlerts ticker={ticker} price={metrics.price} onSignIn={() => setShowLogin(true)} />
                   </>
                 )}
 
                 {/* ── Analysis ────────────────────────────────── */}
                 {subTab === 'analysis' && (
                   <>
+                    <RelativeStrength ticker={ticker} />
                     <IvRank ticker={ticker} />
+                    <IncomeIdeas ticker={ticker} />
                     <Structures ticker={ticker} />
                     <AnalystRatings ticker={ticker} />
                     <PeerBenchmark ticker={ticker} />
-                    <div className="two-column">
-                      <BullBear ticker={ticker} />
-                      <AiChat ticker={ticker} context={metrics} />
-                    </div>
+                    <AiChat ticker={ticker} onSignIn={() => setShowLogin(true)} />
                   </>
                 )}
 
                 {/* ── Fundamentals ────────────────────────────── */}
                 {subTab === 'fundamentals' && (
                   <>
+                    <LongTermView ticker={ticker} />
+                    <EarningsIntel ticker={ticker} />
                     <Financials ticker={ticker} />
                     <div className="two-column">
                       <Ownership ticker={ticker} />
@@ -223,14 +252,7 @@ function AppShell() {
                 )}
 
                 {/* ── News & AI ───────────────────────────────── */}
-                {subTab === 'news' && (
-                  <>
-                    <div className="two-column">
-                      <NewsSentiment newsData={newsData} />
-                      <AiSummary ticker={ticker} dataReady={!loading} />
-                    </div>
-                  </>
-                )}
+                {subTab === 'news' && <NewsSentiment newsData={newsData} />}
               </>
             )}
           </div>
@@ -242,24 +264,28 @@ function AppShell() {
         </div>
       )}
 
+      {activeTab === 'setups' && <SetupScanner onSelect={openTicker} />}
+
       {activeTab === 'screener' && <Screener />}
 
       {activeTab === 'portfolio' && <Portfolio />}
+
+      {activeTab === 'journal' && <Journal onSignIn={() => setShowLogin(true)} onSelect={openTicker} />}
 
       {activeTab === 'tools' && (
         <div className="tools-page">
           <h2 className="tools-heading">🧰 Trading Tools</h2>
           <p className="tools-subheading">Calculators and simulators to help plan your trades.</p>
+          {user && <PriceAlerts />}
           <div className="tools-grid">
             <PreTradeChecklist />
             <PositionCalculator />
-            <DcaSimulator />
           </div>
         </div>
       )}
 
       <footer className="app-footer">
-        Data from Yahoo Finance &middot; News from NewsAPI &middot; AI by Groq &middot; Not financial advice
+        Data: Finnhub, Yahoo Finance, SEC EDGAR &middot; AI-generated analysis can be wrong &middot; Not financial advice
       </footer>
     </div>
   );
@@ -273,7 +299,9 @@ export function AppRoot() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <App />
+        <ProfileProvider>
+          <App />
+        </ProfileProvider>
       </AuthProvider>
     </ThemeProvider>
   );

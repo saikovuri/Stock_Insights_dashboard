@@ -56,10 +56,15 @@ DATABASE_URL=postgresql://postgres.xxx:password@aws-0-us-east-1.pooler.supabase.
 JWT_SECRET=CHANGE_ME_TO_A_RANDOM_STRING
 CORS_ORIGINS=https://stock-insights-dashboard.vercel.app,http://localhost:5173
 
-# ── Optional ──────────────────────────────────────────────
-OPENAI_API_KEY=sk-...
-NEWS_API_KEY=...
-OPENAI_MODEL=gpt-4o-mini
+# ── AI (free tiers: Groq or Gemini) ─────────────────────────
+GROQ_API_KEY=
+# GEMINI_API_KEY=
+# AI_PROVIDER=gemini
+
+# ── Market data (free tiers) ─────────────────────────────────
+FINNHUB_API_KEY=
+TWELVEDATA_API_KEY=
+SEC_USER_AGENT=StockInsights you@example.com
 ENVEOF
   echo ""
   echo "⚠️  IMPORTANT: Edit $APP_DIR/backend/.env with your actual credentials!"

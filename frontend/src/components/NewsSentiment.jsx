@@ -81,7 +81,12 @@ export default function NewsSentiment({ newsData }) {
 
   return (
     <div className="card">
-      <h3>News &amp; Sentiment</h3>
+      <h3>
+        News &amp; Sentiment
+        {articles[0]?.scored_by === 'ai' && <span className="guest-badge" title="Sentiment and relevance scored by AI">AI-scored</span>}
+      </h3>
+
+      {articles.length === 0 && <p className="empty-state">No recent news found.</p>}
 
       <ContrarianBadge articles={articles} />
 

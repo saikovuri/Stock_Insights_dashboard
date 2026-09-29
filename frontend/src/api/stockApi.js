@@ -64,32 +64,26 @@ async function authFetch(url, opts = {}) {
 
 export async function fetchMetrics(ticker) {
   const res = await fetch(`${BASE}/stock/${ticker}/metrics`);
-  if (!res.ok) throw new Error((await res.json()).detail || 'Failed to fetch metrics');
+  if (!res.ok) throw new Error(await readError(res, 'Failed to fetch metrics'));
   return res.json();
 }
 
 export async function fetchHistory(ticker, period = '6mo', interval = '1d', prepost = false) {
   const pp = prepost ? '&prepost=true' : '';
   const res = await fetch(`${BASE}/stock/${ticker}/history?period=${period}&interval=${interval}${pp}`);
-  if (!res.ok) throw new Error((await res.json()).detail || 'Failed to fetch history');
+  if (!res.ok) throw new Error(await readError(res, 'Failed to fetch history'));
   return res.json();
 }
 
 export async function fetchNews(ticker) {
   const res = await fetch(`${BASE}/stock/${ticker}/news`);
-  if (!res.ok) throw new Error((await res.json()).detail || 'Failed to fetch news');
-  return res.json();
-}
-
-export async function fetchSummary(ticker) {
-  const res = await fetch(`${BASE}/stock/${ticker}/summary`);
-  if (!res.ok) throw new Error(await readError(res, 'Failed to fetch summary'));
+  if (!res.ok) throw new Error(await readError(res, 'Failed to fetch news'));
   return res.json();
 }
 
 export async function fetchAlerts(ticker) {
   const res = await fetch(`${BASE}/stock/${ticker}/alerts`);
-  if (!res.ok) throw new Error((await res.json()).detail || 'Failed to fetch alerts');
+  if (!res.ok) throw new Error(await readError(res, 'Failed to fetch alerts'));
   return res.json();
 }
 
@@ -113,7 +107,7 @@ export async function sellStock(ticker, shares, price) {
     method: 'POST', headers: authHeaders(),
     body: JSON.stringify({ ticker, shares, price }),
   });
-  if (!res.ok) throw new Error((await res.json()).detail || 'Failed to sell');
+  if (!res.ok) throw new Error(await readError(res, 'Failed to sell'));
   return res.json();
 }
 
@@ -122,7 +116,7 @@ export async function sellStockLot(holdingId, ticker, shares, price) {
     method: 'POST', headers: authHeaders(),
     body: JSON.stringify({ ticker, shares, price }),
   });
-  if (!res.ok) throw new Error((await res.json()).detail || 'Failed to sell lot');
+  if (!res.ok) throw new Error(await readError(res, 'Failed to sell lot'));
   return res.json();
 }
 
@@ -147,7 +141,7 @@ export async function closeOption(ticker, option_type, strike, expiry, premium, 
     method: 'POST', headers: authHeaders(),
     body: JSON.stringify({ ticker, option_type, strike, expiry, premium, contracts, position }),
   });
-  if (!res.ok) throw new Error((await res.json()).detail || 'Failed to close option');
+  if (!res.ok) throw new Error(await readError(res, 'Failed to close option'));
   return res.json();
 }
 
@@ -157,13 +151,13 @@ export async function editHolding(id, ticker, shares, price) {
     method: 'PUT', headers: authHeaders(),
     body: JSON.stringify({ ticker, shares, price }),
   });
-  if (!res.ok) throw new Error((await res.json()).detail || 'Failed to edit holding');
+  if (!res.ok) throw new Error(await readError(res, 'Failed to edit holding'));
   return res.json();
 }
 
 export async function deleteHolding(id) {
   const res = await authFetch(`${BASE}/portfolio/${id}`, { method: 'DELETE', headers: authHeaders() });
-  if (!res.ok) throw new Error((await res.json()).detail || 'Failed to delete holding');
+  if (!res.ok) throw new Error(await readError(res, 'Failed to delete holding'));
   return res.json();
 }
 
@@ -172,13 +166,13 @@ export async function editOption(id, ticker, option_type, strike, expiry, premiu
     method: 'PUT', headers: authHeaders(),
     body: JSON.stringify({ ticker, option_type, strike, expiry, premium, contracts, position }),
   });
-  if (!res.ok) throw new Error((await res.json()).detail || 'Failed to edit option');
+  if (!res.ok) throw new Error(await readError(res, 'Failed to edit option'));
   return res.json();
 }
 
 export async function deleteOption(id) {
   const res = await authFetch(`${BASE}/portfolio/options/${id}`, { method: 'DELETE', headers: authHeaders() });
-  if (!res.ok) throw new Error((await res.json()).detail || 'Failed to delete option');
+  if (!res.ok) throw new Error(await readError(res, 'Failed to delete option'));
   return res.json();
 }
 
@@ -195,68 +189,103 @@ export async function fetchClosedOptions() {
   return res.json();
 }
 
-// ── New AI / analytical endpoints ────────────────────────────────
-export async function fetchWhyMoving(ticker) {
-  const res = await fetch(`${BASE}/stock/${ticker}/why-moving`);
-  if (!res.ok) throw new Error(await readError(res, 'Failed'));
+// ── AI (sign-in required) ────────────────────────────────────────
+export async function fetchBrief(ticker, profile) {
+  const res = await authFetch(`${BASE}/stock/${ticker}/brief${profile ? `?profile=${profile}` : ''}`);
+  if (!res.ok) throw new Error(await readError(res, 'Failed to load AI brief'));
   return res.json();
 }
 
-export async function fetchBullBear(ticker) {
-  const res = await fetch(`${BASE}/stock/${ticker}/bull-bear`);
-  if (!res.ok) throw new Error(await readError(res, 'Failed'));
-  return res.json();
-}
-
-export async function sendChat(ticker, messages, context) {
-  const res = await fetch(`${BASE}/stock/${ticker}/chat`, {
+export async function sendChat(ticker, messages) {
+  const res = await authFetch(`${BASE}/stock/${ticker}/chat`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages, context }),
+    headers: authHeaders(),
+    body: JSON.stringify({ messages }),
   });
   if (!res.ok) throw new Error(await readError(res, 'Failed'));
   return res.json();
 }
 
+export async function fetchPortfolioDoctor() {
+  const res = await authFetch(`${BASE}/portfolio/doctor`);
+  if (!res.ok) throw new Error(await readError(res, 'Failed to run portfolio check'));
+  return res.json();
+}
+
+export async function fetchBriefing(refresh = false) {
+  const res = await authFetch(`${BASE}/briefing${refresh ? '?refresh=true' : ''}`);
+  if (!res.ok) throw new Error(await readError(res, 'Failed to load briefing'));
+  return res.json();
+}
+
+// ── Notifications ────────────────────────────────────────────────
+export async function fetchNotifications() {
+  const res = await authFetch(`${BASE}/notifications`);
+  if (!res.ok) throw new Error(await readError(res, 'Failed to load notifications'));
+  return res.json();
+}
+
+export async function markNotificationsRead() {
+  const res = await authFetch(`${BASE}/notifications/read`, { method: 'POST', headers: authHeaders() });
+  if (!res.ok) throw new Error(await readError(res, 'Failed'));
+  return res.json();
+}
+
+export async function fetchNotificationSettings() {
+  const res = await authFetch(`${BASE}/notifications/settings`);
+  if (!res.ok) throw new Error(await readError(res, 'Failed'));
+  return res.json();
+}
+
+export async function saveNotificationSettings(ntfy_topic) {
+  const res = await authFetch(`${BASE}/notifications/settings`, {
+    method: 'PUT',
+    headers: authHeaders(),
+    body: JSON.stringify({ ntfy_topic }),
+  });
+  if (!res.ok) throw new Error(await readError(res, 'Failed to save'));
+  return res.json();
+}
+
 export async function fetchPeers(ticker) {
   const res = await fetch(`${BASE}/stock/${ticker}/peers`);
-  if (!res.ok) throw new Error((await res.json()).detail || 'Failed');
+  if (!res.ok) throw new Error(await readError(res, 'Failed to load peers'));
   return res.json();
 }
 
 export async function fetchEvents(ticker) {
   const res = await fetch(`${BASE}/stock/${ticker}/events`);
-  if (!res.ok) throw new Error((await res.json()).detail || 'Failed');
+  if (!res.ok) throw new Error(await readError(res, 'Failed to load events'));
   return res.json();
 }
 
 export async function fetchReturns(ticker, period = '3mo') {
   const res = await fetch(`${BASE}/stock/${ticker}/history-returns?period=${period}`);
-  if (!res.ok) throw new Error((await res.json()).detail || 'Failed');
+  if (!res.ok) throw new Error(await readError(res, 'Failed to load returns'));
   return res.json();
 }
 
 export async function fetchAnalyst(ticker) {
   const res = await fetch(`${BASE}/stock/${ticker}/analyst`);
-  if (!res.ok) throw new Error((await res.json()).detail || 'Failed');
+  if (!res.ok) throw new Error(await readError(res, 'Failed to load analyst ratings'));
   return res.json();
 }
 
 export async function fetchFinancials(ticker) {
   const res = await fetch(`${BASE}/stock/${ticker}/financials`);
-  if (!res.ok) throw new Error((await res.json()).detail || 'Failed');
+  if (!res.ok) throw new Error(await readError(res, 'Failed to load financials'));
   return res.json();
 }
 
 export async function fetchOwnership(ticker) {
   const res = await fetch(`${BASE}/stock/${ticker}/ownership`);
-  if (!res.ok) throw new Error((await res.json()).detail || 'Failed');
+  if (!res.ok) throw new Error(await readError(res, 'Failed to load ownership'));
   return res.json();
 }
 
 export async function fetchDividends(ticker) {
   const res = await fetch(`${BASE}/stock/${ticker}/dividends`);
-  if (!res.ok) throw new Error((await res.json()).detail || 'Failed');
+  if (!res.ok) throw new Error(await readError(res, 'Failed to load dividends'));
   return res.json();
 }
 
@@ -266,7 +295,7 @@ export async function fetchBatchSparklines(tickers) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ tickers }),
   });
-  if (!res.ok) throw new Error((await res.json()).detail || 'Failed');
+  if (!res.ok) throw new Error(await readError(res, 'Failed to load sparklines'));
   return res.json();
 }
 
@@ -275,6 +304,52 @@ export async function fetchIvRank(ticker) {
   if (!res.ok) throw new Error(await readError(res, 'Failed to fetch IV rank'));
   return res.json();
 }
+
+export async function fetchIncomeIdeas(ticker, expiry) {
+  const q = expiry ? `?expiry=${encodeURIComponent(expiry)}` : '';
+  const res = await fetch(`${BASE}/stock/${ticker}/income${q}`);
+  if (!res.ok) throw new Error(await readError(res, 'Failed to fetch income ideas'));
+  return res.json();
+}
+
+async function getJson(url, fallback, auth = false) {
+  const res = auth ? await authFetch(url) : await fetch(url);
+  if (!res.ok) throw new Error(await readError(res, fallback));
+  return res.json();
+}
+
+async function sendJson(url, method, body, fallback) {
+  const res = await authFetch(url, { method, headers: authHeaders(), body: body ? JSON.stringify(body) : undefined });
+  if (!res.ok) throw new Error(await readError(res, fallback));
+  return res.json();
+}
+
+// ── Profile & custom alerts ──────────────────────────────────────
+export const fetchProfile = () => getJson(`${BASE}/profile`, 'Failed to load profile', true);
+export const saveProfile = (profile) => sendJson(`${BASE}/profile`, 'PUT', { profile }, 'Failed to save profile');
+export const fetchCustomAlerts = (ticker) =>
+  getJson(`${BASE}/alerts/custom${ticker ? `?ticker=${encodeURIComponent(ticker)}` : ''}`, 'Failed to load alerts', true);
+export const addCustomAlert = (alert) => sendJson(`${BASE}/alerts/custom`, 'POST', alert, 'Failed to add alert');
+export const deleteCustomAlert = (id) => sendJson(`${BASE}/alerts/custom/${id}`, 'DELETE', null, 'Failed to delete alert');
+
+// ── Market ───────────────────────────────────────────────────────
+export const fetchMarketOverview = () => getJson(`${BASE}/market/overview`, 'Failed to load market overview');
+export const fetchMovers = (kind) => getJson(`${BASE}/market/movers?kind=${kind}`, 'Failed to load movers');
+export const fetchMyEarnings = () => getJson(`${BASE}/market/my-earnings`, 'Failed to load earnings', true);
+
+// ── Earnings, scanner, fundamentals ──────────────────────────────
+export const fetchEarningsIntel = (t) => getJson(`${BASE}/stock/${t}/earnings-intel`, 'Failed to load earnings history');
+export const fetchEarningsRelease = (t) => getJson(`${BASE}/stock/${t}/earnings-release`, 'Failed to load press release', true);
+export const fetchScanner = () => getJson(`${BASE}/scanner`, 'Failed to load scanner');
+export const fetchRelativeStrength = (t) => getJson(`${BASE}/stock/${t}/rs`, 'Failed to load relative strength');
+export const fetchLongTerm = (t) => getJson(`${BASE}/stock/${t}/longterm`, 'Failed to load long-term data');
+
+// ── Journal ──────────────────────────────────────────────────────
+export const fetchJournal = () => getJson(`${BASE}/journal`, 'Failed to load journal', true);
+export const addJournalEntry = (e) => sendJson(`${BASE}/journal`, 'POST', e, 'Failed to save trade');
+export const updateJournalEntry = (id, e) => sendJson(`${BASE}/journal/${id}`, 'PUT', e, 'Failed to update trade');
+export const deleteJournalEntry = (id) => sendJson(`${BASE}/journal/${id}`, 'DELETE', null, 'Failed to delete trade');
+export const fetchJournalCoach = () => getJson(`${BASE}/journal/coach`, 'Failed to load coaching', true);
 
 export async function fetchStructures(ticker, direction, budget) {
   const params = new URLSearchParams({ direction, budget: String(budget) });

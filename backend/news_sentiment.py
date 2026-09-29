@@ -1,7 +1,14 @@
-import requests
+import logging
+from datetime import datetime, timezone
+
 import yfinance as yf
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
-from config import NEWS_API_KEY
+
+from cache import get_or_fetch
+from providers import finnhub_company_news
+import llm
+
+log = logging.getLogger(__name__)
 
 # VADER with financial lexicon for accurate stock sentiment
 _sia = SentimentIntensityAnalyzer()
@@ -38,40 +45,79 @@ def _analyze_sentiment(text: str) -> float:
     return _sia.polarity_scores(text)["compound"]
 
 
-def fetch_news(ticker: str, company_name: str = "", max_articles: int = 10) -> list[dict]:
-    """Fetch recent news articles — tries NewsAPI first, falls back to yfinance."""
-    # Try NewsAPI if key is configured
-    if NEWS_API_KEY:
-        articles = _newsapi_fetch(ticker, company_name, max_articles)
-        if articles:
-            return articles
-
-    # Free fallback: yfinance news (no API key needed)
-    return _yfinance_news(ticker, max_articles)
+def fetch_news(ticker: str, company_name: str = "", max_articles: int = 12) -> list[dict]:
+    """Recent news (Finnhub, then yfinance) scored by the LLM, with VADER as fallback. Cached 15 min."""
+    def _fetch():
+        articles = _finnhub_news(ticker, max_articles) or _yfinance_news(ticker, max_articles)
+        return _score_articles(ticker, company_name, articles)
+    return get_or_fetch(f"newsraw:{ticker}", _fetch, ttl=900)
 
 
-def _newsapi_fetch(ticker: str, company_name: str, max_articles: int) -> list[dict]:
-    query = f"{ticker} stock"
-    if company_name:
-        query = f"{company_name} OR {ticker}"
+def _finnhub_news(ticker: str, max_articles: int) -> list[dict]:
+    items = sorted(finnhub_company_news(ticker), key=lambda a: a.get("datetime", 0), reverse=True)
+    seen, results = set(), []
+    for a in items:
+        title = (a.get("headline") or "").strip()
+        if not title or title in seen:
+            continue
+        seen.add(title)
+        ts = a.get("datetime")
+        results.append({
+            "title": title,
+            "summary": (a.get("summary") or "")[:300],
+            "source": a.get("source") or "Unknown",
+            "url": a.get("url", ""),
+            "published": datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if ts else "",
+        })
+        # Over-fetch so relevance filtering still leaves enough
+        if len(results) >= max_articles * 2:
+            break
+    return results
 
-    url = "https://newsapi.org/v2/everything"
-    params = {
-        "q": query,
-        "sortBy": "publishedAt",
-        "pageSize": max_articles,
-        "language": "en",
-        "apiKey": NEWS_API_KEY,
-    }
 
-    try:
-        resp = requests.get(url, params=params, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-        articles = data.get("articles", [])
-        return _process_articles(articles)
-    except Exception:
+def _score_articles(ticker: str, company_name: str, articles: list[dict]) -> list[dict]:
+    if not articles:
         return []
+    scores = _llm_scores(ticker, company_name, articles) if llm.ai_enabled() else None
+    for i, a in enumerate(articles):
+        if scores:
+            s, rel = scores[i]
+            a["relevance"] = rel
+        else:
+            s = _analyze_sentiment(f"{a['title']}. {a.get('summary', '')}")
+        a["sentiment"] = round(s, 3)
+        a["sentiment_label"] = _sentiment_label(s)
+        a["scored_by"] = "ai" if scores else "lexicon"
+
+    if scores:
+        relevant = [a for a in articles if a.get("relevance", 1) >= 0.3]
+        if len(relevant) >= 3:
+            articles = relevant
+    return articles[:12]
+
+
+def _llm_scores(ticker: str, company_name: str, articles: list[dict]) -> list[tuple[float, float]] | None:
+    lines = "\n".join(
+        f"{i + 1}. {a['title']}" + (f" — {a['summary'][:160]}" if a.get("summary") else "")
+        for i, a in enumerate(articles)
+    )
+    system = "You score financial news for equity investors. Output JSON only."
+    user = (
+        f"Stock: {ticker} ({company_name or ticker}).\n"
+        "For each numbered item give [sentiment, relevance]:\n"
+        "- sentiment: impact on THIS stock's shareholders, -1 (very negative) to 1 (very positive), 0 if neutral\n"
+        "- relevance: 0 to 1, how much the item is actually about this company\n"
+        f'Return {{"scores": [[s, r], ...]}} with exactly {len(articles)} pairs in order.\n\n{lines}'
+    )
+    try:
+        data = llm.chat_json(system, user, temperature=0, max_tokens=1200)
+        raw = data.get("scores")
+        if not isinstance(raw, list) or len(raw) != len(articles):
+            return None
+        return [(max(-1.0, min(1.0, float(s))), max(0.0, min(1.0, float(r)))) for s, r in raw]
+    except Exception as e:
+        log.info("LLM sentiment failed for %s, using lexicon: %s", ticker, e)
+        return None
 
 
 def _yfinance_news(ticker: str, max_articles: int) -> list[dict]:
@@ -80,10 +126,7 @@ def _yfinance_news(ticker: str, max_articles: int) -> list[dict]:
         stock = yf.Ticker(ticker)
         news_items = stock.news or []
     except Exception:
-        return _fallback_news(ticker)
-
-    if not news_items:
-        return _fallback_news(ticker)
+        return []
 
     results = []
     for item in news_items[:max_articles]:
@@ -110,61 +153,20 @@ def _yfinance_news(ticker: str, max_articles: int) -> list[dict]:
         pub_date = content.get("pubDate", "") or item.get("providerPublishTime", "")
         published = ""
         if isinstance(pub_date, (int, float)):
-            from datetime import datetime, timezone
             published = datetime.fromtimestamp(pub_date, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         elif isinstance(pub_date, str):
             published = pub_date
 
-        # Sentiment analysis on title + summary
-        summary_text = content.get("summary", "")
-        analysis_text = f"{title}. {summary_text}" if summary_text else title
-        sentiment = _analyze_sentiment(analysis_text)
-
+        if not title:
+            continue
         results.append({
             "title": title,
+            "summary": (content.get("summary") or "")[:300],
             "source": publisher,
             "url": link,
             "published": published,
-            "sentiment": round(sentiment, 3),
-            "sentiment_label": _sentiment_label(sentiment),
         })
 
-    return results if results else _fallback_news(ticker)
-
-
-def _fallback_news(ticker: str) -> list[dict]:
-    """Return placeholder when no API key is configured."""
-    return [
-        {
-            "title": f"No news API key configured — add NEWS_API_KEY to .env to see live news for {ticker}",
-            "source": "System",
-            "url": "",
-            "published": "",
-            "sentiment": 0.0,
-            "sentiment_label": "Neutral",
-        }
-    ]
-
-
-def _process_articles(articles: list[dict]) -> list[dict]:
-    """Analyze sentiment for each article."""
-    results = []
-    for art in articles:
-        title = art.get("title") or ""
-        description = art.get("description") or ""
-        text = f"{title}. {description}"
-        sentiment = _analyze_sentiment(text)
-
-        results.append(
-            {
-                "title": title,
-                "source": (art.get("source") or {}).get("name", "Unknown"),
-                "url": art.get("url", ""),
-                "published": art.get("publishedAt", ""),
-                "sentiment": round(sentiment, 3),
-                "sentiment_label": _sentiment_label(sentiment),
-            }
-        )
     return results
 
 

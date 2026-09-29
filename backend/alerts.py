@@ -57,22 +57,53 @@ def check_alerts(metrics: dict, thresholds: dict | None = None) -> list[dict]:
                 "value": round(pct_from_low, 2),
             })
 
-    avg_50 = metrics.get("50d_avg", 0)
-    avg_200 = metrics.get("200d_avg", 0)
-    if price and avg_50 and avg_200:
-        if avg_50 > avg_200 and price > avg_50:
-            alerts.append({
-                "type": "GOLDEN_CROSS",
-                "severity": "info",
-                "message": f"{metrics['name']}: 50-day avg (${avg_50:.2f}) > 200-day avg (${avg_200:.2f}) — bullish signal",
-                "value": round(avg_50 - avg_200, 2),
-            })
-        elif avg_50 < avg_200 and price < avg_50:
-            alerts.append({
-                "type": "DEATH_CROSS",
-                "severity": "warning",
-                "message": f"{metrics['name']}: 50-day avg (${avg_50:.2f}) < 200-day avg (${avg_200:.2f}) — bearish signal",
-                "value": round(avg_200 - avg_50, 2),
-            })
-
     return alerts
+
+
+def _cross_date(fast, slow, lookback: int, direction: str):
+    """Date of the most recent crossing of fast over (up) / under (down) slow within the last N bars."""
+    diff = (fast - slow).dropna()
+    if len(diff) < 2:
+        return None
+    above = diff > 0
+    crossed = above != above.shift(1)
+    crossed.iloc[0] = False
+    hits = crossed & (above if direction == "up" else ~above)
+    recent = hits.tail(lookback)
+    return recent[recent].index[-1] if recent.any() else None
+
+
+def technical_events(name: str, df) -> list[dict]:
+    """Recent crossover events from daily bars with indicators (see stock_data.compute_indicators)."""
+    import pandas as pd
+    out = []
+
+    def add(type_, severity, message, when):
+        out.append({"type": type_, "severity": severity, "message": message,
+                    "date": pd.Timestamp(when).strftime("%Y-%m-%d")})
+
+    close = df["Close"]
+    checks = [
+        ("GOLDEN_CROSS", "info", df["sma_50"], df["sma_200"], 10, "up",
+         "50-day average crossed above the 200-day (golden cross)"),
+        ("DEATH_CROSS", "warning", df["sma_50"], df["sma_200"], 10, "down",
+         "50-day average crossed below the 200-day (death cross)"),
+        ("ABOVE_200D", "info", close, df["sma_200"], 3, "up", "price reclaimed its 200-day average"),
+        ("BELOW_200D", "warning", close, df["sma_200"], 3, "down", "price fell below its 200-day average"),
+        ("MACD_BULLISH", "info", df["macd"], df["macd_signal"], 2, "up", "MACD crossed above its signal line"),
+        ("MACD_BEARISH", "medium", df["macd"], df["macd_signal"], 2, "down", "MACD crossed below its signal line"),
+    ]
+    for type_, sev, fast, slow, lookback, direction, text in checks:
+        when = _cross_date(fast, slow, lookback, direction)
+        if when is not None:
+            add(type_, sev, f"{name}: {text} on {pd.Timestamp(when).strftime('%b %d')}", when)
+
+    rsi = df["rsi"]
+    for type_, sev, level, direction, text in [
+        ("RSI_OVERBOUGHT", "medium", 70, "up", "RSI moved above 70 (overbought)"),
+        ("RSI_OVERSOLD", "medium", 30, "down", "RSI dropped below 30 (oversold)"),
+    ]:
+        when = _cross_date(rsi, pd.Series(level, index=rsi.index), 3, direction)
+        if when is not None:
+            add(type_, sev, f"{name}: {text} — now {rsi.iloc[-1]:.0f}", when)
+    return out

@@ -12,6 +12,11 @@ ALTER TABLE public.watchlist          ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.closed_trades      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.closed_options     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.refresh_tokens     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.notifications      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.iv_history         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_alerts        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.journal            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.kv_cache           ENABLE ROW LEVEL SECURITY;
 
 -- ── 2. Drop any accidental legacy policies ──────────────────
 DO $$
@@ -64,6 +69,26 @@ CREATE POLICY "service_role_all_refresh_tokens"
   ON public.refresh_tokens FOR ALL
   TO service_role USING (true) WITH CHECK (true);
 
+CREATE POLICY "service_role_all_notifications"
+  ON public.notifications FOR ALL
+  TO service_role USING (true) WITH CHECK (true);
+
+CREATE POLICY "service_role_all_iv_history"
+  ON public.iv_history FOR ALL
+  TO service_role USING (true) WITH CHECK (true);
+
+CREATE POLICY "service_role_all_user_alerts"
+  ON public.user_alerts FOR ALL
+  TO service_role USING (true) WITH CHECK (true);
+
+CREATE POLICY "service_role_all_journal"
+  ON public.journal FOR ALL
+  TO service_role USING (true) WITH CHECK (true);
+
+CREATE POLICY "service_role_all_kv_cache"
+  ON public.kv_cache FOR ALL
+  TO service_role USING (true) WITH CHECK (true);
+
 -- ── 4. Revoke anon/authenticated direct access ──────────────
 -- No policies are created for `anon` or `authenticated` roles,
 -- so the Supabase public REST API returns zero rows / permission
@@ -78,6 +103,11 @@ REVOKE ALL ON public.watchlist      FROM anon, authenticated;
 REVOKE ALL ON public.closed_trades  FROM anon, authenticated;
 REVOKE ALL ON public.closed_options FROM anon, authenticated;
 REVOKE ALL ON public.refresh_tokens FROM anon, authenticated;
+REVOKE ALL ON public.notifications  FROM anon, authenticated;
+REVOKE ALL ON public.iv_history     FROM anon, authenticated;
+REVOKE ALL ON public.user_alerts    FROM anon, authenticated;
+REVOKE ALL ON public.journal        FROM anon, authenticated;
+REVOKE ALL ON public.kv_cache       FROM anon, authenticated;
 
 -- ── 5. Verify ───────────────────────────────────────────────
 SELECT tablename, rowsecurity

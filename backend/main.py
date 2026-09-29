@@ -5,16 +5,31 @@ from starlette.responses import Response
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, date as _date
-import json
+import logging
+import math
 import re
+from typing import Literal
+from pydantic import Field
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
-from stock_data import get_stock_data, get_key_metrics, format_large_number, compute_indicators
+from stock_data import get_stock_data, get_key_metrics, get_quote, format_large_number, compute_indicators, \
+    get_daily_indicators
 from news_sentiment import fetch_news, aggregate_sentiment
-from ai_summary import get_ai_summary
-from alerts import check_alerts
+from ai_brief import get_ai_brief
+from ai_chat import run_chat
+import llm
+import options_analytics
+import portfolio_doctor
+import market
+import earnings_intel
+import scanner
+import journal
+import fundamentals
+import scheduler
+from providers import finnhub_enabled, finnhub_quote, finnhub_peers, finnhub_recommendations
+from alerts import check_alerts, technical_events
 from cache import get_or_fetch, stats as cache_stats, clear as cache_clear
 from auth import hash_password, verify_password, create_token, decode_token, create_refresh_token, REFRESH_EXPIRE_DAYS
 from database import (
@@ -25,10 +40,38 @@ from database import (
     get_user_transactions, get_user_watchlist, add_to_watchlist, remove_from_watchlist,
     get_closed_trades, get_closed_options,
     store_refresh_token, get_refresh_token, delete_refresh_token, delete_user_refresh_tokens,
+    list_notifications, mark_notifications_read, get_ntfy_topic, set_ntfy_topic,
+    get_trader_profile, set_trader_profile, list_user_alerts, add_user_alert, delete_user_alert,
+    count_active_alerts, list_journal, add_journal, update_journal, delete_journal,
 )
-from config import CORS_ORIGINS
+from config import CORS_ORIGINS, SCHEDULER_ENABLED
 
-app = FastAPI(title="Stock Insights API", version="2.0.0")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logging.getLogger("httpx").setLevel(logging.WARNING)
+log = logging.getLogger("api")
+
+app = FastAPI(title="Stock Insights API", version="3.0.0")
+
+
+@app.on_event("startup")
+def _start_background_jobs():
+    if SCHEDULER_ENABLED:
+        scheduler.start()
+
+
+def _upstream_error(e: Exception, status: int = 500) -> HTTPException:
+    """Log the real error; return a generic message so internals aren't exposed."""
+    log.warning("Request failed: %s: %s", type(e).__name__, e)
+    if status == 404:
+        return HTTPException(status_code=404, detail="Ticker not found or data unavailable")
+    return HTTPException(status_code=status, detail="Data provider error. Please try again shortly.")
+
+
+@app.exception_handler(Exception)
+async def _unhandled_error(request: Request, exc: Exception):
+    from fastapi.responses import JSONResponse
+    log.exception("Unhandled error on %s", request.url.path, exc_info=exc)
+    return JSONResponse(status_code=500, content={"detail": "Something went wrong. Please try again."})
 
 # ── Health check (used by UptimeRobot / monitoring) ─────────────────────────
 
@@ -49,7 +92,8 @@ async def api_health_check():
             _release(conn)
         return {"status": "ok", "db": "connected"}
     except Exception as e:
-        return {"status": "ok", "db": f"error: {e}"}
+        log.error("Health check DB error: %s", e)
+        return {"status": "ok", "db": "error"}
 
 # ── Rate limiting ───────────────────────────────────────────────────────────
 
@@ -248,7 +292,7 @@ def stock_metrics(request: Request, ticker: str):
         metrics["market_cap_fmt"] = format_large_number(metrics.get("market_cap"))
         return metrics
     except Exception as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise _upstream_error(e, 404)
 
 
 class BatchMetricsRequest(BaseModel):
@@ -263,13 +307,38 @@ def batch_metrics(request: Request, req: BatchMetricsRequest):
     tickers = [_valid_ticker(t) for t in req.tickers[:30]]
     def _fetch(t):
         try:
-            m = get_key_metrics(t)
-            return {"ticker": t, "price": m.get("price"), "change_pct": m.get("change_pct"), "name": m.get("name", t)}
+            q = get_quote(t)
+            return {"ticker": t, "price": q.get("price"), "change_pct": q.get("change_pct"), "name": q.get("name", t)}
         except Exception:
             return {"ticker": t, "price": None, "change_pct": None, "name": t}
     with ThreadPoolExecutor(max_workers=min(len(tickers), 8)) as pool:
         results = list(pool.map(_fetch, tickers))
     return {"quotes": {r["ticker"]: r for r in results}}
+
+
+_INTRADAY = ("1m", "2m", "5m", "15m", "30m", "1h")
+# Extra history so long averages (SMA 200 etc.) are populated from the first visible bar
+_WARMUP = {
+    ("1d", "1mo"): "2y", ("1d", "3mo"): "2y", ("1d", "6mo"): "2y", ("1d", "1y"): "2y",
+    ("1d", "2y"): "5y", ("1d", "5y"): "max",
+    ("1wk", "1y"): "max", ("1wk", "2y"): "max", ("1wk", "5y"): "max",
+    ("1mo", "5y"): "max",
+    ("5m", "1d"): "5d", ("15m", "1d"): "5d", ("30m", "1d"): "5d", ("1h", "1d"): "1mo",
+    ("5m", "5d"): "1mo", ("15m", "5d"): "1mo", ("30m", "5d"): "1mo", ("1h", "5d"): "3mo",
+    ("1h", "1mo"): "6mo",
+}
+_PERIOD_OFFSETS = {"1mo": {"months": 1}, "3mo": {"months": 3}, "6mo": {"months": 6},
+                   "1y": {"years": 1}, "2y": {"years": 2}, "5y": {"years": 5}}
+
+
+def _trim_to_period(df, period: str):
+    import pandas as pd
+    if period in ("1d", "5d"):
+        sessions = sorted(set(df.index.date))[-(1 if period == "1d" else 5):]
+        return df[pd.Index(df.index.date).isin(sessions)]
+    if period in _PERIOD_OFFSETS:
+        return df[df.index > df.index[-1] - pd.DateOffset(**_PERIOD_OFFSETS[period])]
+    return df
 
 
 @app.get("/api/stock/{ticker}/history")
@@ -283,8 +352,19 @@ def stock_history(
 ):
     ticker = _valid_ticker(ticker)
     try:
-        df = get_stock_data(ticker, period=period, interval=interval, prepost=prepost)
+        warm = _WARMUP.get((interval, period))
+        try:
+            df = get_stock_data(ticker, period=warm or period, interval=interval, prepost=prepost)
+        except Exception:
+            if not warm:
+                raise
+            warm, df = None, get_stock_data(ticker, period=period, interval=interval, prepost=prepost)
+        # Yahoo occasionally returns bars with missing prices (holidays, halted sessions)
+        df = df.dropna(subset=["Open", "High", "Low", "Close"]).copy()
+        df["Volume"] = df["Volume"].fillna(0)
         df = compute_indicators(df)
+        if warm:
+            df = _trim_to_period(df, period)
         records = []
         indicator_keys = [
             "sma_10", "sma_20", "sma_50", "sma_100", "sma_200",
@@ -300,19 +380,23 @@ def stock_history(
             date_fmt = "%Y-%m-%d %H:%M" if interval in ("1m","2m","5m","15m","30m","1h") else "%Y-%m-%d"
             rec = {
                 "date": ts.strftime(date_fmt),
-                "open": round(row["Open"], 2),
-                "high": round(row["High"], 2),
-                "low": round(row["Low"], 2),
-                "close": round(row["Close"], 2),
+                "open": round(float(row["Open"]), 2),
+                "high": round(float(row["High"]), 2),
+                "low": round(float(row["Low"]), 2),
+                "close": round(float(row["Close"]), 2),
                 "volume": int(row["Volume"]),
             }
             for k in indicator_keys:
                 v = row.get(k)
-                rec[k] = round(float(v), 2) if v is not None and not (isinstance(v, float) and (v != v)) else None
+                try:
+                    f = float(v)
+                    rec[k] = round(f, 2) if math.isfinite(f) else None
+                except (TypeError, ValueError):
+                    rec[k] = None
             records.append(rec)
         return records
     except Exception as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise _upstream_error(e, 404)
 
 
 @app.get("/api/stock/{ticker}/news")
@@ -327,23 +411,20 @@ def stock_news(request: Request, ticker: str):
     try:
         return get_or_fetch(f"news:{ticker}", _fetch, ttl=300)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _upstream_error(e)
 
 
-@app.get("/api/stock/{ticker}/summary")
-@limiter.limit("60/minute")
-def stock_summary(request: Request, ticker: str):
+@app.get("/api/stock/{ticker}/brief")
+@limiter.limit("20/minute")
+def stock_brief(request: Request, ticker: str, user: dict = Depends(get_current_user),
+                profile: Optional[str] = Query(None, pattern="^(day|swing|long)$")):
+    """One AI call: summary, why it's moving, bull/bear, risks, catalysts (cached 15 min per ticker+profile)."""
     ticker = _valid_ticker(ticker)
-    def _fetch():
-        metrics = get_key_metrics(ticker)
-        news = fetch_news(ticker, company_name=metrics.get("name", ""))
-        sentiment = aggregate_sentiment(news)
-        summary = get_ai_summary(metrics, sentiment, news)
-        return {"summary": summary}
+    profile = profile or get_trader_profile(int(user["user_id"])) or "swing"
     try:
-        return get_or_fetch(f"summary:{ticker}", _fetch, ttl=300)
+        return get_ai_brief(ticker, profile)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _upstream_error(e)
 
 
 @app.get("/api/stock/{ticker}/alerts")
@@ -353,9 +434,13 @@ def stock_alerts(request: Request, ticker: str):
     try:
         metrics = get_key_metrics(ticker)
         alerts = check_alerts(metrics)
+        try:
+            alerts += technical_events(metrics.get("name", ticker), get_daily_indicators(ticker))
+        except Exception as e:
+            log.info("No technical events for %s: %s", ticker, e)
         return alerts
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _upstream_error(e)
 
 
 # ── Portfolio (auth required) ──────────────────────────────────────────────
@@ -366,18 +451,24 @@ def portfolio_summary_endpoint(user: dict = Depends(get_current_user)):
     if not holdings:
         return {"total_invested": 0, "total_current": 0, "total_pnl": 0, "total_pnl_pct": 0, "holdings": []}
 
-    # Batch fetch current prices — one yfinance call for all unique tickers
+    # Real-time Finnhub quotes first; one batched yfinance download for anything left
     import yfinance as yf
     unique_tickers = list({h["ticker"] for h in holdings})
     current_prices = {}
+    if finnhub_enabled():
+        for t in unique_tickers:
+            q = finnhub_quote(t)
+            if q:
+                current_prices[t] = round(float(q["c"]), 2)
+    remaining = [t for t in unique_tickers if t not in current_prices]
     try:
-        if len(unique_tickers) == 1:
-            data = yf.download(unique_tickers[0], period="1d", interval="1d", progress=False)
+        if len(remaining) == 1:
+            data = yf.download(remaining[0], period="1d", interval="1d", progress=False)
             if not data.empty:
-                current_prices[unique_tickers[0]] = round(float(data["Close"].iloc[-1]), 2)
-        else:
-            data = yf.download(unique_tickers, period="1d", interval="1d", progress=False, group_by="ticker")
-            for t in unique_tickers:
+                current_prices[remaining[0]] = round(float(data["Close"].iloc[-1]), 2)
+        elif remaining:
+            data = yf.download(remaining, period="1d", interval="1d", progress=False, group_by="ticker")
+            for t in remaining:
                 try:
                     current_prices[t] = round(float(data[t]["Close"].iloc[-1]), 2)
                 except Exception:
@@ -661,23 +752,24 @@ def watchlist_get(user: dict = Depends(get_current_user)):
 
 @app.post("/api/watchlist")
 def watchlist_add(req: WatchlistRequest, user: dict = Depends(get_current_user)):
-    # Validate ticker exists
+    ticker = _valid_ticker(req.ticker)
     try:
-        get_key_metrics(req.ticker.upper())
+        get_key_metrics(ticker)
     except Exception:
-        raise HTTPException(status_code=404, detail=f"Ticker '{req.ticker}' not found")
-    added = add_to_watchlist(user["user_id"], req.ticker)
+        raise HTTPException(status_code=404, detail=f"Ticker '{ticker}' not found")
+    added = add_to_watchlist(user["user_id"], ticker)
     if not added:
         raise HTTPException(status_code=409, detail="Already in watchlist")
-    return {"message": f"{req.ticker.upper()} added to watchlist"}
+    return {"message": f"{ticker} added to watchlist"}
 
 
 @app.delete("/api/watchlist/{ticker}")
 def watchlist_remove(ticker: str, user: dict = Depends(get_current_user)):
+    ticker = _valid_ticker(ticker)
     removed = remove_from_watchlist(user["user_id"], ticker)
     if not removed:
         raise HTTPException(status_code=404, detail="Not in watchlist")
-    return {"message": f"{ticker.upper()} removed from watchlist"}
+    return {"message": f"{ticker} removed from watchlist"}
 
 
 @app.get("/api/screener")
@@ -747,247 +839,88 @@ def screener_data(user: dict = Depends(get_current_user)):
     return {"stocks": results}
 
 
-# ── New AI / analytical endpoints ────────────────────────────────────────────
+# ── AI chat & portfolio doctor ───────────────────────────────────────────────
 
 class ChatMessage(BaseModel):
-    role: str
-    content: str
+    # Only user/assistant turns are accepted; the system prompt is always server-side
+    role: Literal["user", "assistant"]
+    content: str = Field(..., min_length=1, max_length=2000)
 
 class ChatRequest(BaseModel):
-    messages: list[ChatMessage]
-    context: Optional[dict] = None
-
-
-@app.get("/api/stock/{ticker}/why-moving")
-@limiter.limit("30/minute")
-def why_moving(request: Request, ticker: str):
-    """AI explanation of why a stock is moving today."""
-    ticker = _valid_ticker(ticker)
-    def _fetch():
-        from config import AI_API_KEY, AI_MODEL
-        from ai_summary import _get_ai_client
-        metrics = get_key_metrics(ticker)
-        news = fetch_news(ticker, company_name=metrics.get("name", ""))
-        headlines = "\n".join(f"- {a['title']}" for a in news[:6])
-        change_pct = metrics.get("change_pct", 0)
-        direction = "up" if change_pct >= 0 else "down"
-        if not AI_API_KEY:
-            top_headline = news[0]['title'] if news else None
-            explanation = f"{metrics['name']} ({ticker.upper()}) is {direction} {abs(change_pct):.2f}% today at ${metrics['price']:.2f}."
-            if top_headline:
-                explanation += f" Most recent headline: \"{top_headline}\"."
-            explanation += " No AI analysis available — add a GROQ_API_KEY to your .env to enable full explanations."
-            return {"explanation": explanation, "change_pct": change_pct}
-        client = _get_ai_client()
-        prompt = f"""{metrics['name']} ({ticker.upper()}) is {direction} {abs(change_pct):.2f}% today (price: ${metrics['price']}).
-
-Recent headlines:
-{headlines}
-
-In 2-3 short sentences, explain the most likely reason for today's move using only the available context. Be specific. If no clear catalyst is visible, say so clearly. Do not fabricate reasons."""
-        try:
-            resp = client.chat.completions.create(
-                model=AI_MODEL,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=150, temperature=0.5,
-            )
-            return {"explanation": resp.choices[0].message.content.strip(), "change_pct": change_pct}
-        except Exception:
-            top_headline = news[0]['title'] if news else None
-            explanation = f"{metrics['name']} ({ticker.upper()}) is {direction} {abs(change_pct):.2f}% today at ${metrics['price']:.2f}."
-            if top_headline:
-                explanation += f' Most recent headline: "{top_headline}".'
-            explanation += " AI analysis temporarily unavailable."
-            return {"explanation": explanation, "change_pct": change_pct}
-    try:
-        return get_or_fetch(f"why-moving:{ticker}", _fetch, ttl=300)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-def _offline_bull_bear(metrics, news, sentiment):
-    """Data-driven bull/bear fallback when AI is unavailable."""
-    name = metrics.get('name', 'Stock')
-    price = metrics.get('price', 0)
-    change = metrics.get('change_pct', 0)
-    pe = metrics.get('pe_ratio')
-    beta = metrics.get('beta')
-    high_52 = metrics.get('52w_high')
-    low_52 = metrics.get('52w_low')
-    div = metrics.get('dividend_yield')
-    fwd_pe = metrics.get('forward_pe')
-    sent_label = sentiment.get('label', 'Neutral')
-    pct_from_high = ((price - high_52) / high_52 * 100) if high_52 else None
-    pct_from_low = ((price - low_52) / low_52 * 100) if low_52 else None
-    bull, bear = [], []
-    if pct_from_low is not None and pct_from_low < 30:
-        bull.append(f"Trading {pct_from_low:.1f}% above its 52-week low — potential value entry")
-    elif pct_from_low is not None:
-        bull.append(f"Strong momentum — up {pct_from_low:.1f}% from 52-week low at ${low_52:.2f}")
-    if pe and pe < 20:
-        bull.append(f"P/E of {pe:.1f} looks attractive vs typical market multiples")
-    elif fwd_pe and fwd_pe < 18:
-        bull.append(f"Forward P/E of {fwd_pe:.1f} suggests reasonable valuation on future earnings")
-    else:
-        bull.append(f"{'Profitable company' if pe else 'Growth-stage company'} in a large addressable market")
-    if div and div > 0.01:
-        bull.append(f"Pays a {div*100:.2f}% dividend yield, providing income alongside potential upside")
-    elif sent_label in ('Positive', 'Very Bullish', 'Bullish'):
-        bull.append(f"Recent news sentiment is {sent_label.lower()} — positive near-term momentum")
-    else:
-        bull.append("Established brand with scale advantages over smaller competitors")
-    if pct_from_high is not None and pct_from_high < -15:
-        bear.append(f"Down {abs(pct_from_high):.1f}% from its 52-week high of ${high_52:.2f} — trend is weak")
-    elif pct_from_high is not None and pct_from_high > -5:
-        bear.append(f"Near 52-week high (${high_52:.2f}) — limited near-term upside, potential resistance")
-    else:
-        bear.append("Price has pulled back from highs — unclear if this is a reversal or a dip")
-    if pe and pe > 30:
-        bear.append(f"P/E of {pe:.1f} demands continued growth execution — leaves little margin for error")
-    elif pe and pe < 0:
-        bear.append("Currently unprofitable — relies on future growth to justify valuation")
-    else:
-        bear.append("Valuation depends on growth assumptions that may be challenged in a rising-rate environment")
-    if beta and beta > 1.3:
-        bear.append(f"High beta of {beta:.2f} means amplified downside in broader market sell-offs")
-    elif sent_label in ('Negative', 'Bearish', 'Very Bearish'):
-        bear.append(f"Recent news sentiment is {sent_label.lower()} — near-term headwinds possible")
-    else:
-        bear.append("Macro uncertainty and sector rotation could weigh on the stock near-term")
-    verdict = (
-        f"{name} shows {'positive' if change >= 0 else 'negative'} momentum today "
-        f"({change:+.2f}%). Weigh the above factors against your own risk tolerance."
-    )
-    return {"bull": bull[:3], "bear": bear[:3], "verdict": verdict}
-
-
-def _parse_bull_bear_response(text: str) -> dict:
-    """Parse and normalize LLM JSON for the bull/bear endpoint."""
-    cleaned = (text or "").strip().replace("```json", "").replace("```", "").strip()
-    cleaned = re.sub(r',\s*([}\]])', r'\1', cleaned)
-    cleaned = re.sub(r'(?<!\\)\n', ' ', cleaned)
-
-    match = re.search(r'\{.*\}', cleaned, re.DOTALL)
-    if match:
-        cleaned = match.group(0)
-
-    parsed = json.loads(cleaned)
-    bull = parsed.get("bull")
-    bear = parsed.get("bear")
-    verdict = parsed.get("verdict")
-
-    if not isinstance(bull, list) or not isinstance(bear, list):
-        raise ValueError("Invalid bull/bear structure")
-
-    normalized = {
-        "bull": [str(item).strip() for item in bull if str(item).strip()][:3],
-        "bear": [str(item).strip() for item in bear if str(item).strip()][:3],
-        "verdict": str(verdict).strip() if verdict else "",
-    }
-
-    if not normalized["bull"] or not normalized["bear"]:
-        raise ValueError("Missing bull/bear content")
-
-    return normalized
-
-
-@app.get("/api/stock/{ticker}/bull-bear")
-@limiter.limit("30/minute")
-def bull_bear(request: Request, ticker: str):
-    """Structured bull vs bear case."""
-    ticker = _valid_ticker(ticker)
-    def _fetch():
-        from config import AI_API_KEY, AI_MODEL
-        from ai_summary import _get_ai_client
-        metrics = get_key_metrics(ticker)
-        news = fetch_news(ticker, company_name=metrics.get("name", ""))
-        sentiment = aggregate_sentiment(news)
-        headlines = "\n".join(f"- {a['title']}" for a in news[:8])
-        if not AI_API_KEY:
-            return _offline_bull_bear(metrics, news, sentiment)
-        client = _get_ai_client()
-        prompt = f"""Analyze {metrics['name']} ({ticker.upper()}) and return a JSON object with exactly this structure:
-{{
-  "bull": ["point 1", "point 2", "point 3"],
-  "bear": ["point 1", "point 2", "point 3"],
-  "verdict": "one sentence synthesis"
-}}
-
-Data:
-- Price: ${metrics['price']} ({metrics.get('change_pct',0):+.2f}% today)
-- P/E: {metrics.get('pe_ratio','N/A')}, Forward P/E: {metrics.get('forward_pe','N/A')}
-- Beta: {metrics.get('beta','N/A')}, Market Cap: {metrics.get('market_cap',0):,.0f}
-- 52W: ${metrics.get('52w_low',0):.2f} – ${metrics.get('52w_high',0):.2f}
-- News sentiment: {sentiment['label']} ({sentiment['positive']} pos, {sentiment['negative']} neg)
-- Headlines: {headlines}
-
-Return ONLY valid JSON, no markdown fences, no trailing commas. Keep each point under 120 characters."""
-        for attempt in range(2):
-            try:
-                resp = client.chat.completions.create(
-                    model=AI_MODEL,
-                    messages=[{"role": "user", "content": prompt}],
-                    response_format={"type": "json_object"},
-                    max_tokens=300, temperature=0.3 if attempt == 0 else 0.1,
-                )
-                text = resp.choices[0].message.content or ""
-                return _parse_bull_bear_response(text)
-            except (json.JSONDecodeError, ValueError, TypeError):
-                if attempt == 1:
-                    break
-                continue
-            except Exception:
-                break  # provider/network issue — fall through to offline
-        # Fallback: return the offline version
-        return _offline_bull_bear(metrics, news, sentiment)
-    try:
-        return get_or_fetch(f"bull-bear:{ticker}", _fetch, ttl=600)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    messages: list[ChatMessage] = Field(..., min_length=1, max_length=20)
 
 
 @app.post("/api/stock/{ticker}/chat")
-@limiter.limit("30/minute")
-def stock_chat(request: Request, ticker: str, req: ChatRequest):
-    """AI chat with per-ticker context."""
+@limiter.limit("20/minute")
+def stock_chat(request: Request, ticker: str, req: ChatRequest, user: dict = Depends(get_current_user)):
+    """Tool-calling AI assistant: the model fetches live data (quotes, news, filings, portfolio) itself."""
     ticker = _valid_ticker(ticker)
+    if not llm.ai_enabled():
+        return {"reply": "AI chat needs an AI key (GROQ_API_KEY or GEMINI_API_KEY) on the server.", "tools_used": []}
+    history = [{"role": m.role, "content": m.content} for m in req.messages]
     try:
-        from config import AI_API_KEY, AI_MODEL
-        from ai_summary import _get_ai_client
-        if not AI_API_KEY:
-            metrics = get_key_metrics(ticker)
-            last_q = req.messages[-1].content if req.messages else ""
-            reply = (
-                f"AI Chat requires an API key (add GROQ_API_KEY to your .env file). "
-                f"Here's what I can tell you about {ticker.upper()} from live data: "
-                f"Price ${metrics.get('price','N/A')}, {metrics.get('change_pct',0):+.2f}% today, "
-                f"P/E {metrics.get('pe_ratio','N/A')}, Market Cap {metrics.get('market_cap_fmt','N/A')}, "
-                f"Sector: {metrics.get('sector','N/A')}."
-            )
-            return {"reply": reply}
-        client = _get_ai_client()
-        ctx = req.context or {}
-        sys_prompt = f"""You are a financial analyst assistant for {ticker.upper()}.
-Available context: Price=${ctx.get('price','N/A')}, Change={ctx.get('change_pct','N/A')}%, P/E={ctx.get('pe_ratio','N/A')}, Market Cap={ctx.get('market_cap','N/A')}, Sector={ctx.get('sector','N/A')}, News sentiment={ctx.get('sentiment_label','N/A')}.
-Answer questions about this stock concisely. Always add a disclaimer that this is not financial advice."""
-        messages = [{"role": "system", "content": sys_prompt}]
-        messages += [{"role": m.role, "content": m.content} for m in req.messages]
-        try:
-            resp = client.chat.completions.create(
-                model=AI_MODEL, messages=messages, max_tokens=400, temperature=0.7,
-            )
-            return {"reply": resp.choices[0].message.content.strip()}
-        except Exception:
-            metrics = get_key_metrics(ticker)
-            return {"reply": (
-                f"AI temporarily unavailable. Here's live data for {ticker.upper()}: "
-                f"Price ${metrics.get('price','N/A')}, {metrics.get('change_pct',0):+.2f}% today, "
-                f"P/E {metrics.get('pe_ratio','N/A')}, Market Cap {metrics.get('market_cap_fmt','N/A')}."
-            )}
-    except HTTPException:
-        raise
+        return run_chat(ticker, history, lambda: portfolio_summary_endpoint(user))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        log.warning("Chat failed for %s: %s", ticker, e)
+        raise HTTPException(status_code=503, detail="AI is temporarily unavailable. Please try again shortly.")
+
+
+@app.get("/api/portfolio/doctor")
+@limiter.limit("10/minute")
+def portfolio_doctor_endpoint(request: Request, user: dict = Depends(get_current_user)):
+    """Concentration, correlation, volatility, tax-loss and earnings checks with an AI review."""
+    try:
+        return get_or_fetch(f"doctor:{user['user_id']}",
+                            lambda: portfolio_doctor.analyze(portfolio_summary_endpoint(user)), ttl=1800)
+    except Exception as e:
+        raise _upstream_error(e)
+
+
+# ── Notifications & daily briefing ───────────────────────────────────────────
+
+_NTFY_TOPIC_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+
+class NotificationSettings(BaseModel):
+    ntfy_topic: Optional[str] = None
+
+
+@app.get("/api/notifications")
+def notifications_list(user: dict = Depends(get_current_user)):
+    items = list_notifications(user["user_id"])
+    return {"items": items, "unread": sum(1 for n in items if not n.get("read_at"))}
+
+
+@app.post("/api/notifications/read")
+def notifications_read(user: dict = Depends(get_current_user)):
+    mark_notifications_read(user["user_id"])
+    return {"ok": True}
+
+
+@app.get("/api/notifications/settings")
+def notifications_settings_get(user: dict = Depends(get_current_user)):
+    return {"ntfy_topic": get_ntfy_topic(user["user_id"])}
+
+
+@app.put("/api/notifications/settings")
+def notifications_settings_put(req: NotificationSettings, user: dict = Depends(get_current_user)):
+    topic = (req.ntfy_topic or "").strip() or None
+    if topic and not _NTFY_TOPIC_RE.match(topic):
+        raise HTTPException(status_code=400, detail="Topic must be 8-64 letters, digits, '-' or '_'")
+    set_ntfy_topic(user["user_id"], topic)
+    return {"ntfy_topic": topic}
+
+
+@app.get("/api/briefing")
+@limiter.limit("6/minute")
+def daily_briefing(request: Request, refresh: bool = False, user: dict = Depends(get_current_user)):
+    """Today's briefing for the user's holdings + watchlist (generated on demand if missing)."""
+    from database import get_all_user_tickers
+    tickers = get_all_user_tickers().get(int(user["user_id"]), set())
+    try:
+        b = scheduler.get_or_create_briefing(int(user["user_id"]), tickers, force=refresh)
+    except Exception as e:
+        raise _upstream_error(e)
+    return b or {"empty": True}
 
 
 @app.get("/api/stock/{ticker}/peers")
@@ -996,28 +929,11 @@ def stock_peers(request: Request, ticker: str):
     """Return peer/competitor metrics for comparison."""
     ticker = _valid_ticker(ticker)
     def _fetch():
-        import yfinance as yf
-        stock = yf.Ticker(ticker)
-        info = stock.info
-
-        peer_tickers = []
+        peer_tickers = [p for p in finnhub_peers(ticker) if p.upper() != ticker][:4]
 
         try:
-            industry = info.get("industry", "")
-            sector = info.get("sector", "")
-            if industry:
-                try:
-                    import yfinance.screener as screener
-                    s = yf.Screener()
-                    s.set_default_body({"query": {"operator": "AND", "operands": [
-                        {"operator": "eq", "operands": ["industry", industry]}
-                    ]}, "size": 10, "sortField": "intradaymarketcap", "sortType": "DESC"})
-                    results = s.response.get("finance", {}).get("result", [{}])[0].get("quotes", [])
-                    peer_tickers = [q["symbol"] for q in results if q.get("symbol", "").upper() != ticker.upper()][:4]
-                except Exception:
-                    pass
-
             if not peer_tickers:
+                sector = get_key_metrics(ticker).get("sector", "")
                 sector_peers = {
                     "Technology": ["AAPL", "MSFT", "GOOGL", "META", "NVDA", "AMZN", "CRM", "ADBE", "ORCL", "INTC", "AMD", "QCOM", "AVGO", "TSM", "IBM"],
                     "Communication Services": ["GOOGL", "META", "DIS", "NFLX", "CMCSA", "T", "VZ", "SNAP", "PINS"],
@@ -1063,7 +979,7 @@ def stock_peers(request: Request, ticker: str):
     try:
         return get_or_fetch(f"peers:{ticker}", _fetch, ttl=600)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _upstream_error(e)
 
 
 @app.get("/api/stock/{ticker}/events")
@@ -1128,7 +1044,7 @@ def stock_events(ticker: str):
     try:
         return get_or_fetch(f"events:{ticker}", _fetch, ttl=600)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _upstream_error(e)
 
 
 @app.get("/api/stock/{ticker}/history-returns")
@@ -1141,7 +1057,7 @@ def stock_history_returns(ticker: str, period: str = Query("3mo")):
                    for ts, row in df.iterrows()]
         return records
     except Exception as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise _upstream_error(e, 404)
 
 
 # ── Analyst Ratings & Price Targets ─────────────────────────────────────────
@@ -1166,8 +1082,12 @@ def stock_analyst(request: Request, ticker: str):
         recommendation_mean = info.get("recommendationMean")
 
         breakdown = {"strongBuy": 0, "buy": 0, "hold": 0, "sell": 0, "strongSell": 0}
+        fh_recs = finnhub_recommendations(ticker)
+        if fh_recs:
+            for col in breakdown:
+                breakdown[col] = int(fh_recs[0].get(col) or 0)
         try:
-            recs = stock.recommendations
+            recs = None if fh_recs else stock.recommendations
             if recs is not None and not recs.empty:
                 latest = recs.iloc[-1] if len(recs) > 0 else None
                 if latest is not None:
@@ -1210,7 +1130,7 @@ def stock_analyst(request: Request, ticker: str):
     try:
         return get_or_fetch(f"analyst:{ticker}", _fetch, ttl=600)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _upstream_error(e)
 
 
 # ── Financial Statements ────────────────────────────────────────────────────
@@ -1250,7 +1170,7 @@ def stock_financials(request: Request, ticker: str):
     try:
         return get_or_fetch(f"financials:{ticker}", _fetch, ttl=600)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _upstream_error(e)
 
 
 # ── Institutional & Insider Activity ────────────────────────────────────────
@@ -1319,7 +1239,7 @@ def stock_ownership(request: Request, ticker: str):
     try:
         return get_or_fetch(f"ownership:{ticker}", _fetch, ttl=600)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _upstream_error(e)
 
 
 # ── Dividend Details ────────────────────────────────────────────────────────
@@ -1363,7 +1283,7 @@ def stock_dividends(request: Request, ticker: str):
 
         return {
             "dividend_rate": div_rate,
-            "dividend_yield": round(div_yield * 100, 2) if div_yield else None,
+            "dividend_yield": round(div_yield, 2) if div_yield else None,  # yfinance already returns a percent
             "ex_dividend_date": ex_date_str,
             "payout_ratio": round(payout_ratio * 100, 1) if payout_ratio else None,
             "five_year_avg_yield": five_yr_avg,
@@ -1372,7 +1292,7 @@ def stock_dividends(request: Request, ticker: str):
     try:
         return get_or_fetch(f"dividends:{ticker}", _fetch, ttl=600)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _upstream_error(e)
 
 
 # ── Sparkline data for watchlist ────────────────────────────────────────────
@@ -1446,129 +1366,28 @@ def _mid_price(row) -> Optional[float]:
 @app.get("/api/stock/{ticker}/iv-rank")
 @limiter.limit("30/minute")
 def stock_iv_rank(request: Request, ticker: str):
-    """Implied volatility rank and expected move for the nearest expiry.
-
-    IV rank uses 1-year realized volatility distribution as a proxy
-    (yfinance does not expose historical IV). Returned values are clearly
-    labelled so the UI can show the caveat.
-    """
+    """Implied vs realized volatility, IV rank (from our own daily IV snapshots) and expected moves."""
     ticker = _valid_ticker(ticker)
-
-    def _fetch():
-        import yfinance as yf
-        import numpy as np
-
-        stock = yf.Ticker(ticker)
-        info = stock.info or {}
-        spot = info.get("currentPrice") or info.get("regularMarketPrice")
-        if not spot:
-            raise HTTPException(status_code=404, detail="Spot price unavailable")
-
-        # 1-year realized vol distribution (used as IV-rank proxy)
-        try:
-            hist = get_stock_data(ticker, period="1y", interval="1d")
-        except Exception:
-            hist = None
-
-        rv_current = rv_low = rv_high = rv_rank = None
-        if hist is not None and len(hist) > 30:
-            log_ret = np.log(hist["Close"] / hist["Close"].shift(1)).dropna()
-            rolling_rv = log_ret.rolling(20).std() * (252 ** 0.5)
-            rolling_rv = rolling_rv.dropna()
-            if not rolling_rv.empty:
-                rv_current = float(rolling_rv.iloc[-1])
-                rv_low = float(rolling_rv.min())
-                rv_high = float(rolling_rv.max())
-                if rv_high > rv_low:
-                    rv_rank = max(0.0, min(1.0, (rv_current - rv_low) / (rv_high - rv_low)))
-
-        try:
-            expirations = list(stock.options or [])
-        except Exception:
-            expirations = []
-        expiry = _nearest_expiry(expirations, min_days=5, max_days=45) or (expirations[0] if expirations else None)
-
-        atm_iv = call_iv = put_iv = None
-        expected_move_dollars = expected_move_pct = None
-        dte = None
-
-        if expiry:
-            try:
-                chain = stock.option_chain(expiry)
-                call_row = _atm_row(chain.calls, spot)
-                put_row = _atm_row(chain.puts, spot)
-                if call_row is not None:
-                    civ = float(call_row.get("impliedVolatility") or 0)
-                    call_iv = civ if civ > 0 else None
-                if put_row is not None:
-                    piv = float(put_row.get("impliedVolatility") or 0)
-                    put_iv = piv if piv > 0 else None
-                ivs = [v for v in (call_iv, put_iv) if v]
-                if ivs:
-                    atm_iv = sum(ivs) / len(ivs)
-
-                call_mid = _mid_price(call_row)
-                put_mid = _mid_price(put_row)
-                if call_mid and put_mid:
-                    expected_move_dollars = call_mid + put_mid
-                    expected_move_pct = expected_move_dollars / spot * 100
-
-                exp_date = datetime.strptime(expiry, "%Y-%m-%d").date()
-                dte = (exp_date - _date.today()).days
-            except Exception:
-                pass
-
-        verdict = None
-        if rv_rank is not None:
-            if rv_rank >= 0.7:
-                verdict = "high"
-            elif rv_rank <= 0.3:
-                verdict = "low"
-            else:
-                verdict = "mid"
-
-        earnings_date = None
-        try:
-            cal = stock.calendar
-            if isinstance(cal, dict):
-                ed = cal.get("Earnings Date") or cal.get("earningsDate")
-                if isinstance(ed, list) and ed:
-                    ed = ed[0]
-                if ed is not None:
-                    if hasattr(ed, "strftime"):
-                        earnings_date = ed.strftime("%Y-%m-%d")
-                    else:
-                        earnings_date = str(ed)[:10]
-        except Exception:
-            pass
-
-        def _pct(x):
-            return None if x is None else round(x * 100, 1)
-
-        return {
-            "spot": round(float(spot), 2),
-            "expiry": expiry,
-            "dte": dte,
-            "atm_iv_pct": _pct(atm_iv),
-            "call_iv_pct": _pct(call_iv),
-            "put_iv_pct": _pct(put_iv),
-            "rv_current_pct": _pct(rv_current),
-            "rv_low_pct": _pct(rv_low),
-            "rv_high_pct": _pct(rv_high),
-            "rv_rank": None if rv_rank is None else round(rv_rank * 100, 0),
-            "verdict": verdict,
-            "expected_move_dollars": None if expected_move_dollars is None else round(expected_move_dollars, 2),
-            "expected_move_pct": None if expected_move_pct is None else round(expected_move_pct, 2),
-            "earnings_date": earnings_date,
-            "note": "IV rank uses realized volatility as a proxy (yfinance does not expose IV history).",
-        }
-
     try:
-        return get_or_fetch(f"iv-rank:{ticker}", _fetch, ttl=300)
-    except HTTPException:
-        raise
+        return options_analytics.volatility_overview(ticker)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="No listed options for this ticker")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _upstream_error(e)
+
+
+@app.get("/api/stock/{ticker}/income")
+@limiter.limit("30/minute")
+def stock_income(request: Request, ticker: str,
+                 expiry: Optional[str] = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$")):
+    """Covered-call and cash-secured-put ideas at conservative/balanced/aggressive deltas."""
+    ticker = _valid_ticker(ticker)
+    try:
+        return options_analytics.income_ideas(ticker, expiry)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="No listed options for this ticker")
+    except Exception as e:
+        raise _upstream_error(e)
 
 
 @app.get("/api/stock/{ticker}/structures")
@@ -1610,7 +1429,8 @@ def stock_structures(
         try:
             chain = stock.option_chain(expiry)
         except Exception as e:
-            raise HTTPException(status_code=502, detail=f"Option chain unavailable: {e}")
+            log.warning("Option chain failed for %s: %s", ticker, e)
+            raise HTTPException(status_code=502, detail="Option chain unavailable")
 
         df = chain.calls if direction == "bull" else chain.puts
         if df is None or df.empty:
@@ -1702,4 +1522,210 @@ def stock_structures(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _upstream_error(e)
+
+
+# ── Trader profile ───────────────────────────────────────────────────────────
+
+class ProfileRequest(BaseModel):
+    profile: Literal["day", "swing", "long"]
+
+
+@app.get("/api/profile")
+def profile_get(user: dict = Depends(get_current_user)):
+    return {"profile": get_trader_profile(int(user["user_id"]))}
+
+
+@app.put("/api/profile")
+def profile_put(req: ProfileRequest, user: dict = Depends(get_current_user)):
+    set_trader_profile(int(user["user_id"]), req.profile)
+    return {"profile": req.profile}
+
+
+# ── Custom alerts ────────────────────────────────────────────────────────────
+
+MAX_ACTIVE_ALERTS = 50
+
+class CustomAlertRequest(BaseModel):
+    ticker: str
+    kind: Literal["price_above", "price_below", "change_up", "change_down", "rsi_above", "rsi_below", "below_high"]
+    value: float = Field(..., gt=0, lt=1_000_000)
+    note: Optional[str] = Field(None, max_length=200)
+
+
+@app.get("/api/alerts/custom")
+def custom_alerts_list(ticker: Optional[str] = None, user: dict = Depends(get_current_user)):
+    t = _valid_ticker(ticker) if ticker else None
+    items = list_user_alerts(int(user["user_id"]), t)
+    for a in items:
+        a["description"] = scheduler.describe_alert(a["kind"], float(a["value"]))
+    return {"items": items}
+
+
+@app.post("/api/alerts/custom")
+@limiter.limit("30/minute")
+def custom_alerts_add(request: Request, req: CustomAlertRequest, user: dict = Depends(get_current_user)):
+    uid = int(user["user_id"])
+    if count_active_alerts(uid) >= MAX_ACTIVE_ALERTS:
+        raise HTTPException(status_code=400, detail=f"Limit of {MAX_ACTIVE_ALERTS} active alerts reached")
+    if req.kind.startswith("rsi") and req.value >= 100:
+        raise HTTPException(status_code=400, detail="RSI value must be between 0 and 100")
+    add_user_alert(uid, _valid_ticker(req.ticker), req.kind, req.value, (req.note or "").strip() or None)
+    return {"ok": True}
+
+
+@app.delete("/api/alerts/custom/{alert_id}")
+def custom_alerts_delete(alert_id: int, user: dict = Depends(get_current_user)):
+    if not delete_user_alert(int(user["user_id"]), alert_id):
+        raise HTTPException(status_code=404, detail="Alert not found")
+    return {"ok": True}
+
+
+# ── Market overview ──────────────────────────────────────────────────────────
+
+@app.get("/api/market/overview")
+@limiter.limit("60/minute")
+def market_overview(request: Request):
+    try:
+        return market.overview()
+    except Exception as e:
+        raise _upstream_error(e)
+
+
+@app.get("/api/market/movers")
+@limiter.limit("60/minute")
+def market_movers(request: Request, kind: str = Query("gainers", pattern="^(gainers|losers|active)$")):
+    return {"kind": kind, "items": market.movers(kind)}
+
+
+@app.get("/api/market/my-earnings")
+def market_my_earnings(user: dict = Depends(get_current_user)):
+    from database import get_all_user_tickers
+    from providers import finnhub_earnings_calendar
+    tickers = get_all_user_tickers().get(int(user["user_id"]), set())
+    items = [{"ticker": e["symbol"], "date": e.get("date"), "hour": e.get("hour"), "eps_estimate": e.get("epsEstimate")}
+             for e in finnhub_earnings_calendar(14) if e.get("symbol") in tickers]
+    return {"items": sorted(items, key=lambda e: e["date"] or "")}
+
+
+# ── Earnings intelligence ────────────────────────────────────────────────────
+
+@app.get("/api/stock/{ticker}/earnings-intel")
+@limiter.limit("30/minute")
+def stock_earnings_intel(request: Request, ticker: str):
+    ticker = _valid_ticker(ticker)
+    try:
+        return earnings_intel.earnings_intel(ticker)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise _upstream_error(e)
+
+
+@app.get("/api/stock/{ticker}/earnings-release")
+@limiter.limit("10/minute")
+def stock_earnings_release(request: Request, ticker: str, user: dict = Depends(get_current_user)):
+    ticker = _valid_ticker(ticker)
+    try:
+        return earnings_intel.earnings_release_summary(ticker)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        log.warning("Earnings release summary failed for %s: %s", ticker, e)
+        raise HTTPException(status_code=503, detail="Summary temporarily unavailable. Try again shortly.")
+
+
+# ── Setup scanner & relative strength ────────────────────────────────────────
+
+@app.get("/api/scanner")
+@limiter.limit("30/minute")
+def setup_scanner(request: Request):
+    data = scanner.get_scan()
+    return {**data, "setup_labels": scanner.SETUPS}
+
+
+@app.get("/api/stock/{ticker}/rs")
+@limiter.limit("60/minute")
+def stock_relative_strength(request: Request, ticker: str):
+    ticker = _valid_ticker(ticker)
+    try:
+        return get_or_fetch(f"rs:{ticker}", lambda: scanner.relative_strength(ticker), ttl=900)
+    except Exception as e:
+        raise _upstream_error(e)
+
+
+# ── Trade journal ────────────────────────────────────────────────────────────
+
+class JournalEntry(BaseModel):
+    ticker: str
+    side: Literal["long", "short"] = "long"
+    shares: float = Field(..., gt=0)
+    entry_date: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$")
+    entry_price: float = Field(..., gt=0)
+    exit_date: Optional[str] = Field(None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    exit_price: Optional[float] = Field(None, gt=0)
+    stop: Optional[float] = Field(None, gt=0)
+    target: Optional[float] = Field(None, gt=0)
+    setup: Optional[str] = Field(None, max_length=40)
+    notes: Optional[str] = Field(None, max_length=1000)
+
+
+def _journal_payload(req: JournalEntry) -> dict:
+    d = req.model_dump()
+    d["ticker"] = _valid_ticker(req.ticker)
+    d["setup"] = (req.setup or "").strip() or None
+    return d
+
+
+@app.get("/api/journal")
+def journal_get(user: dict = Depends(get_current_user)):
+    return journal.compute_stats(list_journal(int(user["user_id"])))
+
+
+@app.post("/api/journal")
+def journal_add(req: JournalEntry, user: dict = Depends(get_current_user)):
+    add_journal(int(user["user_id"]), _journal_payload(req))
+    return {"ok": True}
+
+
+@app.put("/api/journal/{entry_id}")
+def journal_update(entry_id: int, req: JournalEntry, user: dict = Depends(get_current_user)):
+    if not update_journal(int(user["user_id"]), entry_id, _journal_payload(req)):
+        raise HTTPException(status_code=404, detail="Trade not found")
+    return {"ok": True}
+
+
+@app.delete("/api/journal/{entry_id}")
+def journal_delete(entry_id: int, user: dict = Depends(get_current_user)):
+    if not delete_journal(int(user["user_id"]), entry_id):
+        raise HTTPException(status_code=404, detail="Trade not found")
+    return {"ok": True}
+
+
+@app.get("/api/journal/coach")
+@limiter.limit("6/minute")
+def journal_coach(request: Request, user: dict = Depends(get_current_user)):
+    uid = int(user["user_id"])
+    entries = list_journal(uid)
+    closed = [e for e in entries if e.get("exit_price") is not None]
+    # Re-coach only when the set of closed trades changes
+    key = f"coach:{uid}:{len(closed)}:{max((e['id'] for e in closed), default=0)}"
+    try:
+        return get_or_fetch(key, lambda: journal.ai_coach(journal.compute_stats(entries)), ttl=3600)
+    except Exception as e:
+        log.warning("Journal coach failed: %s", e)
+        raise HTTPException(status_code=503, detail="AI coach temporarily unavailable. Try again shortly.")
+
+
+# ── Long-term fundamentals & valuation ───────────────────────────────────────
+
+@app.get("/api/stock/{ticker}/longterm")
+@limiter.limit("30/minute")
+def stock_long_term(request: Request, ticker: str):
+    ticker = _valid_ticker(ticker)
+    try:
+        return fundamentals.long_term(ticker)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise _upstream_error(e)

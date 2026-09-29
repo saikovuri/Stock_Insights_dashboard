@@ -32,7 +32,9 @@ export default function KeyMetrics({ metrics }) {
     <div className="card">
       <div className="card-header">
         <h2>{metrics.name}</h2>
-        <span className="subtitle">{metrics.sector} &middot; {metrics.industry}</span>
+        <span className="subtitle">
+          {metrics.sector}{metrics.industry && metrics.industry !== metrics.sector && metrics.industry !== 'N/A' ? ` · ${metrics.industry}` : ''}
+        </span>
       </div>
 
       <div className="metrics-grid">

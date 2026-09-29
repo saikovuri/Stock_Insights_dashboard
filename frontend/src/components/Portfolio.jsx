@@ -9,6 +9,7 @@ import {
 } from '../api/stockApi';
 import PortfolioChart from './PortfolioChart';
 import SectorAllocation from './SectorAllocation';
+import PortfolioDoctor from './PortfolioDoctor';
 
 const GUEST_HOLDINGS_KEY = 'guest_holdings';
 
@@ -315,6 +316,8 @@ export default function Portfolio() {
           <SectorAllocation holdings={portfolio.holdings} />
         </div>
       )}
+
+      {!isGuest && portfolio?.holdings?.length > 0 && <PortfolioDoctor />}
 
       <div className="portfolio-tabs">
         <h3 style={{ margin: 0 }}>Portfolio {isGuest && <span className="guest-badge">Guest</span>}</h3>

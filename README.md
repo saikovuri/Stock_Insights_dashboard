@@ -1,60 +1,55 @@
 # Stock Insights Dashboard
 
-AI-powered stock analysis dashboard built with Streamlit.
+AI-powered stock research and portfolio assistant. FastAPI backend + React (Vite/Capacitor) frontend.
 
 ## Features
 
-- **Key Metrics** — Real-time price, P/E, market cap, moving averages, volume
-- **Interactive Charts** — Candlestick/line charts with 20/50-day moving averages
-- **News Sentiment** — Live news with NLP sentiment scoring (positive/negative/neutral)
-- **AI Summary** — GPT-powered stock analysis with buy/hold/sell recommendation
-- **Alerts** — Auto-detected signals: price swings, volume spikes, 52-week proximity, MA crossovers
-- **Portfolio Tracking** — Add holdings, track P/L in real-time
+- **AI Brief** — one call per ticker: summary, why it's moving (with cited headlines), bull/bear case, risks, catalysts, rule-based technical signals
+- **AI Chat (tool-calling)** — the model pulls live quotes, technicals, news, fundamentals, SEC filings, peers and *your portfolio* on demand
+- **Portfolio Doctor** — concentration, sector exposure, beta, correlation, volatility, drawdown, tax-loss candidates, upcoming earnings + AI review
+- **Alerts & Daily Briefing** — scanned every 15 min during market hours and each weekday morning; in-app bell + optional free phone push via [ntfy](https://ntfy.sh)
+- **News Sentiment** — AI-scored sentiment and relevance (VADER fallback)
+- Charts & indicators, screener, watchlist, options tools (IV rank, structures, pre-trade checklist), fundamentals, ownership, dividends
 
 ## Quick Start
 
 ```bash
-# 1. Install dependencies
+cd backend
 pip install -r requirements.txt
+cp ../.env.example .env        # fill in the free keys below
+uvicorn main:app --reload
 
-# 2. Set up API keys (optional but recommended)
-cp .env.example .env
-# Edit .env with your keys:
-#   OPENAI_API_KEY  — for AI summaries (get from https://platform.openai.com)
-#   NEWS_API_KEY    — for live news (get from https://newsapi.org)
-
-# 3. Run the dashboard
-streamlit run app.py
+cd ../frontend
+npm install && npm run dev
 ```
 
-The dashboard works without API keys — you'll get rule-based analysis instead of AI, and placeholder news instead of live feeds.
+Everything degrades gracefully: without keys you get Yahoo data and rule-based analysis.
 
-## API Keys
+## Free API keys
 
-| Key | Source | Required? | What it enables |
-|-----|--------|-----------|-----------------|
-| `OPENAI_API_KEY` | [OpenAI](https://platform.openai.com/api-keys) | Optional | AI-powered stock summaries and recommendations |
-| `NEWS_API_KEY` | [NewsAPI](https://newsapi.org/register) | Optional | Live news headlines with sentiment analysis |
+| Key | Source | What it enables |
+|-----|--------|-----------------|
+| `GROQ_API_KEY` or `GEMINI_API_KEY` | [Groq](https://console.groq.com/keys) / [Google AI Studio](https://aistudio.google.com/apikey) | AI brief, chat, sentiment, portfolio doctor, briefing |
+| `FINNHUB_API_KEY` | [Finnhub](https://finnhub.io/register) | Real-time quotes, company news, analyst trends, peers, earnings calendar |
+| `TWELVEDATA_API_KEY` | [Twelve Data](https://twelvedata.com/pricing) | Price-history fallback when Yahoo fails |
+| `SEC_USER_AGENT` | (no key) | SEC EDGAR filings — just set a contact email |
+
+Yahoo Finance (`yfinance`) is still used for price history, options chains, financial statements and ownership, with the providers above as primary/fallback sources.
 
 ## Project Structure
 
 ```
-├── app.py              # Streamlit dashboard (main entry point)
-├── stock_data.py       # Stock price & metrics via yfinance
-├── news_sentiment.py   # News fetching + TextBlob sentiment
-├── ai_summary.py       # OpenAI GPT analysis (with offline fallback)
-├── portfolio.py        # Portfolio CRUD + P/L calculation
-├── alerts.py           # Smart alert detection
-├── config.py           # Configuration & env loading
-├── requirements.txt    # Python dependencies
-└── .env.example        # API keys template
+backend/
+  main.py              API routes
+  providers.py         Finnhub, Twelve Data, SEC EDGAR clients
+  stock_data.py        Quotes, history, indicators (with provider fallbacks)
+  news_sentiment.py    News + AI/VADER sentiment
+  llm.py               OpenAI-compatible LLM wrapper (Groq/Gemini/OpenAI)
+  ai_brief.py          Single-call AI research brief
+  ai_chat.py           Tool-calling chat
+  portfolio_doctor.py  Portfolio risk analytics + AI review
+  scheduler.py         Background alerts + daily briefing
+  database.py          SQLite (local) / Postgres (Supabase)
+frontend/              React app (web + Capacitor Android/iOS)
+deploy/                Oracle VM setup, Supabase RLS
 ```
-
-## Future Roadmap
-
-- [ ] Scheduled daily email
-- [ ] Multi-ticker comparison view
-- [ ] Technical indicators (RSI, MACD, Bollinger)
-- [ ] Watchlist with batch analysis
-- [ ] Historical portfolio performance chart
-- [ ] Export reports to PDF

@@ -1,0 +1,150 @@
+import { useState, useEffect, useMemo } from 'react';
+import { fetchScanner } from '../api/stockApi';
+
+const TAG_CLS = { breakout: 'signal-bullish', pullback: 'signal-bullish', golden_cross: 'signal-bullish', squeeze: '', oversold: 'signal-bearish' };
+const SHORT = { breakout: 'Breakout', pullback: 'Pullback', squeeze: 'Squeeze', oversold: 'Oversold', golden_cross: 'Golden X' };
+
+function rsClass(rs) {
+  return rs >= 80 ? 'rs-strong' : rs >= 50 ? 'rs-mid' : 'rs-weak';
+}
+
+export default function SetupScanner({ onSelect }) {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+  const [setup, setSetup] = useState('all');
+  const [sector, setSector] = useState('all');
+  const [minRs, setMinRs] = useState(0);
+  const [sort, setSort] = useState({ key: 'rs_rating', dir: -1 });
+
+  useEffect(() => {
+    let timer;
+    const load = () => fetchScanner()
+      .then(d => {
+        setData(d);
+        if (d.status !== 'ready') timer = setTimeout(load, 10_000);
+      })
+      .catch(e => setError(e.message));
+    load();
+    return () => clearTimeout(timer);
+  }, []);
+
+  const rows = useMemo(() => {
+    if (!data?.rows) return [];
+    return data.rows
+      .filter(r => (setup === 'all' ? r.setups.length > 0 : setup === 'any' ? true : r.setups.includes(setup)))
+      .filter(r => sector === 'all' || r.sector === sector)
+      .filter(r => r.rs_rating >= minRs)
+      .sort((a, b) => ((a[sort.key] ?? -1e9) > (b[sort.key] ?? -1e9) ? 1 : -1) * sort.dir)
+      .slice(0, 150);
+  }, [data, setup, sector, minRs, sort]);
+
+  if (error) return <div className="card"><p className="error-text">{error}</p></div>;
+  if (!data) return <div className="card"><p className="loading-text">Loading scanner…</p></div>;
+  if (data.status === 'building' || !data.rows?.length) {
+    return (
+      <div className="card">
+        <h3>🎯 Setup Scanner</h3>
+        <p className="loading-text">Scanning all S&P 500 stocks for the first time — this takes about a minute…</p>
+      </div>
+    );
+  }
+
+  const counts = {};
+  data.rows.forEach(r => r.setups.forEach(s => { counts[s] = (counts[s] || 0) + 1; }));
+  const th = (key, label, title) => (
+    <th onClick={() => setSort(s => ({ key, dir: s.key === key ? -s.dir : -1 }))} title={title} className="sortable">
+      {label}{sort.key === key ? (sort.dir < 0 ? ' ▼' : ' ▲') : ''}
+    </th>
+  );
+
+  return (
+    <div className="setup-scanner">
+      <div className="card">
+        <div className="ivrank-header">
+          <h3 style={{ margin: 0 }}>🎯 Setup Scanner · S&P 500</h3>
+          <span className="market-sub">Updated {new Date(data.updated_at).toLocaleString()}{data.status === 'running' ? ' · refreshing…' : ''}</span>
+        </div>
+        <p className="structures-intro">
+          Rescanned every weekday after the close. <b>RS rating</b> (1–99) ranks 12-month performance against every S&P 500 stock,
+          weighted toward the last 3 months — 80+ means a market leader. Stops are 1.5 × ATR below price, targets 3 × ATR above (2:1 reward/risk).
+        </p>
+
+        <div className="scanner-filters">
+          <div className="chart-toggle">
+            <button className={setup === 'all' ? 'active' : ''} onClick={() => setSetup('all')}>All setups</button>
+            {Object.entries(data.setup_labels).map(([k, label]) => (
+              <button key={k} className={setup === k ? 'active' : ''} onClick={() => setSetup(k)} title={label}>
+                {SHORT[k]} ({counts[k] || 0})
+              </button>
+            ))}
+            <button className={setup === 'any' ? 'active' : ''} onClick={() => setSetup('any')}>Everything</button>
+          </div>
+          <select className="candle-select" value={sector} onChange={e => setSector(e.target.value)}>
+            <option value="all">All sectors</option>
+            {data.sectors.map(s => <option key={s.sector} value={s.sector}>{s.sector}</option>)}
+          </select>
+          <label className="market-sub">
+            Min RS {minRs}
+            <input type="range" min={0} max={95} step={5} value={minRs} onChange={e => setMinRs(Number(e.target.value))} />
+          </label>
+        </div>
+        {setup !== 'all' && setup !== 'any' && <p className="market-sub">{data.setup_labels[setup]}</p>}
+      </div>
+
+      <div className="card">
+        <h3>🏆 Sector leadership</h3>
+        <div className="sector-rs">
+          {data.sectors.map(s => (
+            <button key={s.sector} className={`sector-rs-row ${sector === s.sector ? 'active' : ''}`}
+              onClick={() => setSector(sector === s.sector ? 'all' : s.sector)}>
+              <span>{s.sector}</span>
+              <div className="vol-track"><div className="vol-fill vol-iv" style={{ width: `${s.rs_rating}%` }} /></div>
+              <strong>{s.rs_rating}</strong>
+              <span className={s.r1m >= 0 ? 'positive' : 'negative'}>{s.r1m != null ? `${s.r1m > 0 ? '+' : ''}${s.r1m}% 1M` : ''}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="card">
+        <p className="market-sub">{rows.length} stocks{rows.length === 150 ? ' (showing first 150)' : ''} · click a row to analyze</p>
+        <div className="table-scroll">
+          <table className="market-table scanner-table">
+            <thead>
+              <tr>
+                {th('symbol', 'Stock')}
+                {th('rs_rating', 'RS', 'Relative strength rating (1–99)')}
+                {th('price', 'Price')}
+                {th('change_pct', 'Today')}
+                {th('r1m', '1M')}
+                {th('r3m', '3M')}
+                {th('rsi', 'RSI')}
+                {th('rvol', 'Rel vol', 'Volume vs 50-day average')}
+                {th('pct_from_high', 'From high')}
+                <th>Setups</th>
+                <th title="1.5×ATR stop / 3×ATR target">Stop / Target</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(r => (
+                <tr key={r.symbol} onClick={() => onSelect(r.symbol)}>
+                  <td><strong>{r.symbol}</strong><div className="market-sub">{r.name}</div></td>
+                  <td><span className={`rs-badge ${rsClass(r.rs_rating)}`}>{r.rs_rating}</span></td>
+                  <td>${r.price}</td>
+                  <td className={r.change_pct >= 0 ? 'positive' : 'negative'}>{r.change_pct > 0 ? '+' : ''}{r.change_pct}%</td>
+                  <td className={r.r1m >= 0 ? 'positive' : 'negative'}>{r.r1m != null ? `${r.r1m}%` : '—'}</td>
+                  <td className={r.r3m >= 0 ? 'positive' : 'negative'}>{r.r3m != null ? `${r.r3m}%` : '—'}</td>
+                  <td>{r.rsi}</td>
+                  <td className={r.rvol >= 1.5 ? 'positive' : ''}>{r.rvol != null ? `${r.rvol}×` : '—'}</td>
+                  <td>{r.pct_from_high}%</td>
+                  <td>{r.setups.map(s => <span key={s} className={`signal-chip ${TAG_CLS[s]}`}>{SHORT[s]}</span>)}</td>
+                  <td className="market-sub">${r.stop} / ${r.target}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}

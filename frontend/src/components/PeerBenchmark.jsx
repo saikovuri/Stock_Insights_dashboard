@@ -87,7 +87,7 @@ export default function PeerBenchmark({ ticker }) {
                   <td>{fmt(p.market_cap)}</td>
                   <td>{p.eps != null ? `$${p.eps.toFixed(2)}` : 'N/A'}</td>
                   <td><Bar value={p.beta} max={maxBeta} isBase={isBase} /></td>
-                  <td>{p.dividend_yield != null ? `${(p.dividend_yield * 100).toFixed(2)}%` : 'N/A'}</td>
+                  <td>{p.dividend_yield != null ? `${p.dividend_yield.toFixed(2)}%` : 'N/A'}</td>
                 </tr>
               );
             })}
