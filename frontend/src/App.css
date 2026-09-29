@@ -4567,6 +4567,18 @@ button.signal-chip { cursor: pointer; }
 .raw-statements[open] > summary { margin-bottom: 0.75rem; }
 .show-all-btn { display: block; margin: 0.5rem auto 1.5rem; }
 
+.inplay-table td { vertical-align: top; }
+.inplay-name { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inplay-catalyst { max-width: 320px; font-size: 0.82rem; }
+.inplay-catalyst a { color: var(--text-secondary); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.inplay-catalyst a:hover { color: var(--accent); }
+
+.bt-form { display: flex; flex-wrap: wrap; gap: 0.6rem 0.9rem; align-items: flex-end; margin-bottom: 0.5rem; }
+.bt-form label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.75rem; color: var(--text-muted); }
+.bt-form .tool-input { min-width: 0; width: 110px; }
+.bt-form .bt-num { width: 80px; }
+.bt-verdict { font-weight: 600; margin: 0.5rem 0 0.75rem; }
+
 @media (max-width: 640px) {
   .econ-cal .econ-day { grid-template-columns: 1fr; }
   .sub-tab { flex: 0 0 auto; }

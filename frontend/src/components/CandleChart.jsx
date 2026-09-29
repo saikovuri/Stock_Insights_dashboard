@@ -4,10 +4,19 @@ import {
   createSeriesMarkers, CrosshairMode, PriceScaleMode, LineStyle,
 } from 'lightweight-charts';
 import { useTheme } from '../ThemeContext';
+import { fetchKeyLevels } from '../api/stockApi';
 
 const UP = '#26a69a';
 const DOWN = '#ef5350';
 const INTRADAY = ['1m', '2m', '5m', '15m', '30m', '1h'];
+const DEFAULT_OVERLAYS = { intraday: ['vwap', 'ema_9', 'ema_21'], daily: ['sma_50', 'sma_200'] };
+
+const LEVEL_GROUPS = [
+  { key: 'prev', label: 'Prev day H/L/C', keys: ['pdh', 'pdl', 'pdc'], color: '#90a4ae', short: { pdh: 'PDH', pdl: 'PDL', pdc: 'PDC' } },
+  { key: 'pre', label: 'Premarket H/L', keys: ['pmh', 'pml'], color: '#ba68c8', short: { pmh: 'PMH', pml: 'PML' } },
+  { key: 'or15', label: 'Opening range 15m', keys: ['or15h', 'or15l'], color: '#4dd0e1', short: { or15h: 'OR15 H', or15l: 'OR15 L' } },
+  { key: 'or30', label: 'Opening range 30m', keys: ['or30h', 'or30l'], color: '#26a69a', short: { or30h: 'OR30 H', or30l: 'OR30 L' } },
+];
 
 const OVERLAYS = [
   { key: 'sma_20', label: 'SMA 20', color: '#29b6f6' },
@@ -58,24 +67,35 @@ function fmtVol(v) {
   return String(v);
 }
 
-export default function CandleChart({ data, events, period, interval, prepost, onSettingsChange }) {
+export default function CandleChart({ ticker, data, events, period, interval, prepost, onSettingsChange }) {
   const { theme } = useTheme();
   const containerRef = useRef(null);
   const chartRef = useRef(null);
   const savedRange = useRef(null);
   const lastData = useRef(null);
 
+  const isIntraday = INTRADAY.includes(interval);
   const [chartType, setChartType] = useState('candle');
   const [candleStyle, setCandleStyle] = useState('standard');
-  const [overlays, setOverlays] = useState(['sma_50', 'sma_200']);
+  const [overlays, setOverlays] = useState(isIntraday ? DEFAULT_OVERLAYS.intraday : DEFAULT_OVERLAYS.daily);
   const [panels, setPanels] = useState([]);
   const [showVolume, setShowVolume] = useState(true);
   const [logScale, setLogScale] = useState(false);
   const [showEvents, setShowEvents] = useState(true);
   const [expanded, setExpanded] = useState(false);
   const [hoverIdx, setHoverIdx] = useState(null);
+  const [levels, setLevels] = useState(null);
+  const [levelGroups, setLevelGroups] = useState(['prev', 'pre', 'or15']);
 
-  const isIntraday = INTRADAY.includes(interval);
+  useEffect(() => {
+    setOverlays(isIntraday ? DEFAULT_OVERLAYS.intraday : DEFAULT_OVERLAYS.daily);
+  }, [isIntraday]);
+
+  useEffect(() => {
+    setLevels(null);
+    if (!ticker || !isIntraday) return;
+    fetchKeyLevels(ticker).then(setLevels).catch(() => setLevels(null));
+  }, [ticker, isIntraday, data]);
 
   // Intraday strings are exchange-local; encoding them as UTC makes the axis show exchange time
   const bars = useMemo(() => {
@@ -158,6 +178,15 @@ export default function CandleChart({ data, events, period, interval, prepost, o
       (o.keys || [o.key]).forEach(k => line(k, o.color, 0, { lineStyle: o.style ?? LineStyle.Solid, lineWidth: o.keys ? 1 : 2 }));
     });
 
+    if (isIntraday && levels?.levels) {
+      LEVEL_GROUPS.filter(g => levelGroups.includes(g.key)).forEach(g => {
+        levels.levels.filter(l => g.keys.includes(l.key)).forEach(l => main.createPriceLine({
+          price: l.price, color: g.color, lineWidth: 1, lineStyle: LineStyle.Dashed,
+          axisLabelVisible: true, title: g.short[l.key],
+        }));
+      });
+    }
+
     let pane = 1;
     const guide = (series, price, color) => series.createPriceLine({
       price, color, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false,
@@ -225,7 +254,7 @@ export default function CandleChart({ data, events, period, interval, prepost, o
       chart.remove();
       chartRef.current = null;
     };
-  }, [data, bars, candles, chartType, candleStyle, overlays, panels, showVolume, logScale, showEvents, events, theme, isIntraday]);
+  }, [data, bars, candles, chartType, candleStyle, overlays, panels, showVolume, logScale, showEvents, events, theme, isIntraday, levels, levelGroups]);
 
   if (!bars.length) return null;
 
@@ -302,6 +331,21 @@ export default function CandleChart({ data, events, period, interval, prepost, o
             </label>
           );
         })}
+        {isIntraday && levels?.levels?.length > 0 && (
+          <>
+            <span className="chart-divider" />
+            {LEVEL_GROUPS.filter(g => levels.levels.some(l => g.keys.includes(l.key))).map(g => {
+              const on = levelGroups.includes(g.key);
+              return (
+                <label key={g.key} className={`indicator-chip ${on ? 'on' : ''}`} style={on ? { borderColor: g.color, color: g.color } : {}}
+                  title="Key intraday level (dashed line)">
+                  <input type="checkbox" checked={on} onChange={() => toggle(setLevelGroups)(g.key)} />
+                  {g.label}
+                </label>
+              );
+            })}
+          </>
+        )}
       </div>
 
       <div className="tv-chart-wrap" style={{ height }}>

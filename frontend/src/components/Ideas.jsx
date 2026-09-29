@@ -1,13 +1,16 @@
 import { useState, useEffect } from 'react';
 import SetupScanner from './SetupScanner';
 import EconomicCalendar from './EconomicCalendar';
+import InPlay from './InPlay';
+import StrategyTester from './StrategyTester';
+import { useProfile } from '../ProfileContext';
 import { FlowTable } from './OptionsFlow';
 import { fetchUnusualOptions, fetchInsiderBuying, fetchSuperinvestors } from '../api/stockApi';
 
 const money = v => v >= 1e9 ? `$${(v / 1e9).toFixed(1)}B` : v >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : `$${(v / 1e3).toFixed(0)}K`;
 const TABS = [
-  ['setups', '🎯 Setups'], ['flow', '🌊 Unusual options'], ['insiders', '🕴️ Insider buying'],
-  ['super', '🧠 Superinvestors'], ['macro', '📅 Macro calendar'],
+  ['inplay', '⚡ In play'], ['setups', '🎯 Setups'], ['flow', '🌊 Unusual options'], ['insiders', '🕴️ Insider buying'],
+  ['super', '🧠 Superinvestors'], ['macro', '📅 Macro calendar'], ['tester', '🧪 Strategy tester'],
 ];
 const ACTION = { new: ['🆕 New', 'positive'], added: ['➕ Added', 'positive'], reduced: ['➖ Reduced', 'negative'], sold: ['❌ Sold', 'negative'] };
 
@@ -190,7 +193,8 @@ function Superinvestors({ onSelect }) {
 }
 
 export default function Ideas({ onSelect }) {
-  const [tab, setTab] = useState(() => sessionStorage.getItem('ideas_tab') || 'setups');
+  const { profile } = useProfile();
+  const [tab, setTab] = useState(() => sessionStorage.getItem('ideas_tab') || (profile === 'day' ? 'inplay' : 'setups'));
   const choose = t => { setTab(t); sessionStorage.setItem('ideas_tab', t); };
   return (
     <div className="ideas-page">
@@ -199,11 +203,13 @@ export default function Ideas({ onSelect }) {
           <button key={id} className={`sub-tab ${tab === id ? 'active' : ''}`} onClick={() => choose(id)}>{label}</button>
         ))}
       </nav>
+      {tab === 'inplay' && <InPlay onSelect={onSelect} />}
       {tab === 'setups' && <SetupScanner onSelect={onSelect} />}
       {tab === 'flow' && <UnusualOptions onSelect={onSelect} />}
       {tab === 'insiders' && <InsiderBuying onSelect={onSelect} />}
       {tab === 'super' && <Superinvestors onSelect={onSelect} />}
       {tab === 'macro' && <EconomicCalendar />}
+      {tab === 'tester' && <StrategyTester />}
     </div>
   );
 }

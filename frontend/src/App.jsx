@@ -223,7 +223,7 @@ function AppShell() {
                     <KeyMetrics metrics={metrics} />
                     <AiBrief ticker={ticker} profile={profile} onSignIn={() => setShowLogin(true)} />
                     {show('thesis') && <ThesisCard ticker={ticker} />}
-                    <PriceChart data={history} events={events}
+                    <PriceChart ticker={ticker} data={history} events={events}
                       period={period} interval={interval} prepost={prepost}
                       onSettingsChange={({ period: p, interval: i, prepost: pp }) => {
                         const newPeriod = p ?? period;

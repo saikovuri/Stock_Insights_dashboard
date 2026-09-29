@@ -369,6 +369,18 @@ export const importPortfolioCsv = (csv, commit) =>
 export const fetchWeeklyReview = (refresh = false) =>
   getJson(`${BASE}/weekly-review${refresh ? '?refresh=true' : ''}`, 'Failed to load weekly review', true);
 
+// ── Day trading ──────────────────────────────────────────────────
+export const fetchKeyLevels = (t) => getJson(`${BASE}/stock/${t}/levels`, 'Failed to load levels');
+export const fetchInPlay = () => getJson(`${BASE}/ideas/in-play`, 'Failed to load stocks in play');
+export const fetchBacktestStrategies = () => getJson(`${BASE}/backtest/strategies`, 'Failed to load strategies');
+export const runBacktest = (opts) => {
+  const q = new URLSearchParams();
+  Object.entries(opts).forEach(([k, v]) => { if (v !== '' && v != null) q.set(k, v); });
+  return getJson(`${BASE}/backtest?${q}`, 'Backtest failed');
+};
+export const compareBacktests = (ticker, timeframe, cost_bps) =>
+  getJson(`${BASE}/backtest/compare?${new URLSearchParams({ ticker, timeframe, cost_bps })}`, 'Comparison failed');
+
 // ── Theses ───────────────────────────────────────────────────────
 export const fetchThesis = (t) => getJson(`${BASE}/thesis/${t}`, 'Failed to load thesis', true);
 export const saveThesis = (t, thesis) => sendJson(`${BASE}/thesis/${t}`, 'PUT', { thesis }, 'Failed to save thesis');

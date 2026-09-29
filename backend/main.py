@@ -33,6 +33,8 @@ import macro
 import smart_money
 import portfolio_insights
 import thesis
+import intraday
+import backtester
 from providers import finnhub_enabled, finnhub_quote, finnhub_peers, finnhub_recommendations, \
     finnhub_basic_financials, finnhub_earnings_calendar, finnhub_insider_transactions, finnhub_profile, \
     finra_short_interest
@@ -1937,3 +1939,77 @@ def thesis_check(request: Request, ticker: str, user: dict = Depends(get_current
     except Exception as e:
         log.warning("Thesis check failed for %s: %s", ticker, e)
         raise HTTPException(status_code=503, detail="AI is temporarily unavailable. Try again shortly.")
+
+
+# ── Day trading: key levels, stocks in play, strategy tester ─────────────────
+
+@app.get("/api/stock/{ticker}/levels")
+@limiter.limit("60/minute")
+def stock_levels(request: Request, ticker: str):
+    ticker = _valid_ticker(ticker)
+    try:
+        return intraday.key_levels(ticker)
+    except Exception as e:
+        raise _upstream_error(e, 404)
+
+
+@app.get("/api/ideas/in-play")
+@limiter.limit("20/minute")
+def ideas_in_play(request: Request):
+    try:
+        return intraday.stocks_in_play()
+    except Exception as e:
+        raise _upstream_error(e)
+
+
+@app.get("/api/backtest/strategies")
+def backtest_strategies():
+    return {"strategies": backtester.STRATEGIES, "timeframes": list(backtester.TIMEFRAMES)}
+
+
+def _bt_overrides(request: Request) -> dict:
+    out = {}
+    for k, v in request.query_params.items():
+        if k.startswith("p_"):
+            try:
+                out[k[2:]] = float(v)
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Parameter {k[2:]} must be a number")
+            if not 0 <= out[k[2:]] <= 500:
+                raise HTTPException(status_code=400, detail=f"Parameter {k[2:]} is out of range")
+    return out
+
+
+@app.get("/api/backtest")
+@limiter.limit("20/minute")
+def backtest_run(request: Request, ticker: str,
+                 timeframe: Literal["1m", "3m", "5m", "15m", "1h", "1d"] = "5m",
+                 strategy: str = "ema_cross",
+                 side: Literal["both", "long", "short"] = "both",
+                 cost_bps: float = Query(3.0, ge=0, le=50),
+                 stop_pct: float = Query(0.0, ge=0, le=50),
+                 target_pct: float = Query(0.0, ge=0, le=100)):
+    ticker = _valid_ticker(ticker)
+    if strategy not in backtester.STRATEGIES:
+        raise HTTPException(status_code=400, detail="Unknown strategy")
+    overrides = _bt_overrides(request)
+    try:
+        return backtester.run(ticker, timeframe, strategy, overrides, side, cost_bps, stop_pct, target_pct)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise _upstream_error(e)
+
+
+@app.get("/api/backtest/compare")
+@limiter.limit("10/minute")
+def backtest_compare(request: Request, ticker: str,
+                     timeframe: Literal["1m", "3m", "5m", "15m", "1h", "1d"] = "5m",
+                     cost_bps: float = Query(3.0, ge=0, le=50)):
+    ticker = _valid_ticker(ticker)
+    try:
+        return backtester.compare(ticker, timeframe, cost_bps)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise _upstream_error(e)
