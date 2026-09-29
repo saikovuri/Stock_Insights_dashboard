@@ -54,11 +54,30 @@ from database import (
     count_active_alerts, list_journal, add_journal, update_journal, delete_journal,
     get_thesis, list_theses, delete_thesis,
 )
-from config import CORS_ORIGINS, SCHEDULER_ENABLED
+from config import CORS_ORIGINS, SCHEDULER_ENABLED, SENTRY_DSN, SENTRY_ENVIRONMENT
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 log = logging.getLogger("api")
+
+if SENTRY_DSN:
+    import os
+    import sentry_sdk
+    from sentry_sdk.integrations.fastapi import FastApiIntegration
+    from sentry_sdk.integrations.logging import ignore_logger
+    from sentry_sdk.integrations.starlette import StarletteIntegration
+
+    # Only real crashes and ERROR logs (e.g. scheduler failures); HTTP error responses are expected
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        environment=SENTRY_ENVIRONMENT,
+        release=os.getenv("RENDER_GIT_COMMIT"),
+        send_default_pii=False,
+        traces_sample_rate=0.0,
+        integrations=[StarletteIntegration(failed_request_status_codes=set()),
+                      FastApiIntegration(failed_request_status_codes=set())],
+    )
+    ignore_logger("yfinance")
 
 app = FastAPI(title="Stock Insights API", version="3.0.0")
 

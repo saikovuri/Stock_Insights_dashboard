@@ -1,0 +1,62 @@
+name: Database backup
+
+# Weekly encrypted pg_dump of the Supabase database, kept as a workflow artifact for 90 days.
+# Repo secrets required: DATABASE_URL (Supabase session-mode URI, port 5432) and BACKUP_PASSPHRASE.
+# The weekly connection also counts as database activity, which keeps a free Supabase project from pausing.
+
+on:
+  schedule:
+    - cron: "0 6 * * 0"  # Sundays 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check secrets
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          if [ -z "$DATABASE_URL" ] || [ -z "$BACKUP_PASSPHRASE" ]; then
+            echo "::error::Set DATABASE_URL and BACKUP_PASSPHRASE in Settings > Secrets and variables > Actions"
+            exit 1
+          fi
+
+      - name: Install PostgreSQL 17 client
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-17
+
+      - name: Dump, compress and encrypt
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          umask 077
+          STAMP=$(date -u +%Y-%m-%d)
+          echo "STAMP=$STAMP" >> "$GITHUB_ENV"
+          # kv_cache only holds regenerable scan/cache data
+          /usr/lib/postgresql/17/bin/pg_dump "$DATABASE_URL" --schema=public --no-owner --no-privileges \
+            --exclude-table-data=public.kv_cache \
+            | gzip -9 \
+            | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --symmetric --cipher-algo AES256 \
+                  -o "stockinsights-$STAMP.sql.gz.gpg" 3<<<"$BACKUP_PASSPHRASE"
+          ls -lh "stockinsights-$STAMP.sql.gz.gpg"
+          test "$(stat -c%s "stockinsights-$STAMP.sql.gz.gpg")" -gt 1000
+
+      - name: Upload encrypted backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-backup-${{ env.STAMP }}
+          path: stockinsights-*.sql.gz.gpg
+          retention-days: 90
+          if-no-files-found: error

@@ -75,6 +75,10 @@ SEC_USER_AGENT = os.getenv("SEC_USER_AGENT", "StockInsights/2.0 admin@example.co
 
 # ── Notifications / scheduler ────────────────────────────────────────────
 SCHEDULER_ENABLED = os.getenv("SCHEDULER_ENABLED", "1") == "1"
+
+# Error tracking (optional): https://sentry.io free tier
+SENTRY_DSN = os.getenv("SENTRY_DSN", "")
+SENTRY_ENVIRONMENT = os.getenv("SENTRY_ENVIRONMENT", "production")
 ALERT_SCAN_MINUTES = int(os.getenv("ALERT_SCAN_MINUTES", "15"))
 BRIEFING_HOUR_ET = int(os.getenv("BRIEFING_HOUR_ET", "8"))
 NTFY_SERVER = os.getenv("NTFY_SERVER", "https://ntfy.sh").rstrip("/")

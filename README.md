@@ -58,5 +58,11 @@ backend/
   scheduler.py         Background alerts + daily briefing
   database.py          SQLite (local) / Postgres (Supabase)
 frontend/              React app (web + Capacitor Android/iOS)
-deploy/                Oracle VM setup, Supabase RLS
+deploy/                Oracle VM setup, Supabase RLS, manual backup script
 ```
+
+## Operations
+
+- **Dependencies** are pinned in `backend/requirements.txt` (Python version in `backend/.python-version`). Upgrade deliberately: bump a version, test locally, then deploy.
+- **Error tracking:** set `SENTRY_DSN` (Render) and `VITE_SENTRY_DSN` (Vercel) from a free [Sentry](https://sentry.io) account. Without them monitoring is off.
+- **Backups:** `.github/workflows/db-backup.yml` runs every Sunday and stores an AES-256 encrypted `pg_dump` as a workflow artifact for 90 days. Add repo secrets `DATABASE_URL` (Supabase *session* connection string, port 5432) and `BACKUP_PASSPHRASE`. Run it any time from the Actions tab. Restore with `gpg -d FILE.sql.gz.gpg | gunzip | psql "$DATABASE_URL"`.
