@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine } from 'recharts';
 import { useAuth } from '../AuthContext';
+import PreTradeChecklist from './PreTradeChecklist';
+import PositionCalculator from './PositionCalculator';
 import {
   fetchJournal, addJournalEntry, updateJournalEntry, deleteJournalEntry, fetchJournalCoach,
 } from '../api/stockApi';
@@ -35,6 +37,18 @@ function Breakdown({ title, rows }) {
   );
 }
 
+function PlanTrade() {
+  return (
+    <details className="card plan-trade">
+      <summary><h3 style={{ display: 'inline' }}>🧮 Plan a trade</h3> <span className="market-sub">pre-trade checklist & position size</span></summary>
+      <div className="tools-grid">
+        <PreTradeChecklist />
+        <PositionCalculator />
+      </div>
+    </details>
+  );
+}
+
 export default function Journal({ onSignIn, onSelect }) {
   const { user } = useAuth();
   const [report, setReport] = useState(null);
@@ -53,10 +67,13 @@ export default function Journal({ onSignIn, onSelect }) {
 
   if (!user) {
     return (
-      <div className="card">
-        <h3>📓 Trade Journal</h3>
-        <p className="empty-state" style={{ padding: 0 }}>Sign in to log trades and get AI coaching on your win rate, R-multiples and habits.</p>
-        {onSignIn && <button className="btn-primary btn-sm" onClick={onSignIn}>Sign in</button>}
+      <div className="journal">
+        <PlanTrade />
+        <div className="card">
+          <h3>📓 Trade Journal</h3>
+          <p className="empty-state" style={{ padding: 0 }}>Sign in to log trades and get AI coaching on your win rate, R-multiples and habits.</p>
+          {onSignIn && <button className="btn-primary btn-sm" onClick={onSignIn}>Sign in</button>}
+        </div>
       </div>
     );
   }
@@ -101,6 +118,7 @@ export default function Journal({ onSignIn, onSelect }) {
 
   return (
     <div className="journal">
+      <PlanTrade />
       <div className="card">
         <div className="ivrank-header">
           <h3 style={{ margin: 0 }}>📓 Trade Journal</h3>

@@ -381,6 +381,24 @@ def init_db():
             cur.execute("ALTER TABLE users ADD COLUMN trader_profile TEXT")
         conn.commit()
 
+    serial = "SERIAL PRIMARY KEY" if USE_PG else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    ts = "TIMESTAMPTZ NOT NULL DEFAULT NOW()" if USE_PG else "TEXT NOT NULL DEFAULT (datetime('now'))"
+    cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS theses (
+            id {serial},
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            ticker TEXT NOT NULL,
+            thesis TEXT NOT NULL,
+            next_earnings TEXT,
+            last_check TEXT,
+            last_checked_at TEXT,
+            created_at {ts},
+            updated_at {ts},
+            UNIQUE(user_id, ticker)
+        )
+    """)
+    conn.commit()
+
     # ── Indexes (idempotent for both PG and SQLite) ──
     idx = conn.cursor()
     idx_stmts = [
@@ -452,20 +470,20 @@ def get_user_holdings(user_id: int) -> list[dict]:
     return rows
 
 
-def add_user_holding(user_id: int, ticker: str, shares: float, buy_price: float) -> dict:
+def add_user_holding(user_id: int, ticker: str, shares: float, buy_price: float,
+                     acquired: str | None = None) -> dict:
     conn = get_db()
     cur = conn.cursor()
+    cols, vals = "user_id, ticker, shares, buy_price", [user_id, ticker.upper(), shares, buy_price]
+    if acquired:
+        cols += ", date_added"
+        vals.append(acquired)
+    ph = ", ".join([PH] * len(vals))
     if USE_PG:
-        cur.execute(
-            f"INSERT INTO holdings (user_id, ticker, shares, buy_price) VALUES ({PH}, {PH}, {PH}, {PH}) RETURNING *",
-            (user_id, ticker.upper(), shares, buy_price),
-        )
+        cur.execute(f"INSERT INTO holdings ({cols}) VALUES ({ph}) RETURNING *", tuple(vals))
         new_row = _fetchone(cur)
     else:
-        cur.execute(
-            f"INSERT INTO holdings (user_id, ticker, shares, buy_price) VALUES ({PH}, {PH}, {PH}, {PH})",
-            (user_id, ticker.upper(), shares, buy_price),
-        )
+        cur.execute(f"INSERT INTO holdings ({cols}) VALUES ({ph})", tuple(vals))
         cur.execute(f"SELECT * FROM holdings WHERE id = {PH}", (cur.lastrowid,))
         new_row = _fetchone(cur)
     cur.execute(
@@ -1062,6 +1080,45 @@ def update_journal(user_id: int, entry_id: int, entry: dict) -> bool:
 
 def delete_journal(user_id: int, entry_id: int) -> bool:
     return _run(f"DELETE FROM journal WHERE id={PH} AND user_id={PH}", (entry_id, user_id)) > 0
+
+
+# ── Investment theses ─────────────────────────────────────────────────────────────────────────
+
+def _decode_thesis(row: dict | None) -> dict | None:
+    if row:
+        row["last_check"] = json.loads(row["last_check"]) if row.get("last_check") else None
+        _stringify([row])
+    return row
+
+
+def get_thesis(user_id: int, ticker: str) -> dict | None:
+    return _decode_thesis(_run(f"SELECT * FROM theses WHERE user_id={PH} AND ticker={PH}",
+                               (user_id, ticker.upper()), "one"))
+
+
+def list_theses(user_id: int | None = None) -> list[dict]:
+    if user_id is None:
+        rows = _run("SELECT * FROM theses", (), "all")
+    else:
+        rows = _run(f"SELECT * FROM theses WHERE user_id={PH} ORDER BY ticker", (user_id,), "all")
+    return [_decode_thesis(r) for r in rows]
+
+
+def save_thesis(user_id: int, ticker: str, thesis: str, next_earnings: str | None) -> None:
+    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    _run(f"INSERT INTO theses (user_id, ticker, thesis, next_earnings, updated_at) VALUES ({PH}, {PH}, {PH}, {PH}, {PH}) "
+         f"ON CONFLICT (user_id, ticker) DO UPDATE SET thesis=excluded.thesis, next_earnings=excluded.next_earnings, "
+         f"updated_at=excluded.updated_at", (user_id, ticker.upper(), thesis, next_earnings, now))
+
+
+def save_thesis_check(thesis_id: int, check: dict, next_earnings: str | None) -> None:
+    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    _run(f"UPDATE theses SET last_check={PH}, last_checked_at={PH}, next_earnings={PH} WHERE id={PH}",
+         (json.dumps(check), now, next_earnings, thesis_id))
+
+
+def delete_thesis(user_id: int, ticker: str) -> bool:
+    return _run(f"DELETE FROM theses WHERE user_id={PH} AND ticker={PH}", (user_id, ticker.upper())) > 0
 
 
 # ── Persistent key/value cache (survives restarts; used for nightly scans) ──────────

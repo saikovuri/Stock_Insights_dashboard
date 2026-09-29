@@ -2,23 +2,33 @@ import { createContext, useContext, useState, useEffect, useCallback } from 'rea
 import { useAuth } from './AuthContext';
 import { fetchProfile, saveProfile } from './api/stockApi';
 
+// hide: dashboard cards not shown for this style (a "show all" toggle reveals them)
+// options: option-hub tabs in priority order
 export const PROFILES = {
   day: {
     label: 'Day trader', icon: '⚡',
     chart: { period: '1d', interval: '5m' },
     subTabs: ['overview', 'analysis', 'news', 'fundamentals'],
+    hide: ['thesis', 'longterm', 'financials', 'ownership'],
+    options: ['flow', 'volatility', 'directional', 'income'],
   },
   swing: {
     label: 'Swing trader', icon: '🌊',
     chart: { period: '6mo', interval: '1d' },
     subTabs: ['overview', 'analysis', 'fundamentals', 'news'],
+    hide: ['financials'],
+    options: ['volatility', 'flow', 'directional', 'income'],
   },
   long: {
     label: 'Long-term investor', icon: '🌳',
     chart: { period: '5y', interval: '1wk' },
     subTabs: ['overview', 'fundamentals', 'news', 'analysis'],
+    hide: ['rs'],
+    options: ['income', 'volatility'],
   },
 };
+
+export const ALL_OPTION_TABS = ['volatility', 'income', 'directional', 'flow'];
 
 const KEY = 'trader_profile';
 const ProfileContext = createContext(null);

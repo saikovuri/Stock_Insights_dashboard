@@ -9,7 +9,12 @@ AI-powered stock research and portfolio assistant. FastAPI backend + React (Vite
 - **Portfolio Doctor** — concentration, sector exposure, beta, correlation, volatility, drawdown, tax-loss candidates, upcoming earnings + AI review
 - **Alerts & Daily Briefing** — scanned every 15 min during market hours and each weekday morning; in-app bell + optional free phone push via [ntfy](https://ntfy.sh)
 - **News Sentiment** — AI-scored sentiment and relevance (VADER fallback)
-- Charts & indicators, screener, watchlist, options tools (IV rank, structures, pre-trade checklist), fundamentals, ownership, dividends
+- **Ideas** — S&P 500 setup scanner with a 1-year backtested track record per setup, market-wide unusual options activity, insider cluster buying (Form 4), superinvestor 13F changes, US economic calendar
+- **Options hub** — volatility & expected move, covered-call / cash-secured-put ideas, directional structures, and flow & positioning (put/call, max pain, call/put walls, dealer gamma flip) from free CBOE delayed quotes
+- **Portfolio insights** — performance vs the same dollars in SPY, projected dividend income calendar, wash-sale warnings, correlation, broker CSV import, weekly AI review
+- **Thesis tracker** — write why you own a stock; the AI re-checks it after every earnings report and notifies you
+- **Key-level alerts** — one click turns a level from the AI brief into a price alert
+- Profile-aware layout (day / swing / long-term), short interest (FINRA), charts & indicators, watchlist, trade journal with position sizing, fundamentals, ownership, dividends
 
 ## Quick Start
 
@@ -35,6 +40,8 @@ Everything degrades gracefully: without keys you get Yahoo data and rule-based a
 | `SEC_USER_AGENT` | (no key) | SEC EDGAR filings — just set a contact email |
 
 Yahoo Finance (`yfinance`) is still used for price history, options chains, financial statements and ownership, with the providers above as primary/fallback sources.
+
+Keyless free sources: CBOE delayed option quotes, FINRA short interest, Nasdaq economic calendar, SEC EDGAR 13F/Form 4, OpenFIGI (CUSIP → ticker).
 
 ## Project Structure
 

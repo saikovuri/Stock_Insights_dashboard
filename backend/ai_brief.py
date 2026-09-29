@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import llm
 from cache import get_or_fetch, invalidate
 from config import AI_MODEL
+from macro import high_impact_this_week
 from news_sentiment import fetch_news, aggregate_sentiment
 from providers import finnhub_recommendations, finnhub_earnings_calendar
 from stock_data import get_key_metrics, get_technical_snapshot, format_large_number, get_daily_indicators
@@ -59,6 +60,7 @@ def build_context(ticker: str) -> dict:
         "levels": levels,
         "analyst": analyst,
         "earnings": earnings,
+        "macro": high_impact_this_week(),
         "news": news[:8],
         "sentiment": aggregate_sentiment(news),
     }
@@ -138,6 +140,7 @@ TECHNICALS: {t or 'unavailable'}
 RULE-BASED SIGNALS: {[s['label'] for s in signals]}
 ANALYST CONSENSUS: {analyst}
 NEXT EARNINGS: {earnings}
+MACRO EVENTS THIS WEEK: {ctx.get('macro') or 'none high-impact'}
 NEWS SENTIMENT: {ctx['sentiment']['label']} (avg {ctx['sentiment']['avg']})
 HEADLINES:
 {headlines}
@@ -151,12 +154,25 @@ Return JSON with exactly these keys:
  "bear": ["3 points, each under 120 chars"],
  "risks": ["2-3 key risks"],
  "watch": ["2-3 upcoming catalysts or price levels to watch"],
+ "levels": [{{"price": 123.45, "label": "short reason, e.g. breakout above 20-day high"}}, ... 2-4 concrete price levels near the current price],
  "verdict": "one-sentence balanced takeaway",
  "citations": [headline numbers you relied on]}}"""
 
 
 def _str_list(v, limit):
     return [str(x).strip() for x in (v or []) if str(x).strip()][:limit] if isinstance(v, list) else []
+
+
+def _key_levels(raw, price) -> list[dict]:
+    out = []
+    for x in raw if isinstance(raw, list) else []:
+        try:
+            p = float(x.get("price"))
+        except (TypeError, ValueError, AttributeError):
+            continue
+        if price and 0.5 * price <= p <= 1.5 * price:
+            out.append({"price": round(p, 2), "label": str(x.get("label", "")).strip()[:80]})
+    return out[:4]
 
 
 def _normalize(raw: dict, n_headlines: int) -> dict:
@@ -210,6 +226,7 @@ def get_ai_brief(ticker: str, profile: str = "swing") -> dict:
             try:
                 raw = llm.chat_json(SYSTEM_PROMPT, _prompt(ticker, ctx, signals, profile), temperature=0.2, max_tokens=2000)
                 brief = _normalize(raw, len(ctx["news"]))
+                brief["key_levels"] = _key_levels(raw.get("levels"), ctx["metrics"].get("price"))
                 ai_used = True
             except Exception as e:
                 log.warning("AI brief failed for %s: %s", ticker, e)
@@ -219,6 +236,7 @@ def get_ai_brief(ticker: str, profile: str = "swing") -> dict:
 
         brief.update({
             "ticker": ticker,
+            "price": ctx["metrics"].get("price"),
             "change_pct": ctx["metrics"].get("change_pct"),
             "signals": signals,
             "technicals": ctx["tech"],

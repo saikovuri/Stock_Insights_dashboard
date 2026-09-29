@@ -1,0 +1,223 @@
+import { useState, useEffect } from 'react';
+import { ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid } from 'recharts';
+import CorrelationHeatmap from './CorrelationHeatmap';
+import {
+  fetchPerformance, fetchDividendIncome, fetchTaxWarnings, importPortfolioCsv, fetchWeeklyReview,
+} from '../api/stockApi';
+
+const tip = { contentStyle: { background: 'var(--surface)', border: '1px solid var(--border)', fontSize: '0.8rem' } };
+const axis = { tick: { fontSize: 11, fill: 'var(--text-muted)' } };
+const usd = v => v == null ? '—' : `${v < 0 ? '-' : ''}$${Math.abs(v).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+const pct = v => v == null ? '—' : `${v > 0 ? '+' : ''}${v}%`;
+const cls = v => v == null ? '' : v >= 0 ? 'positive' : 'negative';
+
+function useLoad(fn, dep) {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+  useEffect(() => {
+    setData(null); setError(null);
+    fn().then(setData).catch(e => setError(e.message));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dep]);
+  return [data, error];
+}
+
+function VsSpy({ version }) {
+  const [d, err] = useLoad(fetchPerformance, version);
+  if (err) return <p className="error-text">{err}</p>;
+  if (!d) return <p className="loading-text">Comparing your lots with SPY…</p>;
+  if (!d.lots) return <p className="empty-state">Add holdings to compare against the S&P 500.</p>;
+  return (
+    <>
+      <div className="doctor-stats">
+        <div><span>Your holdings</span><strong className={cls(d.return_pct)}>{pct(d.return_pct)}</strong></div>
+        <div><span>Same $ in SPY</span><strong className={cls(d.spy_return_pct)}>{pct(d.spy_return_pct)}</strong></div>
+        <div><span>Ahead / behind SPY</span><strong className={cls(d.alpha)}>{usd(d.alpha)}</strong></div>
+        <div><span>Realized P/L (closed)</span><strong className={cls(d.realized_pnl)}>{usd(d.realized_pnl)}</strong></div>
+      </div>
+      {d.series.length > 2 && (
+        <ResponsiveContainer width="100%" height={240}>
+          <LineChart data={d.series}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+            <XAxis dataKey="date" {...axis} minTickGap={40} /><YAxis {...axis} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} width={55} />
+            <Tooltip {...tip} formatter={v => usd(v)} /><Legend />
+            <Line dataKey="portfolio" name="Your holdings" stroke="#7c6cf0" dot={false} strokeWidth={2} />
+            <Line dataKey="spy" name="Same $ in SPY" stroke="#ffb300" dot={false} strokeWidth={2} />
+            <Line dataKey="cost" name="Money invested" stroke="var(--text-muted)" strokeDasharray="4 3" dot={false} />
+          </LineChart>
+        </ResponsiveContainer>
+      )}
+      <table className="market-table">
+        <thead><tr><th>Stock</th><th>Cost</th><th>Value</th><th>Return</th><th>SPY same dates</th><th>vs SPY</th></tr></thead>
+        <tbody>
+          {d.by_ticker.map(r => (
+            <tr key={r.ticker}>
+              <td><strong>{r.ticker}</strong></td><td>{usd(r.cost)}</td><td>{usd(r.value)}</td>
+              <td className={cls(r.return_pct)}>{pct(r.return_pct)}</td><td className={cls(r.spy_return_pct)}>{pct(r.spy_return_pct)}</td>
+              <td className={cls(r.vs_spy)}><strong>{usd(r.vs_spy)}</strong></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="ivrank-note">{d.note}</p>
+    </>
+  );
+}
+
+function DividendIncome({ version }) {
+  const [d, err] = useLoad(fetchDividendIncome, version);
+  if (err) return <p className="error-text">{err}</p>;
+  if (!d) return <p className="loading-text">Projecting dividend income…</p>;
+  if (!d.by_ticker.length) return <p className="empty-state">None of your holdings paid a dividend in the last 12 months.</p>;
+  return (
+    <>
+      <div className="doctor-stats">
+        <div><span>Projected annual income</span><strong className="positive">{usd(d.annual_income)}</strong></div>
+        <div><span>Monthly average</span><strong>{usd(d.monthly_avg)}</strong></div>
+      </div>
+      <ResponsiveContainer width="100%" height={180}>
+        <BarChart data={d.calendar}>
+          <XAxis dataKey="month" {...axis} /><YAxis {...axis} tickFormatter={v => `$${v}`} width={50} />
+          <Tooltip {...tip} formatter={v => [usd(v), 'Est. income']} />
+          <Bar dataKey="income" fill="#66bb6a" radius={[4, 4, 0, 0]} />
+        </BarChart>
+      </ResponsiveContainer>
+      <div className="two-column">
+        <table className="market-table">
+          <thead><tr><th>Stock</th><th>Annual</th><th>Yield</th><th>Yield on cost</th></tr></thead>
+          <tbody>
+            {d.by_ticker.map(r => (
+              <tr key={r.ticker}><td><strong>{r.ticker}</strong></td><td>{usd(r.annual_income)}</td>
+                <td>{r.yield_pct != null ? `${r.yield_pct}%` : '—'}</td><td>{r.yield_on_cost_pct != null ? `${r.yield_on_cost_pct}%` : '—'}</td></tr>
+            ))}
+          </tbody>
+        </table>
+        <div>
+          <h4 className="sub-chart-title">Next expected ex-dates</h4>
+          <ul className="smart-list">
+            {d.upcoming.map((p, i) => <li key={i}><strong>{p.ticker}</strong> ~{p.est_ex_date} · {usd(p.amount)}</li>)}
+          </ul>
+        </div>
+      </div>
+      <p className="ivrank-note">{d.note}</p>
+    </>
+  );
+}
+
+function TaxCheck({ version }) {
+  const [d, err] = useLoad(fetchTaxWarnings, version);
+  if (err) return <p className="error-text">{err}</p>;
+  if (!d) return <p className="loading-text">Checking for wash sales…</p>;
+  return (
+    <>
+      {d.warnings.length === 0 ? <p className="empty-state">✅ No wash-sale issues found in your recorded trades.</p> : (
+        <ul className="tax-list">
+          {d.warnings.map((w, i) => (
+            <li key={i} className={`tax-${w.level}`}>
+              <strong>{w.level === 'high' ? '⛔' : w.level === 'medium' ? '⚠️' : 'ℹ️'} {w.ticker}</strong> {w.text}
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="ivrank-note">{d.note}</p>
+    </>
+  );
+}
+
+function WeeklyReview() {
+  const [d, setD] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState(null);
+  const load = (refresh) => {
+    setLoading(true); setErr(null);
+    fetchWeeklyReview(refresh).then(setD).catch(e => setErr(e.message)).finally(() => setLoading(false));
+  };
+  useEffect(() => { load(false); }, []);
+  return (
+    <>
+      <div className="ivrank-header">
+        <span className="market-sub">Sent to your notifications (and phone, if set up) every weekend.</span>
+        <button className="btn-secondary btn-sm" onClick={() => load(true)} disabled={loading}>{loading ? 'Writing…' : '↻ Regenerate'}</button>
+      </div>
+      {err && <p className="error-text">{err}</p>}
+      {d?.empty && <p className="empty-state">Add holdings or watchlist stocks to get a weekly review.</p>}
+      {d?.body && <><h4 className="sub-chart-title">{d.title}</h4><p className="briefing-body">{d.body}</p></>}
+    </>
+  );
+}
+
+function ImportCsv({ onImported }) {
+  const [text, setText] = useState('');
+  const [preview, setPreview] = useState(null);
+  const [msg, setMsg] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const onFile = async (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (f.size > 1_000_000) { setMsg('File is larger than 1 MB.'); return; }
+    setText(await f.text());
+    setPreview(null); setMsg(null);
+  };
+  const run = async (commit) => {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await importPortfolioCsv(text, commit);
+      setPreview(r);
+      if (commit) { setMsg(`Imported ${r.imported} lots.`); setText(''); onImported?.(); }
+    } catch (e) { setMsg(e.message); }
+    setBusy(false);
+  };
+
+  return (
+    <>
+      <p className="structures-intro">
+        Export your <b>positions</b> as CSV from Fidelity, Schwab, E*TRADE, Vanguard or any broker (needs Symbol, Quantity and
+        a cost-basis column). Each row becomes a lot; cash, money-market and option rows are skipped. The file is parsed on
+        the server and not stored.
+      </p>
+      <div className="alert-form">
+        <input type="file" accept=".csv,text/csv" onChange={onFile} />
+        <button className="btn-secondary btn-sm" disabled={!text || busy} onClick={() => run(false)}>Preview</button>
+        <button className="btn-primary btn-sm" disabled={!preview?.rows?.length || busy} onClick={() => run(true)}>
+          Import {preview?.rows?.length || ''} lots
+        </button>
+      </div>
+      {msg && <p className="notif-msg">{msg}</p>}
+      {preview && (
+        <>
+          <p className="market-sub">Detected columns: {Object.entries(preview.columns).map(([k, v]) => `${k} = "${v}"`).join(', ')}</p>
+          <table className="market-table">
+            <thead><tr><th>Ticker</th><th>Shares</th><th>Cost / share</th><th>Acquired</th></tr></thead>
+            <tbody>{preview.rows.map((r, i) => <tr key={i}><td>{r.ticker}</td><td>{r.shares}</td><td>${r.price}</td><td>{r.acquired || 'today'}</td></tr>)}</tbody>
+          </table>
+          {preview.skipped.length > 0 && (
+            <p className="market-sub">Skipped: {preview.skipped.map(s => `${s.symbol} (${s.reason})`).join('; ')}</p>
+          )}
+        </>
+      )}
+    </>
+  );
+}
+
+const TABS = [['spy', '📈 vs S&P 500'], ['divs', '💰 Dividend income'], ['tax', '🧾 Wash sales'],
+  ['corr', '🔗 Correlation'], ['weekly', '🗞️ Weekly review'], ['import', '📥 Import CSV']];
+
+export default function PortfolioInsights({ tickers, version, onImported }) {
+  const [tab, setTab] = useState('spy');
+  return (
+    <div className="card portfolio-insights">
+      <nav className="sub-tabs">
+        {TABS.map(([id, label]) => (
+          <button key={id} className={`sub-tab ${tab === id ? 'active' : ''}`} onClick={() => setTab(id)}>{label}</button>
+        ))}
+      </nav>
+      {tab === 'spy' && <VsSpy version={version} />}
+      {tab === 'divs' && <DividendIncome version={version} />}
+      {tab === 'tax' && <TaxCheck version={version} />}
+      {tab === 'corr' && (tickers.length >= 2 ? <CorrelationHeatmap tickers={tickers} /> : <p className="empty-state">Hold at least two stocks to see correlations.</p>)}
+      {tab === 'weekly' && <WeeklyReview />}
+      {tab === 'import' && <ImportCsv onImported={onImported} />}
+    </div>
+  );
+}

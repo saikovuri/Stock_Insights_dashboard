@@ -3,6 +3,7 @@ import {
   ResponsiveContainer, BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
 } from 'recharts';
 import { fetchLongTerm } from '../api/stockApi';
+import DividendHistory from './DividendHistory';
 
 const tip = { contentStyle: { background: 'var(--surface)', border: '1px solid var(--border)', fontSize: '0.8rem' } };
 const axis = { tick: { fontSize: 11, fill: 'var(--text-muted)' }, interval: 0 };
@@ -48,7 +49,12 @@ export default function LongTermView({ ticker }) {
     fetchLongTerm(ticker).then(setData).catch(e => setError(e.message));
   }, [ticker]);
 
-  if (error) return <div className="card"><h3>🌳 Long-term view</h3><p className="empty-state" style={{ padding: 0 }}>{error}</p></div>;
+  if (error) return (
+    <>
+      <div className="card"><h3>🌳 Long-term view</h3><p className="empty-state" style={{ padding: 0 }}>{error}</p></div>
+      <DividendHistory ticker={ticker} />
+    </>
+  );
   if (!data) return <div className="card"><p className="loading-text">Loading 10 years of SEC filings…</p></div>;
 
   const years = data.years.map(y => ({
@@ -140,16 +146,6 @@ export default function LongTermView({ ticker }) {
           {data.altman && (
             <p>Altman Z-score <b>{data.altman.z}</b> — <span className={data.altman.zone === 'safe' ? 'positive' : data.altman.zone === 'distress' ? 'negative' : ''}>{data.altman.zone} zone</span> (bankruptcy-risk model; above 3 is safe)</p>
           )}
-          {d && (
-            <>
-              <h4 className="sub-chart-title">Dividend</h4>
-              <div className="doctor-stats">
-                <div><span>Years without a cut</span><strong>{d.growth_streak_years}</strong></div>
-                <div><span>5y dividend growth</span><strong>{pct(d.cagr_5y)}/yr</strong></div>
-                <div><span>Paid from FCF</span><strong className={d.safety === 'safe' ? 'positive' : d.safety === 'at risk' ? 'negative' : ''}>{d.fcf_payout_pct != null ? `${d.fcf_payout_pct}% (${d.safety})` : '—'}</strong></div>
-              </div>
-            </>
-          )}
           <h4 className="sub-chart-title">Diluted shares (B) — falling = buybacks</h4>
           <ResponsiveContainer width="100%" height={120}>
             <LineChart data={years}>
@@ -160,6 +156,7 @@ export default function LongTermView({ ticker }) {
           </ResponsiveContainer>
         </div>
       </div>
+      <DividendHistory ticker={ticker} profile={d} />
       <p className="ivrank-note">Figures from annual 10-K filings (as reported, split-adjusted per share). Educational only — not financial advice. Revenue {big(years.at(-1)?.revenue)} in the latest fiscal year.</p>
     </div>
   );

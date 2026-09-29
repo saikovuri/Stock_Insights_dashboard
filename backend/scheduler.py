@@ -21,7 +21,7 @@ from database import (
 )
 from news_sentiment import fetch_news
 from providers import finnhub_earnings_calendar
-from stock_data import get_key_metrics, get_quote, get_daily_indicators, get_technical_snapshot
+from stock_data import get_key_metrics, get_quote, get_daily_indicators, get_technical_snapshot, get_stock_data
 
 log = logging.getLogger(__name__)
 ET = ZoneInfo("America/New_York")
@@ -218,6 +218,126 @@ def _run_briefings() -> None:
             log.warning("Briefing failed for user %s: %s", uid, e)
 
 
+# ── Weekly review ─────────────────────────────────────────────────────────────────────────
+
+def _week_change(ticker: str) -> float | None:
+    close = get_stock_data(ticker, period="1mo", interval="1d")["Close"]
+    return float(close.iloc[-1] / close.iloc[-6] - 1) if len(close) >= 6 else None
+
+
+def build_weekly_review(user_id: int, tickers: set[str]) -> dict:
+    from database import get_user_holdings, kv_get, list_theses
+    from macro import economic_calendar
+    from smart_money import insider_buying
+
+    shares: dict[str, float] = {}
+    for h in get_user_holdings(user_id):
+        shares[h["ticker"]] = shares.get(h["ticker"], 0) + h["shares"]
+    moves, dollars, start_value = [], 0.0, 0.0
+    for t in sorted(tickers)[:MAX_BRIEFING_TICKERS]:
+        try:
+            chg = _week_change(t)
+            price = get_quote(t).get("price")
+        except Exception:
+            continue
+        if chg is None or not price:
+            continue
+        moves.append({"ticker": t, "week_pct": round(chg * 100, 2), "held": t in shares})
+        if t in shares:
+            prev = price / (1 + chg)
+            dollars += shares[t] * (price - prev)
+            start_value += shares[t] * prev
+    moves.sort(key=lambda m: m["week_pct"], reverse=True)
+    scan = kv_get("scan:sp500")
+    setups = [{"ticker": r["symbol"], "setups": r["setups"]} for r in (scan["data"]["rows"] if scan else [])
+              if r["symbol"] in tickers and r["setups"]]
+    earnings = [{"ticker": e["symbol"], "date": e.get("date")} for e in finnhub_earnings_calendar(9)
+                if e.get("symbol") in tickers]
+    try:
+        macro = [f"{e['date']} {e['event']}" for e in economic_calendar(7)["events"] if e["impact"] == "high"]
+    except Exception:
+        macro = []
+    theses = [{"ticker": t["ticker"], "status": (t.get("last_check") or {}).get("status")} for t in list_theses(user_id)]
+    insiders = [c for c in insider_buying(30)["clusters"] if c["symbol"] in tickers]
+    data = {
+        "portfolio_week_dollars": round(dollars, 2),
+        "portfolio_week_pct": round(dollars / start_value * 100, 2) if start_value else None,
+        "best": moves[:3], "worst": moves[-3:][::-1] if len(moves) > 3 else [],
+        "setups": setups[:8], "earnings_next_week": earnings, "macro_next_week": macro[:6],
+        "theses": theses, "insider_clusters": [c["symbol"] for c in insiders],
+    }
+    body = None
+    if llm.ai_enabled():
+        system = ("You write a short weekly review for an individual investor. Use ONLY the data given; no invented "
+                  "facts. Plain text, no markdown headers, short bullet-style lines are fine.")
+        user = (f"Data: {data}\n\nWrite at most 170 words: 1) how their portfolio did this week and the standout "
+                "winners/losers, 2) what's coming next week (their earnings, macro events), 3) any new setups or "
+                "insider buying in their stocks, 4) theses that need attention. End with 'Not financial advice.'")
+        try:
+            body = (llm.chat([{"role": "system", "content": system}, {"role": "user", "content": user}],
+                             temperature=0.3, max_tokens=1500).content or "").strip() or None
+        except Exception as e:
+            log.warning("AI weekly review failed: %s", e)
+    if not body:
+        lines = []
+        if data["portfolio_week_pct"] is not None:
+            lines.append(f"Portfolio this week: {data['portfolio_week_pct']:+.2f}% (${data['portfolio_week_dollars']:+,.2f})")
+        lines += [f"• {m['ticker']} {m['week_pct']:+.2f}%" for m in data["best"] + data["worst"]]
+        if earnings:
+            lines.append("Earnings next week: " + ", ".join(f"{e['ticker']} ({e['date']})" for e in earnings))
+        if macro:
+            lines.append("Macro: " + "; ".join(macro[:4]))
+        if setups:
+            lines.append("Setups: " + ", ".join(f"{s['ticker']} ({'/'.join(s['setups'])})" for s in setups[:5]))
+        body = "\n".join(lines) or "No data this week."
+    return {"body": body, "data": data}
+
+
+def get_or_create_weekly(user_id: int, tickers: set[str], force: bool = False) -> dict | None:
+    y, w, _ = datetime.now(ET).isocalendar()
+    key = f"weekly:{y}-W{w:02d}"
+    if force:
+        delete_notification(user_id, key)
+    else:
+        existing = get_notification(user_id, key)
+        if existing:
+            return existing
+    if not tickers:
+        return None
+    r = build_weekly_review(user_id, tickers)
+    title = f"Weekly review — week {w}"
+    if add_notification(user_id, "weekly", title, r["body"], key, data=r["data"]) and not force:
+        push_ntfy(get_ntfy_topic(user_id), title, r["body"], tags="calendar")
+    return get_notification(user_id, key)
+
+
+def _run_weekly() -> None:
+    for uid, tickers in get_all_user_tickers().items():
+        try:
+            get_or_create_weekly(uid, tickers)
+        except Exception as e:
+            log.warning("Weekly review failed for user %s: %s", uid, e)
+
+
+def _run_thesis_checks(limit: int = 10) -> None:
+    """Re-check each thesis once its company has reported earnings."""
+    import thesis
+    from database import list_theses
+    today = datetime.now(ET).date().isoformat()
+    due = [t for t in list_theses() if t.get("next_earnings") and t["next_earnings"] < today][:limit]
+    for t in due:
+        try:
+            r = thesis.check(t["user_id"], t["ticker"])
+        except Exception as e:
+            log.info("Thesis check failed for %s: %s", t["ticker"], e)
+            continue
+        title = f"📝 {t['ticker']} thesis after earnings: {r['status']}"
+        if add_notification(t["user_id"], "thesis", title, r["summary"], f"thesis:{t['ticker']}:{t['next_earnings']}",
+                            ticker=t["ticker"], data=r):
+            push_ntfy(get_ntfy_topic(t["user_id"]), title, r["summary"], tags="memo")
+        time.sleep(2)
+
+
 def _record_iv_snapshots() -> None:
     import options_analytics
     tickers = {t for ts in get_all_user_tickers().values() for t in ts}
@@ -234,6 +354,8 @@ def _loop() -> None:
     last_cleanup_day = None
     last_iv_day = None
     last_scan_day = None
+    last_weekly_day = None
+    last_thesis_day = None
     last_custom = datetime.min.replace(tzinfo=ET)
     while True:
         try:
@@ -259,6 +381,12 @@ def _loop() -> None:
             if now.weekday() < 5 and now.hour >= BRIEFING_HOUR_ET and last_briefing_day != now.date():
                 last_briefing_day = now.date()
                 _run_briefings()
+            if now.weekday() >= 5 and now.hour >= 9 and last_weekly_day != now.date():
+                last_weekly_day = now.date()
+                _run_weekly()
+            if now.weekday() < 5 and now.hour >= 17 and last_thesis_day != now.date():
+                last_thesis_day = now.date()
+                _run_thesis_checks()
             if last_cleanup_day != now.date():
                 last_cleanup_day = now.date()
                 delete_old_notifications(30)

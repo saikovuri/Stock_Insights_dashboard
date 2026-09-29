@@ -9,38 +9,42 @@ import NewsSentiment from './components/NewsSentiment';
 import AiBrief from './components/AiBrief';
 import Alerts from './components/Alerts';
 import Portfolio from './components/Portfolio';
-import Screener from './components/Screener';
+import Watchlist from './components/Watchlist';
 import AiChat from './components/AiChat';
 import PeerBenchmark from './components/PeerBenchmark';
-import PositionCalculator from './components/PositionCalculator';
 import WatchlistRail from './components/WatchlistRail';
 import AnalystRatings from './components/AnalystRatings';
 import Financials from './components/Financials';
 import Ownership from './components/Ownership';
-import DividendHistory from './components/DividendHistory';
-import IvRank from './components/IvRank';
-import IncomeIdeas from './components/IncomeIdeas';
-import Structures from './components/Structures';
-import PreTradeChecklist from './components/PreTradeChecklist';
+import OptionsHub from './components/OptionsHub';
 import NotificationBell from './components/NotificationBell';
 import DailyBriefing from './components/DailyBriefing';
 import MarketOverview from './components/MarketOverview';
 import PriceAlerts from './components/PriceAlerts';
 import EarningsIntel from './components/EarningsIntel';
-import SetupScanner from './components/SetupScanner';
+import Ideas from './components/Ideas';
 import RelativeStrength from './components/RelativeStrength';
 import Journal from './components/Journal';
 import LongTermView from './components/LongTermView';
-import { ProfileProvider, useProfile, PROFILES } from './ProfileContext';
+import ShortAndSmartMoney from './components/ShortAndSmartMoney';
+import ThesisCard from './components/ThesisCard';
+import EconomicCalendar from './components/EconomicCalendar';
+import { ProfileProvider, useProfile, PROFILES, ALL_OPTION_TABS } from './ProfileContext';
 import { fetchMetrics, fetchHistory, fetchNews, fetchAlerts, fetchEvents } from './api/stockApi';
 
-const VALID_TABS = ['dashboard', 'setups', 'screener', 'portfolio', 'journal', 'tools'];
+const VALID_TABS = ['dashboard', 'ideas', 'watchlist', 'portfolio', 'journal'];
+// Old bookmarks keep working
+const LEGACY_TABS = { setups: 'ideas', screener: 'watchlist', tools: 'journal' };
 const SUB_TAB_LABELS = {
   overview: '📋 Overview', analysis: '🔬 Analysis', fundamentals: '📑 Fundamentals', news: '📰 News',
 };
-function getInitialTab() {
+function tabFromHash() {
   const hash = window.location.hash.slice(1);
-  return VALID_TABS.includes(hash) ? hash : 'dashboard';
+  const t = LEGACY_TABS[hash] || hash;
+  return VALID_TABS.includes(t) ? t : null;
+}
+function getInitialTab() {
+  return tabFromHash() || 'dashboard';
 }
 
 function AppShell() {
@@ -61,11 +65,12 @@ function AppShell() {
   const [interval, setChartInterval] = useState(config.chart.interval);
   const [prepost, setPrepost] = useState(false);
   const [subTab, setSubTab] = useState('overview');
+  const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
     const onHashChange = () => {
-      const hash = window.location.hash.slice(1);
-      if (VALID_TABS.includes(hash)) setActiveTab(hash);
+      const t = tabFromHash();
+      if (t) setActiveTab(t);
     };
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
@@ -133,12 +138,19 @@ function AppShell() {
 
   const tabs = [
     { id: 'dashboard', label: '📊 Dashboard' },
-    { id: 'setups', label: '🎯 Setups' },
-    { id: 'screener', label: '🔍 Screener' },
+    { id: 'ideas', label: '💡 Ideas' },
+    { id: 'watchlist', label: '👀 Watchlist' },
     { id: 'portfolio', label: '💼 Portfolio' },
     { id: 'journal', label: '📓 Journal' },
-    { id: 'tools', label: '🧰 Tools' },
   ];
+
+  // Cards hidden for the selected trading style (revealed with "show all")
+  const SUB_CARDS = {
+    overview: ['thesis'], analysis: ['rs'], fundamentals: ['longterm', 'ownership', 'financials'], news: [],
+  };
+  const show = (id) => showAll || !config.hide.includes(id);
+  const hiddenHere = (SUB_CARDS[subTab] || []).filter(id => config.hide.includes(id)).length;
+  const optionTabs = showAll ? ALL_OPTION_TABS : config.options;
 
   return (
     <div className="app">
@@ -187,6 +199,7 @@ function AppShell() {
               <>
                 {user && <DailyBriefing onSelect={(t) => handleSearch(t)} />}
                 <MarketOverview onSelect={(t) => handleSearch(t)} />
+                <EconomicCalendar compact />
               </>
             )}
 
@@ -209,6 +222,7 @@ function AppShell() {
                     <Alerts alerts={alerts} />
                     <KeyMetrics metrics={metrics} />
                     <AiBrief ticker={ticker} profile={profile} onSignIn={() => setShowLogin(true)} />
+                    {show('thesis') && <ThesisCard ticker={ticker} />}
                     <PriceChart data={history} events={events}
                       period={period} interval={interval} prepost={prepost}
                       onSettingsChange={({ period: p, interval: i, prepost: pp }) => {
@@ -228,10 +242,9 @@ function AppShell() {
                 {/* ── Analysis ────────────────────────────────── */}
                 {subTab === 'analysis' && (
                   <>
-                    <RelativeStrength ticker={ticker} />
-                    <IvRank ticker={ticker} />
-                    <IncomeIdeas ticker={ticker} />
-                    <Structures ticker={ticker} />
+                    {show('rs') && <RelativeStrength ticker={ticker} />}
+                    <OptionsHub ticker={ticker} tabs={optionTabs} />
+                    <ShortAndSmartMoney ticker={ticker} />
                     <AnalystRatings ticker={ticker} />
                     <PeerBenchmark ticker={ticker} />
                     <AiChat ticker={ticker} onSignIn={() => setShowLogin(true)} />
@@ -241,51 +254,52 @@ function AppShell() {
                 {/* ── Fundamentals ────────────────────────────── */}
                 {subTab === 'fundamentals' && (
                   <>
-                    <LongTermView ticker={ticker} />
+                    {show('longterm') && <LongTermView ticker={ticker} />}
                     <EarningsIntel ticker={ticker} />
-                    <Financials ticker={ticker} />
-                    <div className="two-column">
-                      <Ownership ticker={ticker} />
-                      <DividendHistory ticker={ticker} />
-                    </div>
+                    {show('ownership') && <Ownership ticker={ticker} />}
+                    {show('financials') && (
+                      <details className="raw-statements">
+                        <summary>📑 Raw financial statements (income, balance sheet, cash flow)</summary>
+                        <Financials ticker={ticker} />
+                      </details>
+                    )}
                   </>
                 )}
 
                 {/* ── News & AI ───────────────────────────────── */}
                 {subTab === 'news' && <NewsSentiment newsData={newsData} />}
+
+                {(hiddenHere > 0 || (subTab === 'analysis' && config.options.length < ALL_OPTION_TABS.length) || showAll) && (
+                  <button className="btn-secondary btn-sm show-all-btn" onClick={() => setShowAll(v => !v)}>
+                    {showAll ? `Show only ${PROFILES[profile].label.toLowerCase()} essentials` : `Show cards hidden for ${PROFILES[profile].label.toLowerCase()}s`}
+                  </button>
+                )}
               </>
             )}
           </div>
           <WatchlistRail
             activeTicker={ticker}
             onSelect={(t) => handleSearch(t)}
-            onGoToScreener={() => handleTabClick('screener')}
+            onGoToScreener={() => handleTabClick('watchlist')}
           />
         </div>
       )}
 
-      {activeTab === 'setups' && <SetupScanner onSelect={openTicker} />}
+      {activeTab === 'ideas' && <Ideas onSelect={openTicker} />}
 
-      {activeTab === 'screener' && <Screener />}
+      {activeTab === 'watchlist' && (
+        <>
+          <Watchlist onSelect={openTicker} onSignIn={() => setShowLogin(true)} />
+          {user && <PriceAlerts />}
+        </>
+      )}
 
       {activeTab === 'portfolio' && <Portfolio />}
 
       {activeTab === 'journal' && <Journal onSignIn={() => setShowLogin(true)} onSelect={openTicker} />}
 
-      {activeTab === 'tools' && (
-        <div className="tools-page">
-          <h2 className="tools-heading">🧰 Trading Tools</h2>
-          <p className="tools-subheading">Calculators and simulators to help plan your trades.</p>
-          {user && <PriceAlerts />}
-          <div className="tools-grid">
-            <PreTradeChecklist />
-            <PositionCalculator />
-          </div>
-        </div>
-      )}
-
       <footer className="app-footer">
-        Data: Finnhub, Yahoo Finance, SEC EDGAR &middot; AI-generated analysis can be wrong &middot; Not financial advice
+        Data: Finnhub, Yahoo Finance, CBOE, SEC EDGAR, FINRA, Nasdaq &middot; AI-generated analysis can be wrong &middot; Not financial advice
       </footer>
     </div>
   );

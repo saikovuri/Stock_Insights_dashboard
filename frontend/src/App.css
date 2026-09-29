@@ -4504,3 +4504,70 @@ button.signal-chip { cursor: pointer; }
 .notif-title { font-weight: 600; font-size: 0.85rem; }
 .notif-body { font-size: 0.8rem; color: var(--text-secondary); white-space: pre-line; }
 .notif-time { font-size: 0.68rem; color: var(--text-muted); margin-top: 0.2rem; }
+
+/* ── v4: ideas, options hub, portfolio insights, thesis ────────── */
+.sub-tabs { overflow-x: auto; scrollbar-width: thin; }
+.link-btn {
+  background: none; border: none; padding: 0; color: var(--accent); cursor: pointer; font: inherit;
+}
+.link-btn:hover { text-decoration: underline; }
+
+.options-hub { margin-bottom: 1.25rem; }
+.options-hub-tabs { margin-bottom: 0.6rem; align-items: center; }
+.options-hub-title {
+  font-weight: 700; font-size: 0.82rem; padding: 0 0.6rem; color: var(--text-secondary);
+  border-right: 1px solid var(--border); white-space: nowrap;
+}
+.flow-table td, .flow-table th { white-space: nowrap; }
+
+.smart-list { list-style: none; padding: 0; margin: 0.25rem 0 0; display: flex; flex-direction: column; gap: 0.4rem; font-size: 0.88rem; }
+
+.econ-cal .econ-day { display: grid; grid-template-columns: 110px 1fr; gap: 0.5rem; padding: 0.45rem 0; border-top: 1px solid var(--border); }
+.econ-cal .econ-day:first-of-type { border-top: none; }
+.econ-date { font-weight: 700; font-size: 0.85rem; }
+.econ-cal ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.3rem; }
+.econ-cal li { display: flex; flex-wrap: wrap; align-items: center; gap: 0.45rem; font-size: 0.86rem; }
+.econ-time { color: var(--text-muted); font-variant-numeric: tabular-nums; min-width: 2.8rem; }
+.econ-name { font-weight: 600; }
+.econ-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+.econ-dot.high { background: var(--negative); }
+.econ-dot.medium { background: #ffb300; }
+
+.portfolio-insights { margin-top: 1rem; }
+.tax-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+.tax-list li { padding: 0.55rem 0.75rem; border-radius: 8px; background: var(--bg-subtle); border-left: 3px solid var(--border-light); font-size: 0.88rem; }
+.tax-list .tax-high { border-left-color: var(--negative); }
+.tax-list .tax-medium { border-left-color: #ffb300; }
+.tax-list .tax-info { border-left-color: var(--accent); }
+
+.thesis-actions { display: flex; gap: 0.4rem; align-items: center; margin-top: 0.4rem; }
+.thesis-input { width: 100%; resize: vertical; font-family: inherit; }
+.thesis-text {
+  margin: 0.5rem 0; padding: 0.5rem 0.8rem; border-left: 3px solid var(--accent);
+  background: var(--bg-subtle); border-radius: 0 8px 8px 0; font-style: italic;
+}
+.thesis-check { margin-top: 0.5rem; }
+
+.key-levels { margin-top: 0.75rem; }
+.key-levels ul { list-style: none; padding: 0; margin: 0.3rem 0 0; display: flex; flex-direction: column; gap: 0.35rem; font-size: 0.88rem; }
+.key-levels li { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; }
+.key-level-btn { margin-left: auto; padding: 0.15rem 0.5rem; font-size: 0.75rem; }
+
+.plan-trade summary { cursor: pointer; list-style: none; }
+.plan-trade summary::-webkit-details-marker { display: none; }
+.plan-trade[open] summary { margin-bottom: 0.75rem; }
+.plan-trade summary::before { content: '▸ '; color: var(--text-muted); }
+.plan-trade[open] summary::before { content: '▾ '; }
+
+.raw-statements { margin-bottom: 1.25rem; }
+.raw-statements > summary {
+  cursor: pointer; padding: 0.7rem 1rem; border: 1px solid var(--border); border-radius: var(--radius);
+  font-weight: 600; color: var(--text-secondary); background: var(--bg-subtle);
+}
+.raw-statements[open] > summary { margin-bottom: 0.75rem; }
+.show-all-btn { display: block; margin: 0.5rem auto 1.5rem; }
+
+@media (max-width: 640px) {
+  .econ-cal .econ-day { grid-template-columns: 1fr; }
+  .sub-tab { flex: 0 0 auto; }
+}

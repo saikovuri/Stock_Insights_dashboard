@@ -58,6 +58,18 @@ CREATE TABLE IF NOT EXISTS public.kv_cache (
     data TEXT NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+CREATE TABLE IF NOT EXISTS public.theses (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES public.users(id),
+    ticker TEXT NOT NULL,
+    thesis TEXT NOT NULL,
+    next_earnings TEXT,
+    last_check TEXT,
+    last_checked_at TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(user_id, ticker)
+);
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON public.notifications(user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_user_alerts_active ON public.user_alerts(active);
 CREATE INDEX IF NOT EXISTS idx_journal_user ON public.journal(user_id);
@@ -85,7 +97,7 @@ BEGIN
   FOREACH t IN ARRAY ARRAY[
     'users', 'holdings', 'options', 'transactions', 'watchlist', 'closed_trades',
     'closed_options', 'refresh_tokens', 'notifications', 'iv_history',
-    'user_alerts', 'journal', 'kv_cache'
+    'user_alerts', 'journal', 'kv_cache', 'theses'
   ] LOOP
     IF to_regclass('public.' || t) IS NULL THEN
       RAISE NOTICE 'Skipping missing table %', t;

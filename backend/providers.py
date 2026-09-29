@@ -216,7 +216,7 @@ def twelvedata_history(ticker: str, period: str, interval: str) -> pd.DataFrame 
 _OCC = re.compile(r"^([A-Z.]+)(\d{6})([CP])(\d{8})$")
 
 
-def cboe_chains(ticker: str) -> dict[str, tuple[pd.DataFrame, pd.DataFrame]]:
+def cboe_chains(ticker: str, cache: bool = True) -> dict[str, tuple[pd.DataFrame, pd.DataFrame]]:
     """All expirations for a ticker as {expiry: (calls, puts)} with yfinance-style columns."""
     if not _is_plain_equity(ticker):
         return {}
@@ -254,6 +254,11 @@ def cboe_chains(ticker: str) -> dict[str, tuple[pd.DataFrame, pd.DataFrame]]:
                                    for df in (calls, puts))
         return chains
 
+    if not cache:
+        try:
+            return _fetch()
+        except Exception:
+            return {}
     return _cached(f"cboe:{ticker}", 300, _fetch, {})
 
 
@@ -263,6 +268,41 @@ def finnhub_insider_transactions(ticker: str) -> list[dict]:
     fetch = _list_fetch("/stock/insider-transactions", {"symbol": ticker},
                         lambda d: (d or {}).get("data") or [] if isinstance(d, dict) else [])
     return _cached(f"fh:insiders:{ticker}", 21600, fetch, [])
+
+
+def finnhub_market_insiders(day: date) -> list[dict]:
+    """All insider transactions filed on one day (Finnhub returns the whole market without a symbol)."""
+    params = {"from": day.isoformat(), "to": day.isoformat()}
+    fetch = _list_fetch("/stock/insider-transactions", params,
+                        lambda d: (d or {}).get("data") or [] if isinstance(d, dict) else [])
+    return _cached(f"fh:insiders:*:{day.isoformat()}", 6 * 3600 if day >= date.today() - timedelta(days=1) else 7 * 86400,
+                   fetch, [])
+
+
+# ── FINRA short interest (free, no key; published twice a month) ─────────
+
+def finra_short_interest(ticker: str) -> list[dict]:
+    if not _is_plain_equity(ticker):
+        return []
+
+    def _fetch():
+        resp = _session.post(
+            "https://api.finra.org/data/group/otcMarket/name/consolidatedShortInterest",
+            json={"limit": 12,
+                  "compareFilters": [{"compareType": "EQUAL", "fieldName": "symbolCode", "fieldValue": ticker}],
+                  "dateRangeFilters": [{"fieldName": "settlementDate",
+                                        "startDate": (date.today() - timedelta(days=200)).isoformat(),
+                                        "endDate": date.today().isoformat()}]},
+            headers={"Accept": "application/json"}, timeout=15)
+        if resp.status_code != 200:
+            raise LookupError(ticker)
+        rows = resp.json() if resp.text.strip() else []
+        return sorted(({"date": r["settlementDate"], "short_shares": r.get("currentShortPositionQuantity"),
+                        "days_to_cover": r.get("daysToCoverQuantity"), "change_pct": r.get("changePercent"),
+                        "avg_volume": r.get("averageDailyVolumeQuantity")}
+                       for r in rows if r.get("settlementDate")), key=lambda r: r["date"])
+
+    return _cached(f"finra:si:{ticker}", 12 * 3600, _fetch, [])
 
 
 # ── SEC EDGAR (free, no key) ─────────────────────────────────────────────

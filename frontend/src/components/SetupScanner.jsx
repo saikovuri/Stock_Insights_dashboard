@@ -91,6 +91,49 @@ export default function SetupScanner({ onSelect }) {
         {setup !== 'all' && setup !== 'any' && <p className="market-sub">{data.setup_labels[setup]}</p>}
       </div>
 
+      {data.track_record && (
+        <div className="card">
+          <h3>📈 Setup track record</h3>
+          <p className="structures-intro">
+            Every time a setup fired on an S&P 500 stock over the past year, what happened next? Counted once per
+            signal (not again within 10 days). This is a backtest, not a guarantee.
+          </p>
+          <div className="table-scroll">
+            <table className="market-table">
+              <thead>
+                <tr>
+                  <th>Setup</th><th>Signals</th><th title="Share of signals up after 20 trading days">Win rate 20d</th>
+                  <th>Avg 5d</th><th>Avg 10d</th><th>Avg 20d</th><th>Median 20d</th>
+                  <th title="Share that gained 5%+ within 20 days (close-to-close)">Hit +5%</th>
+                  <th title="Average 20-day return minus SPY over the same days">vs SPY</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(data.track_record)
+                  .sort((a, b) => (b[1].excess_20d ?? -99) - (a[1].excess_20d ?? -99))
+                  .map(([k, s]) => {
+                    const c = v => (v == null ? '' : v >= 0 ? 'positive' : 'negative');
+                    const p = v => (v == null ? '—' : `${v > 0 ? '+' : ''}${v}%`);
+                    return (
+                      <tr key={k} onClick={() => setSetup(k)} title={data.setup_labels[k]}>
+                        <td><span className={`signal-chip ${TAG_CLS[k]}`}>{SHORT[k]}</span></td>
+                        <td>{s.signals}</td>
+                        <td className={s.win_20d >= 55 ? 'positive' : s.win_20d < 45 ? 'negative' : ''}>{s.win_20d != null ? `${s.win_20d}%` : '—'}</td>
+                        <td className={c(s.avg_5d)}>{p(s.avg_5d)}</td>
+                        <td className={c(s.avg_10d)}>{p(s.avg_10d)}</td>
+                        <td className={c(s.avg_20d)}>{p(s.avg_20d)}</td>
+                        <td className={c(s.median_20d)}>{p(s.median_20d)}</td>
+                        <td>{s.hit5_20d != null ? `${s.hit5_20d}%` : '—'}</td>
+                        <td className={c(s.excess_20d)}><strong>{p(s.excess_20d)}</strong></td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       <div className="card">
         <h3>🏆 Sector leadership</h3>
         <div className="sector-rs">

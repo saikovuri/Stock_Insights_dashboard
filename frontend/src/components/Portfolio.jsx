@@ -10,6 +10,7 @@ import {
 import PortfolioChart from './PortfolioChart';
 import SectorAllocation from './SectorAllocation';
 import PortfolioDoctor from './PortfolioDoctor';
+import PortfolioInsights from './PortfolioInsights';
 
 const GUEST_HOLDINGS_KEY = 'guest_holdings';
 
@@ -318,6 +319,13 @@ export default function Portfolio() {
       )}
 
       {!isGuest && portfolio?.holdings?.length > 0 && <PortfolioDoctor />}
+      {!isGuest && (
+        <PortfolioInsights
+          tickers={[...new Set((portfolio?.holdings || []).map(h => h.ticker))]}
+          version={(portfolio?.holdings || []).map(h => `${h.id}:${h.shares}`).join(',') + `|${closedStocks?.trades?.length || 0}`}
+          onImported={loadStocks}
+        />
+      )}
 
       <div className="portfolio-tabs">
         <h3 style={{ margin: 0 }}>Portfolio {isGuest && <span className="guest-badge">Guest</span>}</h3>

@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { fetchDividends } from '../api/stockApi';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
-export default function DividendHistory({ ticker }) {
+export default function DividendHistory({ ticker, profile }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
 
@@ -50,7 +50,7 @@ export default function DividendHistory({ ticker }) {
 
   return (
     <div className="glass-card dividend-card">
-      <h3>💰 Dividend History</h3>
+      <h3>💰 Dividends</h3>
 
       {/* Key stats row */}
       <div className="dividend-stats">
@@ -83,6 +83,26 @@ export default function DividendHistory({ ticker }) {
             <span className="div-stat-val">{data.five_year_avg_yield.toFixed(2)}%</span>
             <span className="div-stat-label">5Y Avg Yield</span>
           </div>
+        )}
+        {profile && (
+          <>
+            <div className="div-stat">
+              <span className="div-stat-val">{profile.growth_streak_years}</span>
+              <span className="div-stat-label">Years without a cut</span>
+            </div>
+            {profile.cagr_5y != null && (
+              <div className="div-stat">
+                <span className="div-stat-val">{profile.cagr_5y > 0 ? '+' : ''}{profile.cagr_5y}%</span>
+                <span className="div-stat-label">5Y growth / yr</span>
+              </div>
+            )}
+            {profile.fcf_payout_pct != null && (
+              <div className="div-stat">
+                <span className={`div-stat-val ${profile.safety === 'safe' ? 'positive' : profile.safety === 'at risk' ? 'negative' : ''}`}>{profile.fcf_payout_pct}%</span>
+                <span className="div-stat-label">Paid from FCF ({profile.safety})</span>
+              </div>
+            )}
+          </>
         )}
       </div>
 

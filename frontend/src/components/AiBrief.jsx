@@ -1,6 +1,61 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../AuthContext';
-import { fetchBrief } from '../api/stockApi';
+import { fetchBrief, addCustomAlert } from '../api/stockApi';
+
+const RULE_LEVELS = {
+  prev_day_high: 'Previous day high', prev_day_low: 'Previous day low',
+  high_20d: '20-day high', low_20d: '20-day low',
+};
+
+function KeyLevels({ data }) {
+  const [set, setSet] = useState({});
+  const price = data.price;
+  const seen = new Set();
+  const levels = [
+    ...(data.key_levels || []),
+    ...Object.entries(data.levels || {}).filter(([k]) => RULE_LEVELS[k]).map(([k, p]) => ({ price: p, label: RULE_LEVELS[k] })),
+  ].filter(l => {
+    const k = l.price.toFixed(2);
+    if (seen.has(k) || !price) return false;
+    seen.add(k);
+    return true;
+  }).sort((a, b) => b.price - a.price);
+  if (!levels.length) return null;
+
+  const add = async (l) => {
+    const kind = l.price >= price ? 'price_above' : 'price_below';
+    setSet(s => ({ ...s, [l.price]: 'saving' }));
+    try {
+      await addCustomAlert({ ticker: data.ticker, kind, value: l.price, note: l.label || null });
+      setSet(s => ({ ...s, [l.price]: 'done' }));
+    } catch (e) {
+      setSet(s => ({ ...s, [l.price]: e.message }));
+    }
+  };
+
+  return (
+    <div className="key-levels">
+      <div className="bull-bear-col-header">🎯 Key levels · now ${price}</div>
+      <ul>
+        {levels.map(l => {
+          const state = set[l.price];
+          const dist = ((l.price / price - 1) * 100).toFixed(1);
+          return (
+            <li key={l.price}>
+              <strong className={l.price >= price ? 'positive' : 'negative'}>${l.price}</strong>
+              <span className="market-sub"> ({dist > 0 ? '+' : ''}{dist}%)</span> {l.label}
+              <button className="btn-secondary btn-sm key-level-btn" onClick={() => add(l)} disabled={!!state}
+                title={`Alert when price ${l.price >= price ? 'rises above' : 'falls below'} $${l.price}`}>
+                {state === 'done' ? '✓ Alert set' : state === 'saving' ? '…' : state ? '⚠' : '🔔 Alert me'}
+              </button>
+              {state && !['done', 'saving'].includes(state) && <span className="error-text"> {state}</span>}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
 
 const STANCE = {
   bullish: { icon: '🐂', cls: 'positive', label: 'Bullish' },
@@ -109,6 +164,8 @@ export default function AiBrief({ ticker, profile, onSignIn }) {
             <List title="⚠️ Risks" items={data.risks} cls="bull-bear-col ai-brief-neutral" />
             <List title="👀 What to watch" items={data.watch} cls="bull-bear-col ai-brief-neutral" />
           </div>
+
+          <KeyLevels data={data} />
 
           {data.verdict && <p className="bull-bear-verdict">⚖️ {data.verdict}</p>}
 

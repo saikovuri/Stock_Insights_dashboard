@@ -351,6 +351,30 @@ export const updateJournalEntry = (id, e) => sendJson(`${BASE}/journal/${id}`, '
 export const deleteJournalEntry = (id) => sendJson(`${BASE}/journal/${id}`, 'DELETE', null, 'Failed to delete trade');
 export const fetchJournalCoach = () => getJson(`${BASE}/journal/coach`, 'Failed to load coaching', true);
 
+// ── Options flow, macro, smart money ─────────────────────────────
+export const fetchOptionsFlow = (t) => getJson(`${BASE}/stock/${t}/flow`, 'Failed to load options flow');
+export const fetchUnusualOptions = () => getJson(`${BASE}/ideas/unusual-options`, 'Failed to load unusual options');
+export const fetchEconomicCalendar = (days = 7) => getJson(`${BASE}/market/calendar?days=${days}`, 'Failed to load calendar');
+export const fetchShortInterest = (t) => getJson(`${BASE}/stock/${t}/short-interest`, 'No short interest data');
+export const fetchInsiderBuying = () => getJson(`${BASE}/ideas/insiders`, 'Failed to load insider buying');
+export const fetchSuperinvestors = () => getJson(`${BASE}/ideas/superinvestors`, 'Failed to load superinvestors');
+export const fetchSmartMoney = (t) => getJson(`${BASE}/stock/${t}/smart-money`, 'Failed to load smart money');
+
+// ── Portfolio insights ───────────────────────────────────────────
+export const fetchPerformance = () => getJson(`${BASE}/portfolio/performance`, 'Failed to load performance', true);
+export const fetchDividendIncome = () => getJson(`${BASE}/portfolio/dividends`, 'Failed to load dividend income', true);
+export const fetchTaxWarnings = () => getJson(`${BASE}/portfolio/tax`, 'Failed to load tax check', true);
+export const importPortfolioCsv = (csv, commit) =>
+  sendJson(`${BASE}/portfolio/import`, 'POST', { csv, commit }, 'Import failed');
+export const fetchWeeklyReview = (refresh = false) =>
+  getJson(`${BASE}/weekly-review${refresh ? '?refresh=true' : ''}`, 'Failed to load weekly review', true);
+
+// ── Theses ───────────────────────────────────────────────────────
+export const fetchThesis = (t) => getJson(`${BASE}/thesis/${t}`, 'Failed to load thesis', true);
+export const saveThesis = (t, thesis) => sendJson(`${BASE}/thesis/${t}`, 'PUT', { thesis }, 'Failed to save thesis');
+export const deleteThesis = (t) => sendJson(`${BASE}/thesis/${t}`, 'DELETE', null, 'Failed to delete thesis');
+export const checkThesis = (t) => sendJson(`${BASE}/thesis/${t}/check`, 'POST', null, 'Thesis check failed');
+
 export async function fetchStructures(ticker, direction, budget) {
   const params = new URLSearchParams({ direction, budget: String(budget) });
   const res = await fetch(`${BASE}/stock/${ticker}/structures?${params}`);

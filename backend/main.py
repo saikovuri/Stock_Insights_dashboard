@@ -28,8 +28,14 @@ import scanner
 import journal
 import fundamentals
 import scheduler
+import options_flow
+import macro
+import smart_money
+import portfolio_insights
+import thesis
 from providers import finnhub_enabled, finnhub_quote, finnhub_peers, finnhub_recommendations, \
-    finnhub_basic_financials, finnhub_earnings_calendar, finnhub_insider_transactions
+    finnhub_basic_financials, finnhub_earnings_calendar, finnhub_insider_transactions, finnhub_profile, \
+    finra_short_interest
 from alerts import check_alerts, technical_events
 from cache import get_or_fetch, stats as cache_stats, clear as cache_clear
 from auth import hash_password, verify_password, create_token, decode_token, create_refresh_token, REFRESH_EXPIRE_DAYS
@@ -44,6 +50,7 @@ from database import (
     list_notifications, mark_notifications_read, get_ntfy_topic, set_ntfy_topic,
     get_trader_profile, set_trader_profile, list_user_alerts, add_user_alert, delete_user_alert,
     count_active_alerts, list_journal, add_journal, update_journal, delete_journal,
+    get_thesis, list_theses, delete_thesis,
 )
 from config import CORS_ORIGINS, SCHEDULER_ENABLED
 
@@ -1764,3 +1771,169 @@ def stock_long_term(request: Request, ticker: str):
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise _upstream_error(e)
+
+
+# ── Options flow & positioning ───────────────────────────────────────────────
+
+@app.get("/api/stock/{ticker}/flow")
+@limiter.limit("30/minute")
+def stock_options_flow(request: Request, ticker: str):
+    ticker = _valid_ticker(ticker)
+    try:
+        return options_flow.options_flow(ticker)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="No listed options for this ticker")
+    except Exception as e:
+        raise _upstream_error(e)
+
+
+@app.get("/api/ideas/unusual-options")
+@limiter.limit("10/minute")
+def ideas_unusual_options(request: Request):
+    try:
+        return options_flow.unusual_scan()
+    except Exception as e:
+        raise _upstream_error(e)
+
+
+# ── Macro, short interest, smart money ───────────────────────────────────────
+
+@app.get("/api/market/calendar")
+@limiter.limit("30/minute")
+def market_calendar(request: Request, days: int = Query(7, ge=1, le=21)):
+    return macro.economic_calendar(days)
+
+
+@app.get("/api/stock/{ticker}/short-interest")
+@limiter.limit("60/minute")
+def stock_short_interest(request: Request, ticker: str):
+    ticker = _valid_ticker(ticker)
+    rows = finra_short_interest(ticker)
+    if not rows:
+        raise HTTPException(status_code=404, detail="No short interest data (FINRA covers US-listed stocks)")
+    latest = rows[-1]
+    shares_out = ((finnhub_profile(ticker) or {}).get("shareOutstanding") or 0) * 1e6
+    return {"ticker": ticker, "history": rows, "latest": latest,
+            "pct_of_shares": round(latest["short_shares"] / shares_out * 100, 2) if shares_out and latest.get("short_shares") else None,
+            "source": "FINRA (settlement twice a month)"}
+
+
+@app.get("/api/ideas/insiders")
+@limiter.limit("20/minute")
+def ideas_insiders(request: Request, days: int = Query(30, ge=7, le=60)):
+    return smart_money.insider_buying(days)
+
+
+@app.get("/api/ideas/superinvestors")
+@limiter.limit("20/minute")
+def ideas_superinvestors(request: Request):
+    return smart_money.superinvestors()
+
+
+@app.get("/api/stock/{ticker}/smart-money")
+@limiter.limit("60/minute")
+def stock_smart_money(request: Request, ticker: str):
+    ticker = _valid_ticker(ticker)
+    clusters = smart_money.insider_buying(30)
+    hit = next((c for c in clusters["clusters"] + clusters["big_buys"] if c["symbol"] == ticker), None)
+    return {"ticker": ticker, "superinvestors": smart_money.held_by_superinvestors(ticker), "insider_buying": hit}
+
+
+# ── Portfolio insights & CSV import ──────────────────────────────────────────
+
+@app.get("/api/portfolio/performance")
+@limiter.limit("10/minute")
+def portfolio_performance(request: Request, user: dict = Depends(get_current_user)):
+    uid = int(user["user_id"])
+    try:
+        return get_or_fetch(f"perf:{uid}:{len(get_user_holdings(uid))}", lambda: portfolio_insights.performance(uid), ttl=900)
+    except Exception as e:
+        raise _upstream_error(e)
+
+
+@app.get("/api/portfolio/dividends")
+@limiter.limit("10/minute")
+def portfolio_dividends(request: Request, user: dict = Depends(get_current_user)):
+    uid = int(user["user_id"])
+    try:
+        return get_or_fetch(f"pdiv:{uid}:{len(get_user_holdings(uid))}", lambda: portfolio_insights.dividend_income(uid), ttl=3600)
+    except Exception as e:
+        raise _upstream_error(e)
+
+
+@app.get("/api/portfolio/tax")
+@limiter.limit("20/minute")
+def portfolio_tax(request: Request, user: dict = Depends(get_current_user)):
+    try:
+        return portfolio_insights.wash_sales(int(user["user_id"]))
+    except Exception as e:
+        raise _upstream_error(e)
+
+
+class ImportRequest(BaseModel):
+    csv: str = Field(..., min_length=10, max_length=1_000_000)
+    commit: bool = False
+
+
+@app.post("/api/portfolio/import")
+@limiter.limit("10/minute")
+def portfolio_import(request: Request, req: ImportRequest, user: dict = Depends(get_current_user)):
+    try:
+        parsed = portfolio_insights.parse_broker_csv(req.csv)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if req.commit:
+        parsed["imported"] = portfolio_insights.import_rows(int(user["user_id"]), parsed["rows"])
+    return parsed
+
+
+@app.get("/api/weekly-review")
+@limiter.limit("6/minute")
+def weekly_review(request: Request, refresh: bool = False, user: dict = Depends(get_current_user)):
+    from database import get_all_user_tickers
+    tickers = get_all_user_tickers().get(int(user["user_id"]), set())
+    try:
+        r = scheduler.get_or_create_weekly(int(user["user_id"]), tickers, force=refresh)
+    except Exception as e:
+        raise _upstream_error(e)
+    return r or {"empty": True}
+
+
+# ── Investment theses ────────────────────────────────────────────────────────
+
+class ThesisRequest(BaseModel):
+    thesis: str = Field(..., min_length=10, max_length=2000)
+
+
+@app.get("/api/thesis")
+def thesis_list(user: dict = Depends(get_current_user)):
+    return {"items": list_theses(int(user["user_id"]))}
+
+
+@app.get("/api/thesis/{ticker}")
+def thesis_get(ticker: str, user: dict = Depends(get_current_user)):
+    return get_thesis(int(user["user_id"]), _valid_ticker(ticker)) or {"empty": True}
+
+
+@app.put("/api/thesis/{ticker}")
+def thesis_put(ticker: str, req: ThesisRequest, user: dict = Depends(get_current_user)):
+    return thesis.upsert(int(user["user_id"]), _valid_ticker(ticker), req.thesis)
+
+
+@app.delete("/api/thesis/{ticker}")
+def thesis_delete(ticker: str, user: dict = Depends(get_current_user)):
+    if not delete_thesis(int(user["user_id"]), _valid_ticker(ticker)):
+        raise HTTPException(status_code=404, detail="No thesis for this ticker")
+    return {"ok": True}
+
+
+@app.post("/api/thesis/{ticker}/check")
+@limiter.limit("6/minute")
+def thesis_check(request: Request, ticker: str, user: dict = Depends(get_current_user)):
+    try:
+        return thesis.check(int(user["user_id"]), _valid_ticker(ticker))
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        log.warning("Thesis check failed for %s: %s", ticker, e)
+        raise HTTPException(status_code=503, detail="AI is temporarily unavailable. Try again shortly.")

@@ -11,7 +11,6 @@ import pandas as pd
 import requests
 import yfinance as yf
 
-from alerts import _cross_date
 from database import kv_get, kv_set
 from stock_data import compute_indicators, get_stock_data
 
@@ -67,7 +66,26 @@ def _ret(close: pd.Series, bars: int) -> float | None:
     return float(close.iloc[-1] / close.iloc[-bars - 1] - 1) if len(close) > bars else None
 
 
-def _analyze(sym: str, df: pd.DataFrame) -> dict | None:
+def _signals(df: pd.DataFrame) -> pd.DataFrame:
+    """Boolean column per setup for every bar (df must already have indicators)."""
+    close, high = df["Close"], df["High"]
+    prior_high = high.rolling(251, min_periods=200).max().shift(1)
+    rvol = df["Volume"] / df["Volume"].rolling(50).mean().shift(1)
+    uptrend = (close > df["sma_200"]) & (df["sma_50"] > df["sma_200"])
+    ext = close / df["ema_21"] - 1
+    width = (df["bb_upper"] - df["bb_lower"]) / df["bb_mid"]
+    above = df["sma_50"] > df["sma_200"]
+    cross = above & (df["sma_50"].shift(1) <= df["sma_200"].shift(1))
+    return pd.DataFrame({
+        "breakout": (close >= prior_high * 0.995) & (rvol >= 1.5) & (close > close.shift(1)),
+        "pullback": uptrend & ext.between(-0.02, 0.015) & df["rsi"].between(40, 60),
+        "squeeze": (width <= width.rolling(126, min_periods=100).quantile(0.1)) & (close > df["sma_50"]),
+        "oversold": (df["rsi"] < 35) & (close > df["sma_200"]),
+        "golden_cross": cross.astype(int).rolling(10, min_periods=1).max().astype(bool),
+    }, index=df.index).fillna(False)
+
+
+def _analyze(sym: str, df: pd.DataFrame, events: list | None = None) -> dict | None:
     df = df.dropna(subset=["Open", "High", "Low", "Close"])
     if len(df) < 210:
         return None
@@ -79,22 +97,14 @@ def _analyze(sym: str, df: pd.DataFrame) -> dict | None:
     vol50 = float(df["Volume"].tail(51).head(50).mean()) or None
     rvol = float(last["Volume"]) / vol50 if vol50 else None
     atr = float(last["atr"])
-    sma50, sma200, ema21, rsi = float(last["sma_50"]), float(last["sma_200"]), float(last["ema_21"]), float(last["rsi"])
-    prior_high = float(df["High"].iloc[-252:-1].max())
+    sma50, sma200 = float(last["sma_50"]), float(last["sma_200"])
+    rsi = float(last["rsi"])
     uptrend = price > sma200 and sma50 > sma200
 
-    width = ((df["bb_upper"] - df["bb_lower"]) / df["bb_mid"]).dropna().tail(126)
-    setups = []
-    if price >= prior_high * 0.995 and (rvol or 0) >= 1.5 and price > float(df["Close"].iloc[-2]):
-        setups.append("breakout")
-    if uptrend and -0.02 <= price / ema21 - 1 <= 0.015 and 40 <= rsi <= 60:
-        setups.append("pullback")
-    if len(width) >= 100 and width.iloc[-1] <= width.quantile(0.1) and price > sma50:
-        setups.append("squeeze")
-    if rsi < 35 and price > sma200:
-        setups.append("oversold")
-    if _cross_date(df["sma_50"], df["sma_200"], 10, "up") is not None:
-        setups.append("golden_cross")
+    sig = _signals(df)
+    setups = [s for s in SETUPS if bool(sig[s].iloc[-1])]
+    if events is not None:
+        _record_events(sym, df, sig, events)
 
     return {
         "symbol": sym,
@@ -115,6 +125,49 @@ def _analyze(sym: str, df: pd.DataFrame) -> dict | None:
     }
 
 
+HORIZONS = (5, 10, 20)
+BACKTEST_BARS = 252
+
+
+def _record_events(sym: str, df: pd.DataFrame, sig: pd.DataFrame, events: list) -> None:
+    """Each new setup signal in the past year with its forward returns (for the track record)."""
+    close = df["Close"]
+    fwd = {h: close.shift(-h) / close - 1 for h in HORIZONS}
+    start = max(len(df) - BACKTEST_BARS, 0)
+    for s in SETUPS:
+        # A signal counts once; it must not have fired in the prior 10 bars
+        recent = sig[s].shift(1, fill_value=False).astype(int).rolling(10, min_periods=1).max().astype(bool)
+        fresh = sig[s] & ~recent
+        for i in np.flatnonzero(fresh.values[start:]) + start:
+            events.append((s, df.index[i], {h: (None if pd.isna(fwd[h].iloc[i]) else float(fwd[h].iloc[i]))
+                                            for h in HORIZONS}))
+
+
+def _track_record(events: list, spy: pd.Series | None) -> dict:
+    spy_fwd = {h: spy.shift(-h) / spy - 1 for h in HORIZONS} if spy is not None else {}
+    out = {}
+    for s in SETUPS:
+        ev = [e for e in events if e[0] == s]
+        stats = {"signals": len(ev)}
+        for h in HORIZONS:
+            rets = [e[2][h] for e in ev if e[2][h] is not None]
+            if not rets:
+                continue
+            stats[f"avg_{h}d"] = round(float(np.mean(rets)) * 100, 2)
+            stats[f"win_{h}d"] = round(float(np.mean([r > 0 for r in rets])) * 100)
+            stats[f"n_{h}d"] = len(rets)
+            if h == 20:
+                stats["median_20d"] = round(float(np.median(rets)) * 100, 2)
+                stats["hit5_20d"] = round(float(np.mean([r >= 0.05 for r in rets])) * 100)
+                if spy_fwd:
+                    ex = [r - spy_fwd[20].get(e[1], np.nan) for e, r in zip([e for e in ev if e[2][20] is not None], rets)]
+                    ex = [x for x in ex if not pd.isna(x)]
+                    if ex:
+                        stats["excess_20d"] = round(float(np.mean(ex)) * 100, 2)
+        out[s] = stats
+    return out
+
+
 def run_scan() -> dict:
     global _running
     with _lock:
@@ -126,22 +179,23 @@ def run_scan() -> dict:
         uni = universe()
         meta = {u["symbol"]: u for u in uni}
         symbols = list(meta)
-        rows = []
+        rows, events = [], []
         for i in range(0, len(symbols), BATCH):
             batch = symbols[i:i + BATCH]
             try:
-                data = yf.download(batch, period="1y", interval="1d", group_by="ticker",
+                data = yf.download(batch, period="2y", interval="1d", group_by="ticker",
                                    auto_adjust=True, threads=True, progress=False)
             except Exception as e:
                 log.warning("Scan batch %d failed: %s", i, e)
                 continue
             for sym in batch:
                 try:
-                    r = _analyze(sym, data[sym])
+                    r = _analyze(sym, data[sym], events)
                 except Exception:
                     r = None
                 if r:
                     rows.append({**r, "name": meta[sym]["name"], "sector": meta[sym]["sector"]})
+            del data
             time.sleep(1)
 
         if not rows:
@@ -163,7 +217,15 @@ def run_scan() -> dict:
                                "count": len(v["rs"])} for k, v in sectors.items()),
                              key=lambda s: s["rs_rating"], reverse=True)
 
+        try:
+            spy = get_stock_data("SPY", period="2y", interval="1d")["Close"]
+            spy.index = spy.index.tz_localize(None) if spy.index.tz is not None else spy.index
+        except Exception:
+            spy = None
+        track = _track_record(events, spy)
+
         result = {"rows": rows, "sectors": sector_rows, "universe": "S&P 500", "rs_dist": rs_dist,
+                  "track_record": track, "track_period_days": BACKTEST_BARS,
                   "updated_at": datetime.now(timezone.utc).isoformat(), "seconds": round(time.time() - started)}
         kv_set(SCAN_KEY, result)
         log.info("Setup scan complete: %d stocks in %ds", len(rows), result["seconds"])
