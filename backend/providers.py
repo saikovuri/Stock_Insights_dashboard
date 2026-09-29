@@ -5,6 +5,7 @@ Every function returns None / [] on failure so callers can fall back to yfinance
 
 import logging
 import math
+import re
 import threading
 import time
 from datetime import date, timedelta
@@ -208,6 +209,60 @@ def twelvedata_history(ticker: str, period: str, interval: str) -> pd.DataFrame 
     except Exception as e:
         log.warning("Twelve Data history failed for %s: %s", ticker, e)
         return None
+
+
+# ── CBOE delayed options (free, no key; fallback when Yahoo blocks the host) ──
+
+_OCC = re.compile(r"^([A-Z.]+)(\d{6})([CP])(\d{8})$")
+
+
+def cboe_chains(ticker: str) -> dict[str, tuple[pd.DataFrame, pd.DataFrame]]:
+    """All expirations for a ticker as {expiry: (calls, puts)} with yfinance-style columns."""
+    if not _is_plain_equity(ticker):
+        return {}
+
+    def _fetch():
+        sym = ticker.replace("-", ".")
+        resp = _session.get(f"https://cdn.cboe.com/api/global/delayed_quotes/options/{sym}.json",
+                            headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+        if resp.status_code != 200:
+            raise LookupError(ticker)
+        rows = {}
+        for o in (resp.json().get("data") or {}).get("options") or []:
+            m = _OCC.match(o.get("option") or "")
+            # Skip adjusted contracts (root differs from the ticker, e.g. after a split)
+            if not m or m.group(1) != sym:
+                continue
+            ymd, cp = m.group(2), m.group(3)
+            expiry = f"20{ymd[:2]}-{ymd[2:4]}-{ymd[4:]}"
+            rows.setdefault((expiry, cp), []).append({
+                "contractSymbol": o["option"],
+                "strike": int(m.group(4)) / 1000,
+                "lastPrice": o.get("last_trade_price") or 0.0,
+                "bid": o.get("bid") or 0.0,
+                "ask": o.get("ask") or 0.0,
+                "volume": o.get("volume") or 0,
+                "openInterest": o.get("open_interest") or 0,
+                "impliedVolatility": o.get("iv") or 0.0,
+            })
+        if not rows:
+            raise LookupError(ticker)
+        chains = {}
+        for expiry in sorted({k[0] for k in rows}):
+            calls, puts = (pd.DataFrame(rows.get((expiry, cp), [])) for cp in "CP")
+            chains[expiry] = tuple(df.sort_values("strike").reset_index(drop=True) if not df.empty else df
+                                   for df in (calls, puts))
+        return chains
+
+    return _cached(f"cboe:{ticker}", 300, _fetch, {})
+
+
+def finnhub_insider_transactions(ticker: str) -> list[dict]:
+    if not _is_plain_equity(ticker):
+        return []
+    fetch = _list_fetch("/stock/insider-transactions", {"symbol": ticker},
+                        lambda d: (d or {}).get("data") or [] if isinstance(d, dict) else [])
+    return _cached(f"fh:insiders:{ticker}", 21600, fetch, [])
 
 
 # ── SEC EDGAR (free, no key) ─────────────────────────────────────────────

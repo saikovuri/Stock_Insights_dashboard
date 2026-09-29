@@ -28,7 +28,8 @@ import scanner
 import journal
 import fundamentals
 import scheduler
-from providers import finnhub_enabled, finnhub_quote, finnhub_peers, finnhub_recommendations
+from providers import finnhub_enabled, finnhub_quote, finnhub_peers, finnhub_recommendations, \
+    finnhub_basic_financials, finnhub_earnings_calendar, finnhub_insider_transactions
 from alerts import check_alerts, technical_events
 from cache import get_or_fetch, stats as cache_stats, clear as cache_clear
 from auth import hash_password, verify_password, create_token, decode_token, create_refresh_token, REFRESH_EXPIRE_DAYS
@@ -623,16 +624,13 @@ def options_summary_endpoint(user: dict = Depends(get_current_user)):
         key = (yf_sym, expiry)
         if key not in chain_cache:
             try:
-                t = yf.Ticker(yf_sym)
-                available = t.options or []
-                if expiry in available:
-                    chain = t.option_chain(expiry)
-                else:
-                    nearest = min(available, key=lambda e: abs(
+                available = options_analytics._expirations(yf_sym)
+                if expiry not in available:
+                    expiry = min(available, key=lambda e: abs(
                         (datetime.strptime(e, "%Y-%m-%d").date() - datetime.strptime(expiry, "%Y-%m-%d").date()).days
                     )) if available else None
-                    chain = t.option_chain(nearest) if nearest else None
-                chain_cache[key] = {"calls": chain.calls if chain else None, "puts": chain.puts if chain else None}
+                calls, puts = options_analytics._chain(yf_sym, expiry) if expiry else (None, None)
+                chain_cache[key] = {"calls": calls, "puts": puts}
             except Exception:
                 chain_cache[key] = {"calls": None, "puts": None}
 
@@ -1003,6 +1001,9 @@ def stock_events(ticker: str):
                     earnings_date = str(ed.iloc[0].date()) if hasattr(ed.iloc[0], "date") else str(ed.iloc[0])[:10]
         except Exception:
             pass
+        if not earnings_date:
+            cal = finnhub_earnings_calendar(90, ticker)
+            earnings_date = next((e.get("date") for e in cal if e.get("symbol") == ticker and e.get("date")), None)
 
         # ── Past earnings with surprise ──────────────────────
         past_earnings = []
@@ -1071,7 +1072,10 @@ def stock_analyst(request: Request, ticker: str):
         import yfinance as yf
         import math
         stock = yf.Ticker(ticker)
-        info = stock.info or {}
+        try:
+            info = stock.info or {}
+        except Exception:
+            info = {}
 
         target_high = info.get("targetHighPrice")
         target_low = info.get("targetLowPrice")
@@ -1097,6 +1101,13 @@ def stock_analyst(request: Request, ticker: str):
                             breakdown[col] = int(val)
         except Exception:
             pass
+        total = sum(breakdown.values())
+        if not recommendation_mean and total:
+            # Yahoo's 1 (strong buy) .. 5 (strong sell) scale, derived from the Finnhub breakdown
+            recommendation_mean = round(sum(w * breakdown[k] for w, k in enumerate(breakdown, 1)) / total, 2)
+            recommendation = ("strong_buy" if recommendation_mean <= 1.5 else "buy" if recommendation_mean <= 2.5
+                              else "hold" if recommendation_mean <= 3.5 else "sell" if recommendation_mean <= 4.5
+                              else "strong_sell")
 
         upgrades = []
         try:
@@ -1184,7 +1195,10 @@ def stock_ownership(request: Request, ticker: str):
         import yfinance as yf
         import math
         stock = yf.Ticker(ticker)
-        info = stock.info
+        try:
+            info = stock.info or {}
+        except Exception:
+            info = {}
 
         # Institutional holders
         institutions = []
@@ -1225,6 +1239,19 @@ def stock_ownership(request: Request, ticker: str):
                     insiders.append(txn)
         except Exception:
             pass
+        if not insiders:
+            # Finnhub fallback (Form 4 data); codes per SEC Form 4 instructions
+            codes = {"P": "Purchase", "S": "Sale", "A": "Award/Grant", "M": "Option Exercise",
+                     "F": "Tax Withholding", "G": "Gift", "C": "Conversion", "X": "Option Exercise"}
+            for t in finnhub_insider_transactions(ticker)[:20]:
+                change, price = t.get("change") or 0, t.get("transactionPrice") or 0
+                insiders.append({
+                    "Insider": t.get("name"),
+                    "Transaction": codes.get(t.get("transactionCode"), t.get("transactionCode") or ""),
+                    "Shares": change,
+                    "Value": round(abs(change) * price, 2) if price else None,
+                    "Date": t.get("transactionDate"),
+                })
 
         # Summary stats
         held_pct_insiders = info.get("heldPercentInsiders")
@@ -1252,7 +1279,10 @@ def stock_dividends(request: Request, ticker: str):
     def _fetch():
         import yfinance as yf
         stock = yf.Ticker(ticker)
-        info = stock.info
+        try:
+            info = stock.info or {}
+        except Exception:
+            info = {}
 
         # Dividend info from info
         div_rate = info.get("dividendRate")
@@ -1260,6 +1290,13 @@ def stock_dividends(request: Request, ticker: str):
         ex_date = info.get("exDividendDate")
         payout_ratio = info.get("payoutRatio")
         five_yr_avg = info.get("fiveYearAvgDividendYield")
+        if div_yield is None:
+            # Finnhub fallback (percent units, like yfinance's dividendYield)
+            m = finnhub_basic_financials(ticker) or {}
+            div_rate = m.get("dividendIndicatedAnnual") or m.get("dividendPerShareTTM")
+            div_yield = m.get("currentDividendYieldTTM")
+            if m.get("payoutRatioTTM") is not None:
+                payout_ratio = m["payoutRatioTTM"] / 100
 
         # Convert epoch ex_date to readable
         ex_date_str = None
@@ -1280,6 +1317,8 @@ def stock_dividends(request: Request, ticker: str):
                     history.append({"date": d, "amount": round(float(amount), 4)})
         except Exception:
             pass
+        if not ex_date_str and history:
+            ex_date_str = history[-1]["date"]
 
         return {
             "dividend_rate": div_rate,
@@ -1410,16 +1449,12 @@ def stock_structures(
         raise HTTPException(status_code=400, detail="direction must be 'bull' or 'bear'")
 
     def _fetch():
-        import yfinance as yf
-
-        stock = yf.Ticker(ticker)
-        info = stock.info or {}
-        spot = info.get("currentPrice") or info.get("regularMarketPrice")
+        spot = get_quote(ticker).get("price")
         if not spot:
             raise HTTPException(status_code=404, detail="Spot price unavailable")
 
         try:
-            expirations = list(stock.options or [])
+            expirations = options_analytics._expirations(ticker)
         except Exception:
             expirations = []
         expiry = _nearest_expiry(expirations, min_days=14, max_days=45) or (expirations[0] if expirations else None)
@@ -1427,12 +1462,12 @@ def stock_structures(
             raise HTTPException(status_code=404, detail="No options available")
 
         try:
-            chain = stock.option_chain(expiry)
+            calls, puts = options_analytics._chain(ticker, expiry)
         except Exception as e:
             log.warning("Option chain failed for %s: %s", ticker, e)
             raise HTTPException(status_code=502, detail="Option chain unavailable")
 
-        df = chain.calls if direction == "bull" else chain.puts
+        df = calls if direction == "bull" else puts
         if df is None or df.empty:
             raise HTTPException(status_code=404, detail="Empty option chain")
 

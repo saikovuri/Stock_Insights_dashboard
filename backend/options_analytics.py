@@ -1,6 +1,7 @@
 """Options analytics: implied-vs-realized volatility, expected moves, and income ideas
-(covered calls / cash-secured puts). Chains come from Yahoo; IV is solved from mid prices
-because Yahoo's own IV field is often stale outside market hours."""
+(covered calls / cash-secured puts). Chains come from Yahoo, falling back to CBOE delayed
+quotes; IV is solved from mid prices because Yahoo's own IV field is often stale outside
+market hours."""
 
 import logging
 import math
@@ -12,7 +13,7 @@ import yfinance as yf
 
 from cache import get_or_fetch
 from database import record_iv, get_iv_history
-from providers import finnhub_earnings_calendar
+from providers import cboe_chains, finnhub_earnings_calendar
 from stock_data import get_quote, get_stock_data
 
 log = logging.getLogger(__name__)
@@ -74,13 +75,29 @@ def _row_iv(row, S, T, kind) -> float | None:
 # ── Chain access ─────────────────────────────────────────────────────────
 
 def _expirations(ticker: str) -> list[str]:
-    return get_or_fetch(f"opt-exp:{ticker}", lambda: list(yf.Ticker(ticker).options or []), ttl=3600)
+    def _fetch():
+        try:
+            exps = list(yf.Ticker(ticker).options or [])
+        except Exception as e:
+            log.info("Yahoo expirations failed for %s: %s", ticker, e)
+            exps = []
+        # Yahoo often blocks cloud hosts; CBOE delayed quotes are the fallback
+        return exps or list(cboe_chains(ticker))
+    return get_or_fetch(f"opt-exp:{ticker}", _fetch, ttl=3600)
 
 
 def _chain(ticker: str, expiry: str):
     def _fetch():
-        c = yf.Ticker(ticker).option_chain(expiry)
-        return c.calls, c.puts
+        try:
+            c = yf.Ticker(ticker).option_chain(expiry)
+            if not (c.calls.empty and c.puts.empty):
+                return c.calls, c.puts
+        except Exception as e:
+            log.info("Yahoo chain failed for %s %s: %s", ticker, expiry, e)
+        chain = cboe_chains(ticker).get(expiry)
+        if chain is None:
+            raise ValueError(f"No option chain for {ticker} {expiry}")
+        return chain
     return get_or_fetch(f"opt-chain:{ticker}:{expiry}", _fetch, ttl=300)
 
 
