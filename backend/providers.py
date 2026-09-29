@@ -230,8 +230,8 @@ def cboe_chains(ticker: str) -> dict[str, tuple[pd.DataFrame, pd.DataFrame]]:
         rows = {}
         for o in (resp.json().get("data") or {}).get("options") or []:
             m = _OCC.match(o.get("option") or "")
-            # Skip adjusted contracts (root differs from the ticker, e.g. after a split)
-            if not m or m.group(1) != sym:
+            # Skip adjusted contracts (root differs from the ticker, e.g. after a split); BRK.B -> BRKB
+            if not m or m.group(1) != sym.replace(".", ""):
                 continue
             ymd, cp = m.group(2), m.group(3)
             expiry = f"20{ymd[:2]}-{ymd[2:4]}-{ymd[4:]}"

@@ -82,8 +82,14 @@ def _expirations(ticker: str) -> list[str]:
             log.info("Yahoo expirations failed for %s: %s", ticker, e)
             exps = []
         # Yahoo often blocks cloud hosts; CBOE delayed quotes are the fallback
-        return exps or list(cboe_chains(ticker))
-    return get_or_fetch(f"opt-exp:{ticker}", _fetch, ttl=3600)
+        exps = exps or list(cboe_chains(ticker))
+        if not exps:
+            raise LookupError(ticker)  # don't cache a transient miss for an hour
+        return exps
+    try:
+        return get_or_fetch(f"opt-exp:{ticker}", _fetch, ttl=3600)
+    except LookupError:
+        return []
 
 
 def _chain(ticker: str, expiry: str):
