@@ -5,16 +5,19 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, time as dtime, timezone
 from zoneinfo import ZoneInfo
 
+import requests
 import yfinance as yf
 from yfinance import EquityQuery
 
 from cache import get_or_fetch
+from database import kv_get, kv_set
 from providers import finnhub_company_news, finra_short_interest
 from stock_data import get_stock_data
 
 log = logging.getLogger(__name__)
 ET = ZoneInfo("America/New_York")
 OPEN, CLOSE = dtime(9, 30), dtime(16, 0)
+NDX_KEY = "universe:ndx"
 
 
 def _hl(df):
@@ -88,6 +91,44 @@ def _screen(direction: str) -> list[dict]:
     return yf.screen(q, sortField="percentchange", sortAsc=direction != "up", size=100).get("quotes", [])
 
 
+def _screen_members(members: set[str]) -> list[dict]:
+    """Quotes for every index member: page through $2B+ US stocks by market cap until all are found."""
+    q = EquityQuery("and", [EquityQuery("eq", ["region", "us"]), EquityQuery("gt", ["intradaymarketcap", 2e9])])
+    found: dict[str, dict] = {}
+    for offset in range(0, 5000, 250):
+        page = yf.screen(q, sortField="intradaymarketcap", sortAsc=False, size=250, offset=offset).get("quotes", [])
+        found.update({x["symbol"]: x for x in page if x.get("symbol") in members})
+        if len(page) < 250 or len(found) >= len(members):
+            break
+    return list(found.values())
+
+
+def nasdaq100() -> set[str]:
+    cached = kv_get(NDX_KEY)
+    fresh = cached and (datetime.now(timezone.utc) - datetime.fromisoformat(
+        cached["updated_at"].replace(" ", "T")).replace(tzinfo=timezone.utc)).days < 7
+    if fresh:
+        return set(cached["data"])
+    try:
+        r = requests.get("https://api.nasdaq.com/api/quote/list-type/nasdaq100",
+                         headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"}, timeout=15)
+        rows = (((r.json().get("data") or {}).get("data") or {}).get("rows")) or []
+        syms = sorted({x["symbol"].replace(".", "-") for x in rows if x.get("symbol")})
+        if len(syms) >= 90:
+            kv_set(NDX_KEY, syms)
+            return set(syms)
+    except Exception as e:
+        log.warning("Nasdaq-100 list unavailable: %s", e)
+    return set(cached["data"]) if cached else set()
+
+
+def _members(universe: str) -> set[str]:
+    if universe == "ndx":
+        return nasdaq100()
+    import scanner
+    return {u["symbol"] for u in scanner.universe()}
+
+
 _ROUNDUP = ("top gainers", "top movers", "what's going on", "stocks moving", "biggest movers", "mid-day movers",
             "premarket movers", "after hours movers", "stocks to watch", "most active stocks", "are moving",
             "movers in", "stocks making")
@@ -108,22 +149,32 @@ def _catalyst(sym: str, name: str, earnings_ts) -> dict | None:
             "time": datetime.fromtimestamp(n["datetime"], timezone.utc).isoformat() if n.get("datetime") else None}
 
 
-def stocks_in_play(limit: int = 40) -> dict:
+def stocks_in_play(universe: str | None = None, limit: int = 40) -> dict:
+    index = universe in ("sp500", "ndx")
+    limit = 60 if index else limit
+
     def _fetch():
         now = datetime.now(ET)
         frac = _session_fraction(now)
         quotes = {}
-        for direction in ("up", "down"):
+        members = _members(universe) if index else None
+        if index:
+            try:
+                quotes = {q["symbol"]: q for q in _screen_members(members)}
+            except Exception as e:
+                log.warning("Index screen %s failed: %s", universe, e)
+        for direction in (("up", "down") if not index else ()):
             try:
                 for q in _screen(direction):
                     quotes[q["symbol"]] = q
             except Exception as e:
                 log.warning("In-play screen %s failed: %s", direction, e)
-        try:
-            for q in yf.screen("most_actives", count=100).get("quotes", []):
-                quotes.setdefault(q["symbol"], q)
-        except Exception as e:
-            log.info("most_actives failed: %s", e)
+        if not index:
+            try:
+                for q in yf.screen("most_actives", count=100).get("quotes", []):
+                    quotes.setdefault(q["symbol"], q)
+            except Exception as e:
+                log.info("most_actives failed: %s", e)
 
         rows = []
         for sym, q in quotes.items():
@@ -140,7 +191,8 @@ def stocks_in_play(limit: int = 40) -> dict:
             pre = q.get("preMarketChangePercent")
             post = q.get("postMarketChangePercent")
             score = rvol * max(abs(chg), abs(pre or 0), abs(gap or 0))
-            if rvol < 1.5 and abs(gap or 0) < 4 and abs(pre or 0) < 4:
+            # Index views rank every member; the market-wide view keeps only real outliers
+            if not index and rvol < 1.5 and abs(gap or 0) < 4 and abs(pre or 0) < 4:
                 continue
             rows.append({
                 "symbol": sym, "name": q.get("shortName") or sym, "price": round(price, 2),
@@ -173,5 +225,7 @@ def stocks_in_play(limit: int = 40) -> dict:
         state = ("pre-market" if now.weekday() < 5 and dtime(4) <= now.time() < OPEN else
                  "open" if now.weekday() < 5 and OPEN <= now.time() < CLOSE else "closed")
         return {"rows": rows, "market_state": state, "session_elapsed_pct": round(frac * 100),
-                "screened": len(quotes), "as_of": now.isoformat(timespec="seconds")}
-    return get_or_fetch("in-play", _fetch, ttl=180)
+                "screened": len(quotes), "universe": universe or "all",
+                "members": len(members) if members is not None else None,
+                "as_of": now.isoformat(timespec="seconds")}
+    return get_or_fetch(f"in-play:{universe or 'all'}", _fetch, ttl=180)

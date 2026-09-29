@@ -1955,9 +1955,9 @@ def stock_levels(request: Request, ticker: str):
 
 @app.get("/api/ideas/in-play")
 @limiter.limit("20/minute")
-def ideas_in_play(request: Request):
+def ideas_in_play(request: Request, universe: Optional[Literal["all", "sp500", "ndx"]] = "all"):
     try:
-        return intraday.stocks_in_play()
+        return intraday.stocks_in_play(None if universe == "all" else universe)
     except Exception as e:
         raise _upstream_error(e)
 

@@ -371,7 +371,7 @@ export const fetchWeeklyReview = (refresh = false) =>
 
 // ── Day trading ──────────────────────────────────────────────────
 export const fetchKeyLevels = (t) => getJson(`${BASE}/stock/${t}/levels`, 'Failed to load levels');
-export const fetchInPlay = () => getJson(`${BASE}/ideas/in-play`, 'Failed to load stocks in play');
+export const fetchInPlay = (universe = 'all') => getJson(`${BASE}/ideas/in-play?universe=${universe}`, 'Failed to load stocks in play');
 export const fetchBacktestStrategies = () => getJson(`${BASE}/backtest/strategies`, 'Failed to load strategies');
 export const runBacktest = (opts) => {
   const q = new URLSearchParams();

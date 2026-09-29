@@ -6,26 +6,31 @@ const cap = v => v == null ? '—' : v >= 1e12 ? `$${(v / 1e12).toFixed(1)}T` : 
 const pct = v => v == null ? '—' : `${v > 0 ? '+' : ''}${v}%`;
 const cls = v => v == null ? '' : v >= 0 ? 'positive' : 'negative';
 
+const UNIVERSES = { all: 'All market', sp500: 'S&P 500', ndx: 'Nasdaq 100' };
 const FILTERS = {
-  all: { label: 'All', test: () => true },
-  small: { label: 'Small caps (< $2B)', test: r => (r.market_cap || 0) < 2e9 },
-  large: { label: 'Mid & large caps', test: r => (r.market_cap || 0) >= 2e9 },
+  all: { label: 'Any cap', test: () => true },
+  small: { label: 'Small < $2B', test: r => (r.market_cap || 0) < 2e9 },
+  mid: { label: 'Mid $2–10B', test: r => (r.market_cap || 0) >= 2e9 && r.market_cap < 1e10 },
+  large: { label: 'Large > $10B', test: r => (r.market_cap || 0) >= 1e10 },
   catalyst: { label: 'With catalyst', test: r => !!r.catalyst },
 };
 
 export default function InPlay({ onSelect }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
+  const [universe, setUniverse] = useState('all');
   const [filter, setFilter] = useState('all');
   const [side, setSide] = useState('both');
   const [minPrice, setMinPrice] = useState(2);
 
   useEffect(() => {
-    const load = () => fetchInPlay().then(d => { setData(d); setError(null); }).catch(e => setError(e.message));
+    setData(null); setError(null);
+    if (universe !== 'all') setFilter(f => (f === 'small' ? 'all' : f));
+    const load = () => fetchInPlay(universe).then(d => { setData(d); setError(null); }).catch(e => setError(e.message));
     load();
     const timer = setInterval(load, 180_000);
     return () => clearInterval(timer);
-  }, []);
+  }, [universe]);
 
   const rows = useMemo(() => (data?.rows || [])
     .filter(FILTERS[filter].test)
@@ -33,7 +38,24 @@ export default function InPlay({ onSelect }) {
     .filter(r => r.price >= minPrice), [data, filter, side, minPrice]);
 
   if (error && !data) return <div className="card"><p className="error-text">{error}</p></div>;
-  if (!data) return <div className="card"><p className="loading-text">Screening the market for stocks in play…</p></div>;
+
+  const universeTabs = (
+    <div className="chart-toggle">
+      {Object.entries(UNIVERSES).map(([k, l]) => (
+        <button key={k} className={universe === k ? 'active' : ''} onClick={() => setUniverse(k)}>{l}</button>
+      ))}
+    </div>
+  );
+  if (!data) {
+    return (
+      <div className="card">
+        <h3>⚡ Stocks in play</h3>
+        <div className="scanner-filters">{universeTabs}</div>
+        <p className="loading-text">Screening {UNIVERSES[universe]} for stocks in play…</p>
+      </div>
+    );
+  }
+  const isIndex = universe !== 'all';
 
   return (
     <div className="card">
@@ -48,10 +70,12 @@ export default function InPlay({ onSelect }) {
         Movers with unusual volume, gaps or a news catalyst — the names day traders focus on. <b>Rel vol</b> compares
         today's volume with the 10-day average for the same point in the session (3× = three times normal).
         {data.market_state === 'pre-market' && ' Premarket % is shown before the open.'}
+        {isIndex && ` Showing the ${UNIVERSES[universe]} members moving most today, ranked by relative volume × move (${data.rows.length} of ${data.members}).`}
       </p>
       <div className="scanner-filters">
+        {universeTabs}
         <div className="chart-toggle">
-          {Object.entries(FILTERS).map(([k, f]) => (
+          {Object.entries(FILTERS).filter(([k]) => !isIndex || k !== 'small').map(([k, f]) => (
             <button key={k} className={filter === k ? 'active' : ''} onClick={() => setFilter(k)}>{f.label}</button>
           ))}
         </div>
