@@ -1,8 +1,59 @@
 import { useState, useEffect, useMemo } from 'react';
 import { fetchScanner } from '../api/stockApi';
+import Tip from './Tip';
 
 const TAG_CLS = { breakout: 'signal-bullish', pullback: 'signal-bullish', golden_cross: 'signal-bullish', squeeze: '', oversold: 'signal-bearish' };
 const SHORT = { breakout: 'Breakout', pullback: 'Pullback', squeeze: 'Squeeze', oversold: 'Oversold', golden_cross: 'Golden X' };
+
+const EXPLAIN = {
+  breakout: {
+    what: 'Price just closed at a new 52-week high on at least 1.5× normal volume.',
+    why: 'Stocks breaking to new highs on heavy buying often keep going — nobody above is waiting to sell at break-even.',
+    how: 'Buy near the breakout level. The idea is wrong if price falls back below it. Avoid chasing if it is already far above.',
+  },
+  pullback: {
+    what: 'A stock in an uptrend (above its 50- and 200-day averages) has dipped back to its 21-day EMA, with RSI cooled to 40–60.',
+    why: 'Buying a dip in a strong trend gets a better price than chasing, with a nearby level to measure risk from.',
+    how: 'Enter near the 21-day EMA; stop below the recent swing low. Best when volume is light on the dip and picks up on the bounce.',
+  },
+  squeeze: {
+    what: 'Bollinger Bands are the tightest in 6 months while price holds above the 50-day average.',
+    why: 'Quiet periods tend to be followed by big moves. Direction is not known yet — this is a "get ready" signal.',
+    how: 'Wait for a break out of the tight range on strong volume, then trade in that direction.',
+  },
+  oversold: {
+    what: 'RSI dropped below 35 while the stock is still above its 200-day average.',
+    why: 'A sharp dip inside a long-term uptrend often snaps back.',
+    how: 'Wait for a reversal day before buying and take profits quicker. Riskier — sometimes the dip is the start of a bigger drop.',
+  },
+  golden_cross: {
+    what: 'The 50-day average crossed above the 200-day in the last 10 days.',
+    why: 'Marks the medium-term trend turning up. Slow and widely watched.',
+    how: 'Use it as a trend filter for longer holds rather than a precise entry — price has often already moved.',
+  },
+};
+
+function SetupExplainer({ k, record, label }) {
+  const e = EXPLAIN[k];
+  if (!e) return <p className="market-sub">{label}</p>;
+  const p = v => (v == null ? '—' : `${v > 0 ? '+' : ''}${v}%`);
+  return (
+    <div className="setup-explain">
+      <div className="setup-explain-head">
+        <span className={`signal-chip ${TAG_CLS[k]}`}>{SHORT[k]}</span>
+        {record && (
+          <span className="market-sub">
+            Past year: {record.signals} signals · up after 20 days {record.win_20d ?? '—'}% of the time ·
+            {' '}<span className={record.excess_20d >= 0 ? 'positive' : 'negative'}>{p(record.excess_20d)} vs SPY</span>
+          </span>
+        )}
+      </div>
+      <p><b>What:</b> {e.what}</p>
+      <p><b>Why it can work:</b> {e.why}</p>
+      <p><b>How traders use it:</b> {e.how}</p>
+    </div>
+  );
+}
 
 function rsClass(rs) {
   return rs >= 80 ? 'rs-strong' : rs >= 50 ? 'rs-mid' : 'rs-weak';
@@ -51,9 +102,9 @@ export default function SetupScanner({ onSelect }) {
 
   const counts = {};
   data.rows.forEach(r => r.setups.forEach(s => { counts[s] = (counts[s] || 0) + 1; }));
-  const th = (key, label, title) => (
-    <th onClick={() => setSort(s => ({ key, dir: s.key === key ? -s.dir : -1 }))} title={title} className="sortable">
-      {label}{sort.key === key ? (sort.dir < 0 ? ' ▼' : ' ▲') : ''}
+  const th = (key, label, term) => (
+    <th onClick={() => setSort(s => ({ key, dir: s.key === key ? -s.dir : -1 }))} className="sortable">
+      {label}{term && <Tip term={term} />}{sort.key === key ? (sort.dir < 0 ? ' ▼' : ' ▲') : ''}
     </th>
   );
 
@@ -88,7 +139,16 @@ export default function SetupScanner({ onSelect }) {
             <input type="range" min={0} max={95} step={5} value={minRs} onChange={e => setMinRs(Number(e.target.value))} />
           </label>
         </div>
-        {setup !== 'all' && setup !== 'any' && <p className="market-sub">{data.setup_labels[setup]}</p>}
+        {setup !== 'all' && setup !== 'any' ? (
+          <SetupExplainer k={setup} record={data.track_record?.[setup]} label={data.setup_labels[setup]} />
+        ) : (
+          <details className="setup-guide">
+            <summary>What do these setups mean?</summary>
+            {Object.keys(data.setup_labels).map(k => (
+              <SetupExplainer key={k} k={k} record={data.track_record?.[k]} label={data.setup_labels[k]} />
+            ))}
+          </details>
+        )}
       </div>
 
       {data.track_record && (
@@ -156,16 +216,16 @@ export default function SetupScanner({ onSelect }) {
             <thead>
               <tr>
                 {th('symbol', 'Stock')}
-                {th('rs_rating', 'RS', 'Relative strength rating (1–99)')}
+                {th('rs_rating', 'RS', 'rs_rating')}
                 {th('price', 'Price')}
                 {th('change_pct', 'Today')}
                 {th('r1m', '1M')}
                 {th('r3m', '3M')}
-                {th('rsi', 'RSI')}
-                {th('rvol', 'Rel vol', 'Volume vs 50-day average')}
+                {th('rsi', 'RSI', 'rsi')}
+                {th('rvol', 'Rel vol', 'rvol_daily')}
                 {th('pct_from_high', 'From high')}
                 <th>Setups</th>
-                <th title="1.5×ATR stop / 3×ATR target">Stop / Target</th>
+                <th>Stop / Target <Tip term="atr_stop" /></th>
               </tr>
             </thead>
             <tbody>

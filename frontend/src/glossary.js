@@ -30,6 +30,12 @@ export const GLOSSARY = {
   pop: 'Chance of profit: a model estimate (from option prices) that the trade makes any money at expiry. Not a guarantee — big moves happen more often than models assume.',
   natural_credit: 'Natural credit: what you would get filling instantly at the worst prices (sell at bid, buy at ask). Aim for a limit between natural and mid.',
 
+  // Setups
+  rs_rating: 'Relative strength (1–99): how this stock performed over the past year vs every other S&P 500 stock, weighted toward the last 3 months. 80+ = a market leader.',
+  rsi: 'RSI (0–100): momentum gauge. Above 70 = stretched after a run-up, below 30 = washed out after a drop, 40–60 = neutral.',
+  rvol_daily: 'Relative volume: today\'s volume vs the 50-day average. 1.5×+ means unusually heavy trading.',
+  atr_stop: 'Suggested stop 1.5× ATR below price and target 3× ATR above (2:1 reward/risk). ATR is the stock\'s average daily range, so stops scale with how much it normally moves.',
+
   // Short interest / smart money
   short_interest: 'Short interest: shares sold short and not yet bought back, reported by FINRA twice a month.',
   days_to_cover: 'Days to cover: shares short ÷ average daily volume. 7+ days means shorts would struggle to exit quickly — short-squeeze risk if good news hits.',

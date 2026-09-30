@@ -4594,6 +4594,16 @@ button.signal-chip { cursor: pointer; }
 }
 
 /* ── Glossary tooltips ─────────────────────────────────────────── */
+.setup-guide { margin-top: 0.6rem; }
+.setup-guide summary { cursor: pointer; font-size: 0.85rem; font-weight: 600; color: var(--accent); }
+.setup-guide[open] summary { margin-bottom: 0.5rem; }
+.setup-explain {
+  border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem 0.75rem; margin-top: 0.5rem;
+  font-size: 0.84rem; line-height: 1.5; color: var(--text-secondary);
+}
+.setup-explain p { margin: 0.2rem 0 0; }
+.setup-explain b { color: var(--text); }
+.setup-explain-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
 .tip-icon {
   display: inline-flex; align-items: center; justify-content: center;
   width: 15px; height: 15px; margin-left: 0.2rem; vertical-align: middle;
