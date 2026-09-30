@@ -4335,8 +4335,17 @@ tr.alert-triggered {
 .app-header h1 { white-space: nowrap; flex-shrink: 0; }
 @media (max-width: 600px) {
   .app-header h1 { font-size: 1rem; }
-  .profile-select { max-width: 112px; font-size: 0.72rem; padding: 0.3rem 0.35rem; }
+  /* gradient-clipped text renders dark in mobile browsers' forced dark mode */
+  .header-title-text { background: none; color: var(--text); -webkit-text-fill-color: currentColor; }
+  .header-top { gap: 0.4rem; }
+  .user-menu { gap: 0.3rem; min-width: 0; }
+  .profile-select { max-width: 112px; min-width: 0; font-size: 0.72rem; padding: 0.3rem 0.35rem; }
   .user-menu .btn-theme { padding: 0.3rem 0.45rem; }
+  .btn-logout { white-space: nowrap; }
+}
+@media (max-width: 480px) {
+  .user-greeting { display: none; }
+  .profile-select { max-width: 92px; }
 }
 @media (max-width: 860px) {
   .watchlist-rail-empty { display: none; }
