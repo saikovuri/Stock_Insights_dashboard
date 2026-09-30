@@ -8,5 +8,5 @@ const isNative = Capacitor.isNativePlatform();
 export const API_BASE = import.meta.env.VITE_API_URL
   ? `${import.meta.env.VITE_API_URL}/api`
   : isNative
-    ? 'https://132-145-214-136.sslip.io/api'
+    ? 'https://157-151-152-97.sslip.io/api'
     : '/api';
