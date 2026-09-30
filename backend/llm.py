@@ -62,7 +62,8 @@ def chat(messages: list[dict], *, json_mode: bool = False, tools: list | None = 
     light=True tries the smaller models first (saves the main models' daily quota for briefs/chat)."""
     attempts = [(name, key, url, model) for name, key, url, models in AI_CHAIN for model in models]
     if light:
-        attempts.sort(key=lambda a: not any(h in a[3] for h in _LIGHT_HINTS))
+        # Small models first, but paid providers (OpenAI) always stay last
+        attempts.sort(key=lambda a: (a[0] == "openai", not any(h in a[3] for h in _LIGHT_HINTS)))
     now = time.monotonic()
     deadline = now + budget_s
     ready = [a for a in attempts if _cooldown.get(a[3], 0) <= now]
