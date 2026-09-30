@@ -11,23 +11,27 @@ SERVICE_NAME="stock-insights"
 cd "$APP_DIR"
 
 echo "Pulling latest code..."
-git pull
+git pull --ff-only
 
 echo "Updating Python dependencies..."
+export PATH="$HOME/.local/bin:$PATH"
 cd backend
-source venv/bin/activate
-pip install -r requirements.txt --quiet
+uv pip install --python venv/bin/python -r requirements.txt --quiet
 
 echo "Restarting service..."
 sudo systemctl restart ${SERVICE_NAME}
 
 echo "Waiting for startup..."
-sleep 3
+for _ in $(seq 1 30); do
+  curl -fs http://127.0.0.1:8000/health >/dev/null && break
+  sleep 2
+done
 
-if sudo systemctl is-active --quiet ${SERVICE_NAME}; then
-  echo "✅ Service is running"
-  curl -s http://127.0.0.1:8000/health | python3 -m json.tool
+if curl -fs http://127.0.0.1:8000/health; then
+  echo ""
+  echo "✅ $(git -C "$APP_DIR" log -1 --format='%h %s') is live"
 else
-  echo "❌ Service failed to start. Check logs:"
-  echo "   sudo journalctl -u ${SERVICE_NAME} -n 20"
+  echo "❌ Service didn't come up. Last logs:"
+  sudo journalctl -u ${SERVICE_NAME} -n 30 --no-pager
+  exit 1
 fi

@@ -1,0 +1,26 @@
+name: Deploy backend to Oracle Cloud
+
+on:
+  push:
+    branches: [master]
+    paths: ["backend/**", "deploy/**"]
+  workflow_dispatch:
+
+concurrency: deploy-oci
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Pull and restart over SSH
+        env:
+          HOST: ${{ secrets.OCI_HOST }}
+          KEY: ${{ secrets.OCI_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.OCI_KNOWN_HOSTS }}
+        run: |
+          if [ -z "$HOST" ]; then echo "OCI_HOST secret not set - skipping"; exit 0; fi
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes "ubuntu@$HOST" 'bash ~/stock-insights/deploy/update.sh'
