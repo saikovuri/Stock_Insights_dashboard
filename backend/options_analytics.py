@@ -256,9 +256,16 @@ def _vol_summary(level, iv, rv, iv_rank, earnings_in_window, e_days) -> str:
     return " ".join(p for p in parts if p)
 
 
-# ── Income ideas: covered calls & cash-secured puts ─────────────────────
+# ── Income ideas: covered calls, cash-secured puts, credit spreads, condors ──
 
 _TARGETS = [("Conservative", 0.15), ("Balanced", 0.25), ("Aggressive", 0.35)]
+_CONDOR_TARGETS = [("Conservative", 0.10), ("Balanced", 0.16), ("Aggressive", 0.25)]
+_WIDTHS = (0.5, 1, 2.5, 5, 10, 25, 50)
+
+
+def _spread_width(S: float) -> float:
+    """Standard wing width: the largest round size within ~2.5% of spot."""
+    return max((w for w in _WIDTHS if w <= S * 0.025), default=_WIDTHS[0])
 
 
 def income_ideas(ticker: str, expiry: str | None = None) -> dict:
@@ -277,30 +284,46 @@ def income_ideas(ticker: str, expiry: str | None = None) -> dict:
         e_days = (datetime.strptime(earnings, "%Y-%m-%d").date() - date.today()).days if earnings else None
         earnings_before = e_days is not None and 0 <= e_days <= d
 
-        cc = _ideas(calls, "call", S, T, d)
-        csp = _ideas(puts, "put", S, T, d)
+        call_rows, put_rows = _otm_rows(calls, "call", S, T), _otm_rows(puts, "put", S, T)
+        call_q, put_q = _quotes(calls), _quotes(puts)
+        atm = _atm_iv(ticker, exp, S)
+        em = S * atm * math.sqrt(T) if atm else None
+        em_range = (S - em, S + em) if em else None
 
-        tips = []
-        if earnings_before:
-            tips.append(f"⚠️ Earnings on {earnings} fall before this expiry. Premiums are higher because the stock "
-                        "can gap — pick an earlier expiry if you want to avoid that risk.")
-        tips.append("Covered calls: only sell at a strike you'd be happy to sell your shares at. "
-                    "You keep the premium either way, but give up gains above the strike.")
-        tips.append("Cash-secured puts: only sell on a stock you want to own. If assigned, you buy 100 shares "
-                    "per contract at the strike (your real cost is the strike minus the premium).")
-        tips.append("Use a limit order near the mid price. Wide bid/ask spreads or low open interest mean worse fills.")
+        fill = "Use a limit order near the mid price. Wide bid/ask spreads or low open interest mean worse fills."
+        tips = {
+            "cc": ["Only sell at a strike you'd be happy to sell your shares at. You keep the premium either way, "
+                   "but give up gains above the strike.", fill],
+            "csp": ["Only sell on a stock you want to own. If assigned, you buy 100 shares per contract at the strike "
+                    "(your real cost is the strike minus the premium).", fill],
+            "pcs": ["Needs no shares and far less cash than a cash-secured put: the most you can lose is the width "
+                    "minus the credit.",
+                    "Many traders take profit at ~50% of the credit, and close or roll if the stock breaks the short "
+                    "strike. Close before expiry to avoid assignment.", fill + " Enter both legs as one spread order."],
+            "ic": ["Works best when IV is high and you expect no big move. Avoid holding through earnings — a gap "
+                   "can blow through one side.",
+                   "Manage at ~50% profit, or close the tested side if price reaches a short strike.",
+                   fill + " Enter all four legs as one order."],
+        }
 
         return {
             "ticker": ticker, "spot": round(S, 2), "expiry": exp, "dte": d,
             "expirations": [{"date": e, "dte": _dte(e)} for e in choices],
             "earnings_date": earnings, "earnings_before_expiry": earnings_before,
-            "covered_calls": cc, "cash_secured_puts": csp, "tips": tips,
+            "expected_move": None if not em else {"move": round(em, 2), "low": round(em_range[0], 2),
+                                                  "high": round(em_range[1], 2)},
+            "covered_calls": _ideas(call_rows, "call", S, d),
+            "cash_secured_puts": _ideas(put_rows, "put", S, d),
+            "put_credit_spreads": _put_credit_spreads(put_rows, put_q, S, T, em_range),
+            "iron_condors": _iron_condors(put_rows, put_q, call_rows, call_q, S, T, em_range),
+            "tips": tips,
         }
 
     return get_or_fetch(f"income:{ticker}:{expiry or 'auto'}", _fetch, ttl=300)
 
 
-def _ideas(df, kind: str, S: float, T: float, dte: int) -> list[dict]:
+def _otm_rows(df, kind: str, S: float, T: float) -> list[dict]:
+    """Sellable OTM strikes with model delta / probability ITM."""
     if df is None or df.empty:
         return []
     rows = []
@@ -315,25 +338,144 @@ def _ideas(df, kind: str, S: float, T: float, dte: int) -> list[dict]:
         if not iv:
             continue
         d1, d2 = _d1_d2(S, K, T, iv)
-        delta = _ncdf(d1) if kind == "call" else _ncdf(d1) - 1
-        p_itm = _ncdf(d2) if kind == "call" else _ncdf(-d2)
-        rows.append((abs(delta), K, mid, bid, float(r.get("ask") or 0), iv, p_itm, int(r.get("openInterest") or 0)))
+        rows.append({"strike": K, "mid": mid, "bid": bid, "ask": float(r.get("ask") or 0), "iv": iv,
+                     "delta": abs(_ncdf(d1) if kind == "call" else _ncdf(d1) - 1),
+                     "p_itm": _ncdf(d2) if kind == "call" else _ncdf(-d2),
+                     "oi": int(r.get("openInterest") or 0)})
+    return rows
 
+
+def _quotes(df) -> dict[float, dict]:
+    """Every strike with a live ask — long wings may have no bid."""
+    out = {}
+    if df is None or df.empty:
+        return out
+    for _, r in df.iterrows():
+        bid, ask = float(r.get("bid") or 0), float(r.get("ask") or 0)
+        if ask > 0:
+            out[float(r["strike"])] = {"mid": (bid + ask) / 2 if bid > 0 else ask, "bid": bid, "ask": ask,
+                                       "oi": int(r.get("openInterest") or 0)}
+    return out
+
+
+def _pick(rows: list[dict], target: float, used=()) -> dict | None:
+    cands = [x for x in rows if x["strike"] not in used]
+    if not cands:
+        return None
+    near = [x for x in cands if abs(x["delta"] - target) <= 0.05]
+    # Among similar deltas, favour the most liquid strike
+    pick = max(near, key=lambda x: x["oi"]) if near else min(cands, key=lambda x: abs(x["delta"] - target))
+    return pick if abs(pick["delta"] - target) <= 0.12 else None
+
+
+def _spread_pct(bid: float, ask: float) -> float | None:
+    return (ask - bid) / ((ask + bid) / 2) * 100 if ask > bid > 0 else None
+
+
+def _liquidity(oi: int, spread_pct: float | None) -> str:
+    s = spread_pct or 0
+    return "good" if oi >= 500 and s <= 8 else "thin" if oi < 100 or s > 20 else "ok"
+
+
+def _prob_above(S: float, X: float, T: float, iv: float) -> float:
+    return 1.0 if X <= 0 else _ncdf(_d1_d2(S, X, T, iv)[1])
+
+
+def _vertical(short: dict, quotes: dict, kind: str, S: float) -> dict | None:
+    """Sell `short`, buy the listed strike closest to a standard width further OTM."""
+    K = short["strike"]
+    w = _spread_width(S)
+    goal = K - w if kind == "put" else K + w
+    wings = [k for k in quotes if (k < K if kind == "put" else k > K)]
+    if not wings:
+        return None
+    L = min(wings, key=lambda k: abs(k - goal))
+    long = quotes[L]
+    width, credit = abs(K - L), short["mid"] - long["mid"]
+    if credit <= 0 or credit >= width:
+        return None
+    worst_spread = max(_spread_pct(short["bid"], short["ask"]) or 0,
+                       _spread_pct(long["bid"], long["ask"]) or (100 if long["bid"] <= 0 else 0))
+    return {"short": K, "long": L, "width": width, "credit": credit,
+            "natural": max(short["bid"] - long["ask"], 0), "oi": min(short["oi"], long["oi"]),
+            "liquidity": _liquidity(min(short["oi"], long["oi"]), worst_spread)}
+
+
+_LIQ_RANK = {"good": 0, "ok": 1, "thin": 2}
+
+
+def _put_credit_spreads(rows, quotes, S, T, em_range) -> list[dict]:
     out, used = [], set()
     for label, target in _TARGETS:
-        cands = [x for x in rows if x[1] not in used]
-        if not cands:
-            break
-        near = [x for x in cands if abs(x[0] - target) <= 0.05]
-        # Among similar deltas, favour the most liquid strike
-        pick = max(near, key=lambda x: x[7]) if near else min(cands, key=lambda x: abs(x[0] - target))
-        delta, K, mid, bid, ask, iv, p_itm, oi = pick
-        if abs(delta - target) > 0.12:
+        short = _pick(rows, target, used)
+        v = short and _vertical(short, quotes, "put", S)
+        if not v:
             continue
+        used.add(short["strike"])
+        credit, width = v["credit"], v["width"]
+        be = short["strike"] - credit
+        out.append({
+            "label": label,
+            "short_strike": v["short"], "long_strike": v["long"], "width": round(width, 2),
+            "credit": round(credit, 2), "natural_credit": round(v["natural"], 2),
+            "premium": round(credit * 100, 2), "max_loss": round((width - credit) * 100, 2),
+            "return_on_risk_pct": round(credit / (width - credit) * 100, 1),
+            "breakeven": round(be, 2), "breakeven_pct": round((S - be) / S * 100, 1),
+            "prob_profit_pct": round(_prob_above(S, be, T, short["iv"]) * 100),
+            "prob_max_profit_pct": round((1 - short["p_itm"]) * 100),
+            "delta": round(short["delta"], 2), "otm_pct": round((S - v["short"]) / S * 100, 1),
+            "outside_expected_move": None if not em_range else v["short"] < em_range[0],
+            "open_interest": v["oi"], "liquidity": v["liquidity"],
+        })
+    return out
+
+
+def _iron_condors(put_rows, put_q, call_rows, call_q, S, T, em_range) -> list[dict]:
+    out, used_p, used_c = [], set(), set()
+    for label, target in _CONDOR_TARGETS:
+        ps, cs = _pick(put_rows, target, used_p), _pick(call_rows, target, used_c)
+        pv = ps and _vertical(ps, put_q, "put", S)
+        cv = cs and _vertical(cs, call_q, "call", S)
+        if not (pv and cv):
+            continue
+        credit, width = pv["credit"] + cv["credit"], max(pv["width"], cv["width"])
+        if credit >= width:
+            continue
+        used_p.add(ps["strike"])
+        used_c.add(cs["strike"])
+        lo, hi = ps["strike"] - credit, cs["strike"] + credit
+        p_profit = _prob_above(S, lo, T, ps["iv"]) - _prob_above(S, hi, T, cs["iv"])
+        p_max = _prob_above(S, ps["strike"], T, ps["iv"]) - _prob_above(S, cs["strike"], T, cs["iv"])
+        out.append({
+            "label": label,
+            "put_long": pv["long"], "put_short": pv["short"], "call_short": cv["short"], "call_long": cv["long"],
+            "width": round(width, 2),
+            "credit": round(credit, 2), "natural_credit": round(pv["natural"] + cv["natural"], 2),
+            "premium": round(credit * 100, 2), "max_loss": round((width - credit) * 100, 2),
+            "return_on_risk_pct": round(credit / (width - credit) * 100, 1),
+            "breakeven_low": round(lo, 2), "breakeven_high": round(hi, 2),
+            "prob_profit_pct": round(max(p_profit, 0) * 100),
+            "prob_max_profit_pct": round(max(p_max, 0) * 100),
+            "delta": round((ps["delta"] + cs["delta"]) / 2, 2),
+            "outside_expected_move": None if not em_range else (
+                pv["short"] < em_range[0] and cv["short"] > em_range[1]),
+            "open_interest": min(pv["oi"], cv["oi"]),
+            "liquidity": max(pv["liquidity"], cv["liquidity"], key=_LIQ_RANK.get),
+        })
+    return out
+
+
+def _ideas(rows: list[dict], kind: str, S: float, dte: int) -> list[dict]:
+    out, used = [], set()
+    for label, target in _TARGETS:
+        p = _pick(rows, target, used)
+        if not p:
+            continue
+        K, mid, bid, ask, iv, p_itm, oi, delta = (p[k] for k in ("strike", "mid", "bid", "ask", "iv", "p_itm", "oi", "delta"))
         used.add(K)
         premium = mid * 100
-        spread_pct = (ask - bid) / mid * 100 if ask > bid > 0 else None
-        liquidity = "good" if oi >= 500 and (spread_pct or 0) <= 8 else "thin" if oi < 100 or (spread_pct or 0) > 20 else "ok"
+        spread_pct = _spread_pct(bid, ask)
+        liquidity = _liquidity(oi, spread_pct)
         idea = {
             "label": label,
             "strike": K,
