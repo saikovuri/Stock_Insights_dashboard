@@ -87,7 +87,7 @@ Return JSON:
  "supporting": ["up to 3 facts that support the thesis"],
  "challenging": ["up to 3 facts that challenge it"],
  "watch": ["up to 2 things to monitor before the next report"]}}"""
-    raw = llm.chat_json(system, user, temperature=0.2, max_tokens=1500)
+    raw = llm.chat_json(system, user, temperature=0.2, max_tokens=1500, budget_s=40)
     lst = lambda k, n: [str(x).strip() for x in raw.get(k, []) if str(x).strip()][:n] if isinstance(raw.get(k), list) else []
     status = str(raw.get("status", "")).lower()
     result = {"status": status if status in STATUSES else "weakening", "summary": str(raw.get("summary", "")).strip(),

@@ -180,7 +180,7 @@ Return JSON:
  "positives": ["2-4 items"],
  "negatives": ["1-3 items"],
  "tone": "positive" | "mixed" | "negative"}}"""
-        raw = llm.chat_json(system, user, temperature=0.1, max_tokens=2000)
+        raw = llm.chat_json(system, user, temperature=0.1, max_tokens=2000, budget_s=35)
 
         def lst(k, n):
             v = raw.get(k)

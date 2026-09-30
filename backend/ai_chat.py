@@ -3,6 +3,7 @@
 import json
 import logging
 import re
+import time
 from datetime import date
 from typing import Callable
 
@@ -16,6 +17,9 @@ log = logging.getLogger(__name__)
 
 MAX_TOOL_ROUNDS = 5
 MAX_TOOL_RESULT_CHARS = 6000
+# Whole conversation turn must finish before the hosting proxy's ~100s cutoff
+CHAT_BUDGET_S = 75
+FINAL_ANSWER_S = 20
 _TICKER_RE = re.compile(r"^[A-Z0-9.\-^]{1,10}$")
 
 _T = {"type": "object", "properties": {"ticker": {"type": "string", "description": "Stock symbol, e.g. AAPL"}},
@@ -141,9 +145,13 @@ def run_chat(ticker: str, history: list[dict], portfolio_fn: Callable[[], dict])
     )
     messages = [{"role": "system", "content": system}, *history]
     tools_used = []
+    deadline = time.monotonic() + CHAT_BUDGET_S
 
     for _ in range(MAX_TOOL_ROUNDS):
-        msg = llm.chat(messages, tools=TOOLS, temperature=0.3, max_tokens=1500)
+        remaining = deadline - time.monotonic() - FINAL_ANSWER_S
+        if remaining < llm.MIN_ATTEMPT_S:
+            break
+        msg = llm.chat(messages, tools=TOOLS, temperature=0.3, max_tokens=1500, budget_s=remaining)
         calls = msg.tool_calls or []
         if not calls:
             return {"reply": (msg.content or "").strip() or "I couldn't produce an answer. Please rephrase.",
@@ -158,7 +166,8 @@ def run_chat(ticker: str, history: list[dict], portfolio_fn: Callable[[], dict])
             messages.append({"role": "tool", "tool_call_id": c.id,
                              "content": _run_tool(c.function.name, c.function.arguments, portfolio_fn)})
 
-    # Out of tool rounds: force a final answer from what was gathered
+    # Out of tool rounds or time: force a final answer from what was gathered
     msg = llm.chat(messages + [{"role": "user", "content": "Answer now using the data gathered so far."}],
-                   tools=TOOLS, tool_choice="none", temperature=0.3, max_tokens=1200)
+                   tools=TOOLS, tool_choice="none", temperature=0.3, max_tokens=1200,
+                   budget_s=max(deadline - time.monotonic(), FINAL_ANSWER_S))
     return {"reply": (msg.content or "").strip(), "tools_used": tools_used}

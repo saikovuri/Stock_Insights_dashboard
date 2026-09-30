@@ -25,6 +25,18 @@ function authHeaders() {
   return h;
 }
 
+// fetch() throws a bare TypeError ("Failed to fetch") when the server is unreachable or drops the request
+async function netFetch(url, opts) {
+  try {
+    return await fetch(url, opts);
+  } catch (e) {
+    if (e instanceof TypeError) {
+      throw new Error("Couldn't reach the server — it may be waking up or busy. Please try again in a moment.");
+    }
+    throw e;
+  }
+}
+
 /**
  * Wrapper around fetch that auto-refreshes the access token on 401.
  * If the refresh itself fails, clears auth and reloads.
@@ -32,7 +44,7 @@ function authHeaders() {
 let _refreshPromise = null;
 async function authFetch(url, opts = {}) {
   opts.headers = opts.headers || authHeaders();
-  let res = await fetch(url, opts);
+  let res = await netFetch(url, opts);
   if (res.status === 401 && localStorage.getItem('refresh_token')) {
     // Deduplicate concurrent refresh attempts
     if (!_refreshPromise) {
@@ -51,7 +63,7 @@ async function authFetch(url, opts = {}) {
       localStorage.setItem('refresh_token', data.refresh_token);
       // Retry original request with new token
       opts.headers['Authorization'] = `Bearer ${data.token}`;
-      res = await fetch(url, opts);
+      res = await netFetch(url, opts);
     } catch {
       localStorage.removeItem('token');
       localStorage.removeItem('refresh_token');
@@ -313,7 +325,7 @@ export async function fetchIncomeIdeas(ticker, expiry) {
 }
 
 async function getJson(url, fallback, auth = false) {
-  const res = auth ? await authFetch(url) : await fetch(url);
+  const res = auth ? await authFetch(url) : await netFetch(url);
   if (!res.ok) throw new Error(await readError(res, fallback));
   return res.json();
 }

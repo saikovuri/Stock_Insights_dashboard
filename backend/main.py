@@ -141,7 +141,15 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        response: Response = await call_next(request)
+        try:
+            response: Response = await call_next(request)
+        except Exception as exc:
+            # Handled here (inside CORS) so the browser sees the 500 instead of an opaque "Failed to fetch"
+            from fastapi.responses import JSONResponse
+            log.exception("Unhandled error on %s", request.url.path, exc_info=exc)
+            if SENTRY_DSN:
+                sentry_sdk.capture_exception(exc)
+            response = JSONResponse(status_code=500, content={"detail": "Something went wrong. Please try again."})
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"

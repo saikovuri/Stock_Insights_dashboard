@@ -110,7 +110,8 @@ def _llm_scores(ticker: str, company_name: str, articles: list[dict]) -> list[tu
         f'Return {{"scores": [[s, r], ...]}} with exactly {len(articles)} pairs in order.\n\n{lines}'
     )
     try:
-        data = llm.chat_json(system, user, temperature=0, max_tokens=1200)
+        # VADER is the fallback, so don't let sentiment eat the time budget of the request that needs it
+        data = llm.chat_json(system, user, temperature=0, max_tokens=1200, budget_s=20, light=True)
         raw = data.get("scores")
         if not isinstance(raw, list) or len(raw) != len(articles):
             return None
