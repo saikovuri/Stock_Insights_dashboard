@@ -121,11 +121,11 @@ export default function WatchlistRail({ activeTicker, onSelect, onGoToScreener }
 
   if (!tickers.length) {
     return (
-      <aside className="watchlist-rail">
+      <aside className="watchlist-rail watchlist-rail-empty">
         <div className="rail-header">Watchlist</div>
         <div className="rail-empty">
           <p>No tickers yet</p>
-          <button className="rail-add-btn" onClick={onGoToScreener}>+ Add in Screener</button>
+          <button className="rail-add-btn" onClick={onGoToScreener}>+ Add tickers</button>
         </div>
       </aside>
     );

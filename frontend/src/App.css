@@ -2281,11 +2281,6 @@ tr.alert-triggered {
   .drag-handle-col { width: 1rem; }
   .drag-handle { font-size: 0.7rem; }
 
-  .prepost-toggle {
-    width: 100%;
-    justify-content: center;
-    padding: 0.5rem;
-  }
 
   /* ── Metrics grid ───────────────────────────────────────────── */
   .metrics-grid {
@@ -2510,11 +2505,6 @@ tr.alert-triggered {
   .btn-secondary {
     padding: 0.45rem 0.8rem;
     font-size: 0.85rem;
-  }
-
-  /* Recharts needs min size */
-  .recharts-wrapper {
-    min-height: 200px;
   }
 
   /* ── Tools page ─────────────────────────────────────────────── */
@@ -4342,6 +4332,19 @@ tr.alert-triggered {
 .sector-val { font-size: 1rem; font-weight: 700; }
 .sector-sym { font-size: 0.65rem; color: var(--text-muted); }
 .profile-select { max-width: 170px; }
+.app-header h1 { white-space: nowrap; flex-shrink: 0; }
+@media (max-width: 600px) {
+  .app-header h1 { font-size: 1rem; }
+  .profile-select { max-width: 112px; font-size: 0.72rem; padding: 0.3rem 0.35rem; }
+  .user-menu .btn-theme { padding: 0.3rem 0.45rem; }
+}
+@media (max-width: 860px) {
+  .watchlist-rail-empty { display: none; }
+}
+@media (hover: none) {
+  .sub-tabs { scrollbar-width: none; }
+  .sub-tabs::-webkit-scrollbar { display: none; }
+}
 
 /* ── Alerts, earnings, scanner, journal, long-term ─────────── */
 .alert-form { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 0.5rem; }

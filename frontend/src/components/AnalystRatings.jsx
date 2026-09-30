@@ -1,6 +1,15 @@
 import { useState, useEffect } from 'react';
 import { fetchAnalyst } from '../api/stockApi';
 
+// Yahoo action codes → label, CSS class suffix
+const ACTIONS = {
+  up: ['Upgrade', 'upgrade'],
+  down: ['Downgrade', 'downgrade'],
+  init: ['Initiated', 'init'],
+  reit: ['Reiterated', 'reiterated'],
+  main: ['Maintained', 'reiterated'],
+};
+
 export default function AnalystRatings({ ticker }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -143,7 +152,7 @@ export default function AnalystRatings({ ticker }) {
                     <tr key={i}>
                       <td>{u.date}</td>
                       <td>{u.firm}</td>
-                      <td className={`action-${u.action?.toLowerCase()}`}>{u.action}</td>
+                      <td className={`action-${(ACTIONS[u.action] || [])[1] || u.action?.toLowerCase()}`}>{(ACTIONS[u.action] || [])[0] || u.action}</td>
                       <td>{u.fromGrade || '—'}</td>
                       <td>{u.toGrade}</td>
                       <td>{ptText}</td>
