@@ -5,6 +5,7 @@ import {
 } from 'lightweight-charts';
 import { useTheme } from '../ThemeContext';
 import { fetchKeyLevels } from '../api/stockApi';
+import Tip from './Tip';
 
 const UP = '#26a69a';
 const DOWN = '#ef5350';
@@ -344,6 +345,7 @@ export default function CandleChart({ ticker, data, events, period, interval, pr
                 </label>
               );
             })}
+            <Tip term="levels" />
           </>
         )}
       </div>

@@ -4592,3 +4592,42 @@ button.signal-chip { cursor: pointer; }
   .econ-cal .econ-day { grid-template-columns: 1fr; }
   .sub-tab { flex: 0 0 auto; }
 }
+
+/* ── Glossary tooltips ─────────────────────────────────────────── */
+.tip-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 15px; height: 15px; margin-left: 0.2rem; vertical-align: middle;
+  border-radius: 50%; border: 1px solid var(--border-light, var(--border));
+  font-size: 0.62rem; font-weight: 700; line-height: 1; font-style: normal;
+  color: var(--text-muted); cursor: help; user-select: none;
+  text-transform: none; letter-spacing: 0;
+}
+.tip-icon:hover, .tip-icon:focus-visible { color: var(--accent); border-color: var(--accent); outline: none; }
+.tip-icon-static { cursor: default; }
+.tip-pop {
+  position: fixed; z-index: 3000; padding: 0.55rem 0.7rem; border-radius: 8px;
+  background: var(--surface); color: var(--text); border: 1px solid var(--border);
+  box-shadow: var(--shadow-lg); font-size: 0.78rem; font-weight: 400; line-height: 1.45;
+  text-transform: none; letter-spacing: 0; text-align: left; white-space: normal; pointer-events: none;
+}
+.tip-pop.tip-above { transform: translateY(-100%); }
+
+/* ── First-visit tour ──────────────────────────────────────────── */
+.tour-root { position: fixed; inset: 0; z-index: 2500; }
+.tour-backdrop { position: fixed; inset: 0; background: rgba(5, 8, 16, 0.65); }
+.tour-spot {
+  position: fixed; border-radius: 10px; pointer-events: none;
+  box-shadow: 0 0 0 9999px rgba(5, 8, 16, 0.65), 0 0 0 2px var(--accent);
+  transition: all 0.25s ease;
+}
+.tour-card {
+  position: fixed; background: var(--surface); color: var(--text); border: 1px solid var(--border);
+  border-radius: 12px; box-shadow: var(--shadow-lg); padding: 1rem 1.1rem 0.9rem;
+}
+.tour-card-center { left: 50% !important; top: 50%; transform: translate(-50%, -50%); }
+.tour-card h3 { margin: 0.15rem 0 0.4rem; font-size: 1.05rem; }
+.tour-step { font-size: 0.7rem; color: var(--text-muted); font-weight: 600; letter-spacing: 0.04em; }
+.tour-body { font-size: 0.87rem; line-height: 1.5; color: var(--text-secondary); }
+.tour-list { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: 0.2rem; }
+.tour-actions { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.9rem; }
+.tour-skip { color: var(--text-muted); font-size: 0.82rem; }

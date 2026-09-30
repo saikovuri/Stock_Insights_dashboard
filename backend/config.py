@@ -71,7 +71,7 @@ FINNHUB_RATE_PER_MIN = int(os.getenv("FINNHUB_RATE_PER_MIN", "55"))
 # Twelve Data: OHLCV history fallback when Yahoo fails
 TWELVEDATA_API_KEY = os.getenv("TWELVEDATA_API_KEY", "")
 # SEC EDGAR requires a descriptive User-Agent with contact info
-SEC_USER_AGENT = os.getenv("SEC_USER_AGENT", "StockInsights/2.0 admin@example.com")
+SEC_USER_AGENT = os.getenv("SEC_USER_AGENT", "StockPilot/2.0 admin@example.com")
 
 # ── Notifications / scheduler ────────────────────────────────────────────
 SCHEDULER_ENABLED = os.getenv("SCHEDULER_ENABLED", "1") == "1"

@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { fetchInPlay } from '../api/stockApi';
+import Tip from './Tip';
 
 const vol = v => v == null ? '—' : v >= 1e9 ? `${(v / 1e9).toFixed(1)}B` : v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : `${(v / 1e3).toFixed(0)}K`;
 const cap = v => v == null ? '—' : v >= 1e12 ? `$${(v / 1e12).toFixed(1)}T` : v >= 1e9 ? `$${(v / 1e9).toFixed(1)}B` : `$${(v / 1e6).toFixed(0)}M`;
@@ -93,9 +94,9 @@ export default function InPlay({ onSelect }) {
         <table className="market-table inplay-table">
           <thead>
             <tr>
-              <th>Stock</th><th>Price</th><th>Change</th><th title="Open vs previous close">Gap</th>
-              <th>Pre / Post</th><th title="Time-of-day adjusted relative volume">Rel vol</th><th>Volume</th>
-              <th>Mkt cap</th><th title="FINRA short interest as % of shares outstanding">Short %</th><th>Catalyst</th>
+              <th>Stock</th><th>Price</th><th>Change</th><th>Gap <Tip term="gap" /></th>
+              <th>Pre / Post</th><th>Rel vol <Tip term="rvol" /></th><th>Volume</th>
+              <th>Mkt cap</th><th>Short % <Tip term="short_interest" /></th><th>Catalyst</th>
             </tr>
           </thead>
           <tbody>

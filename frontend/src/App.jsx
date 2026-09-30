@@ -29,6 +29,7 @@ import LongTermView from './components/LongTermView';
 import ShortAndSmartMoney from './components/ShortAndSmartMoney';
 import ThesisCard from './components/ThesisCard';
 import EconomicCalendar from './components/EconomicCalendar';
+import Tour, { TOUR_KEY } from './components/Tour';
 import { ProfileProvider, useProfile, PROFILES, ALL_OPTION_TABS } from './ProfileContext';
 import { fetchMetrics, fetchHistory, fetchNews, fetchAlerts, fetchEvents } from './api/stockApi';
 
@@ -53,6 +54,8 @@ function AppShell() {
   const { profile, setProfile, config } = useProfile();
   const [activeTab, setActiveTab] = useState(getInitialTab);
   const [showLogin, setShowLogin] = useState(false);
+  const [tourOpen, setTourOpen] = useState(() => { try { return !localStorage.getItem(TOUR_KEY); } catch { return false; } });
+  const closeTour = () => { setTourOpen(false); try { localStorage.setItem(TOUR_KEY, 'done'); } catch { /* private mode */ } };
   const [ticker, setTicker] = useState(null);
   const [metrics, setMetrics] = useState(null);
   const [history, setHistory] = useState(null);
@@ -156,7 +159,7 @@ function AppShell() {
     <div className="app">
       <header className="app-header">
         <div className="header-top">
-          <h1 onClick={() => { setActiveTab('dashboard'); window.location.hash = 'dashboard'; }} style={{ cursor: 'pointer' }}><span className="header-emoji">📈</span><span className="header-title-text">Stock Insights</span></h1>
+          <h1 onClick={() => { setActiveTab('dashboard'); window.location.hash = 'dashboard'; }} style={{ cursor: 'pointer' }}><span className="header-emoji">📈</span><span className="header-title-text">StockPilot</span></h1>
           <div className="user-menu">
             <select className="candle-select profile-select" value={profile} onChange={e => changeProfile(e.target.value)}
               title="Your trading style tailors charts, layout and AI analysis">
@@ -300,7 +303,9 @@ function AppShell() {
 
       <footer className="app-footer">
         Data: Finnhub, Yahoo Finance, CBOE, SEC EDGAR, FINRA, Nasdaq &middot; AI-generated analysis can be wrong &middot; Not financial advice
+        {' '}&middot; <button className="link-btn" onClick={() => { handleTabClick('dashboard'); setTourOpen(true); }}>Take the tour</button>
       </footer>
+      {tourOpen && !showLogin && <Tour onClose={closeTour} />}
     </div>
   );
 }

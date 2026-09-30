@@ -31,7 +31,7 @@ export default function LoginPage({ onBack }) {
     <div className="login-page">
       <div className="login-card">
         <div className="login-header">
-          <h1>📈 Stock Insights</h1>
+          <h1>📈 StockPilot</h1>
           <p>Sign in to save your portfolio &amp; watchlist</p>
         </div>
 

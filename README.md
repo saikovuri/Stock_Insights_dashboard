@@ -1,4 +1,4 @@
-# Stock Insights Dashboard
+# StockPilot
 
 AI-powered stock research and portfolio assistant. FastAPI backend + React (Vite/Capacitor) frontend.
 

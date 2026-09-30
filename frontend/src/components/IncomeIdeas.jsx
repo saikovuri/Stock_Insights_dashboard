@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { fetchIncomeIdeas } from '../api/stockApi';
+import Tip from './Tip';
 
 const LIQ = {
   good: { text: 'Liquid', cls: 'positive' },
@@ -50,7 +51,7 @@ function SpreadCard({ i, mode, expiry, contracts, em }) {
   return (
     <div className="structure-card">
       <div className="structure-title">
-        {i.label} <span className="income-delta">Δ {i.delta.toFixed(2)}</span>
+        {i.label} <span className="income-delta">Δ {i.delta.toFixed(2)}</span> <Tip term="delta" />
       </div>
       <div className="structure-legs">
         {legs.map(([action, strike, kind]) => (
@@ -63,8 +64,8 @@ function SpreadCard({ i, mode, expiry, contracts, em }) {
         <div><span>Credit / contract</span><strong className="positive">{money(i.premium)}</strong></div>
         <div><span>Max loss / contract</span><strong className="negative">{money(i.max_loss)}</strong></div>
         <div><span>Total credit · risk</span><strong>{money(i.premium * n)} · {money(i.max_loss * n)}</strong></div>
-        <div><span>Return on risk</span><strong>{i.return_on_risk_pct}%</strong></div>
-        <div><span>Chance of profit</span><strong>~{i.prob_profit_pct}% <small>(full credit ~{i.prob_max_profit_pct}%)</small></strong></div>
+        <div><span>Return on risk <Tip term="return_on_risk" /></span><strong>{i.return_on_risk_pct}%</strong></div>
+        <div><span>Chance of profit <Tip term="pop" /></span><strong>~{i.prob_profit_pct}% <small>(full credit ~{i.prob_max_profit_pct}%)</small></strong></div>
         {mode === 'ic'
           ? <div><span>Profit zone at expiry</span><strong>${i.breakeven_low} – ${i.breakeven_high}</strong></div>
           : <div><span>Breakeven</span><strong>${i.breakeven} <small>(−{i.breakeven_pct}%)</small></strong></div>}
@@ -77,7 +78,7 @@ function SpreadCard({ i, mode, expiry, contracts, em }) {
         </p>
       )}
       <p className="structure-notes">
-        Limit ~${i.credit} net credit (natural ${i.natural_credit}) · ${i.width} wide · OI {i.open_interest.toLocaleString()} ·{' '}
+        Limit ~${i.credit} net credit (natural ${i.natural_credit} <Tip term="natural_credit" />) · ${i.width} wide · OI {i.open_interest.toLocaleString()} ·{' '}
         <span className={liq.cls}>{liq.text}</span>
       </p>
     </div>
@@ -162,6 +163,7 @@ export default function IncomeIdeas({ ticker }) {
           <span className="structures-meta">
             Stock ${data.spot}
             {spread && data.expected_move && ` · expected move ±$${data.expected_move.move} ($${data.expected_move.low}–$${data.expected_move.high})`}
+            {spread && data.expected_move && <> <Tip term="expected_move" /></>}
           </span>
         </div>
       )}

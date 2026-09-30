@@ -1,5 +1,5 @@
 
-Stock Insights Dashboard — Complete Feature List
+StockPilot — Complete Feature List
 1. UI Tabs & Navigation
 Tab	Description
 Dashboard	Main stock analysis view with search, charts, AI, and news

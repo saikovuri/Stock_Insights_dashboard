@@ -79,7 +79,7 @@ if SENTRY_DSN:
     )
     ignore_logger("yfinance")
 
-app = FastAPI(title="Stock Insights API", version="3.0.0")
+app = FastAPI(title="StockPilot API", version="3.0.0")
 
 
 @app.on_event("startup")

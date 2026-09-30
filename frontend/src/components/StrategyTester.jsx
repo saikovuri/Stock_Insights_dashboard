@@ -120,7 +120,7 @@ export default function StrategyTester({ initialTicker }) {
           <p className="market-sub">{compare.from} → {compare.to} · {compare.sessions} sessions · {compare.cost_bps} bps cost · click a row for details</p>
           <div className="table-scroll">
             <table className="market-table">
-              <thead><tr><th>Strategy</th><th>Trades</th><th>Per session</th><th>Win %</th><th>Avg / trade</th><th>Total</th><th>Profit factor</th><th>Max DD</th></tr></thead>
+              <thead><tr><th>Strategy</th><th>Trades</th><th>Per session</th><th>Win % <Tip term="win_rate" /></th><th>Avg / trade</th><th>Total</th><th>Profit factor <Tip term="profit_factor" /></th><th>Max DD <Tip term="max_drawdown" /></th></tr></thead>
               <tbody>
                 {compare.rows.map(r => (
                   <tr key={r.label} onClick={() => openRow(r)}>
@@ -150,12 +150,12 @@ export default function StrategyTester({ initialTicker }) {
             <>
               <div className="doctor-stats">
                 <div><span>Trades</span><strong>{s.trades} <span className="market-sub">({s.per_session}/session)</span></strong></div>
-                <div><span>Win rate</span><strong>{s.win_rate}%</strong></div>
+                <div><span>Win rate <Tip term="win_rate" /></span><strong>{s.win_rate}%</strong></div>
                 <div><span>Avg per trade (net)</span><strong className={cls(s.avg_net_pct)}>{pct(s.avg_net_pct, 3)}</strong></div>
                 <div><span>Total (sum of trades)</span><strong className={cls(s.total_net_pct)}>{pct(s.total_net_pct)}</strong></div>
-                <div><span>Profit factor</span><strong className={s.profit_factor >= 1 ? 'positive' : 'negative'}>{s.profit_factor ?? '—'}</strong></div>
+                <div><span>Profit factor <Tip term="profit_factor" /></span><strong className={s.profit_factor >= 1 ? 'positive' : 'negative'}>{s.profit_factor ?? '—'}</strong></div>
                 <div><span>Avg win / loss</span><strong>{pct(s.avg_win_pct, 2)} / {pct(s.avg_loss_pct, 2)}</strong></div>
-                <div><span>Max drawdown</span><strong className="negative">{pct(s.max_drawdown_pct)}</strong></div>
+                <div><span>Max drawdown <Tip term="max_drawdown" /></span><strong className="negative">{pct(s.max_drawdown_pct)}</strong></div>
                 <div><span>Longs / shorts avg</span><strong>{pct(s.long_avg_net_pct, 3)} / {pct(s.short_avg_net_pct, 3)}</strong></div>
               </div>
               <ResponsiveContainer width="100%" height={220}>

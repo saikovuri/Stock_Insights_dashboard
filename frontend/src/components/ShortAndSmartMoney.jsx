@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip } from 'recharts';
 import { fetchShortInterest, fetchSmartMoney } from '../api/stockApi';
+import Tip from './Tip';
 
 const tip = { contentStyle: { background: 'var(--surface)', border: '1px solid var(--border)', fontSize: '0.8rem' } };
 const m = v => v == null ? '—' : v >= 1e9 ? `${(v / 1e9).toFixed(2)}B` : v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : `${(v / 1e3).toFixed(0)}K`;
@@ -27,9 +28,9 @@ export default function ShortAndSmartMoney({ ticker }) {
       {l && (
         <>
           <div className="doctor-stats">
-            <div><span>Shares short ({l.date})</span><strong>{m(l.short_shares)}</strong></div>
+            <div><span>Shares short ({l.date}) <Tip term="short_interest" /></span><strong>{m(l.short_shares)}</strong></div>
             <div><span>% of shares outstanding</span><strong className={squeeze ? 'negative' : ''}>{si.pct_of_shares != null ? `${si.pct_of_shares}%` : '—'}</strong></div>
-            <div><span>Days to cover</span><strong className={l.days_to_cover >= 7 ? 'negative' : ''}>{l.days_to_cover ?? '—'}</strong></div>
+            <div><span>Days to cover <Tip term="days_to_cover" /></span><strong className={l.days_to_cover >= 7 ? 'negative' : ''}>{l.days_to_cover ?? '—'}</strong></div>
             <div><span>Change vs prior</span><strong className={l.change_pct > 0 ? 'negative' : 'positive'}>{l.change_pct != null ? `${l.change_pct > 0 ? '+' : ''}${l.change_pct}%` : '—'}</strong></div>
           </div>
           {squeeze && <p className="ivrank-verdict-desc">⚠️ Heavy short interest — good news could force a short squeeze; bad news may already be crowded.</p>}

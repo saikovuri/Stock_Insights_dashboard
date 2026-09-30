@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { fetchIvRank } from '../api/stockApi';
+import Tip from './Tip';
 
 const LEVEL = {
   high: { text: 'Premium expensive', cls: 'ivrank-high' },
@@ -51,14 +52,14 @@ export default function IvRank({ ticker }) {
           </div>
           <div className="ivrank-bar-labels">
             <span>Cheapest (1y)</span>
-            <span>IV rank {data.iv_rank} · percentile {data.iv_percentile}</span>
+            <span>IV rank {data.iv_rank} · percentile {data.iv_percentile} <Tip term="iv_rank" /></span>
             <span>Most expensive</span>
           </div>
         </div>
       ) : (data.iv_pct != null && data.rv_pct != null) && (
         <div className="vol-compare">
           <div className="vol-row">
-            <span>Options expect</span>
+            <span>Options expect <Tip term="iv" /></span>
             <div className="vol-track"><div className="vol-fill vol-iv" style={{ width: `${data.iv_pct / maxVol * 100}%` }} /></div>
             <strong>{data.iv_pct}%</strong>
           </div>

@@ -1,3 +1,5 @@
+import Tip from './Tip';
+
 function fmt(num) {
   if (num == null) return 'N/A';
   if (num >= 1e12) return `$${(num / 1e12).toFixed(2)}T`;
@@ -49,15 +51,15 @@ export default function KeyMetrics({ metrics }) {
           <RangeBar low={metrics['52w_low']} high={metrics['52w_high']} current={metrics.price} />
         </div>
         <div className="metric">
-          <span className="metric-label">Market Cap</span>
+          <span className="metric-label">Market Cap <Tip term="market_cap" /></span>
           <span className="metric-value">{fmt(metrics.market_cap)}</span>
         </div>
         <div className="metric">
-          <span className="metric-label">P/E Ratio</span>
+          <span className="metric-label">P/E Ratio <Tip term="pe" /></span>
           <span className="metric-value">{metrics.pe_ratio?.toFixed(1) ?? 'N/A'}</span>
         </div>
         <div className="metric">
-          <span className="metric-label">EPS</span>
+          <span className="metric-label">EPS <Tip term="eps" /></span>
           <span className="metric-value">{metrics.eps != null ? `$${metrics.eps.toFixed(2)}` : 'N/A'}</span>
         </div>
         <div className="metric">
@@ -77,7 +79,7 @@ export default function KeyMetrics({ metrics }) {
           <span className="metric-value">{metrics.avg_volume?.toLocaleString()}</span>
         </div>
         <div className="metric">
-          <span className="metric-label">50D Avg</span>
+          <span className="metric-label">50D Avg <Tip term="sma" /></span>
           <span className="metric-value">${metrics['50d_avg']?.toFixed(2)}</span>
         </div>
         <div className="metric">
@@ -85,11 +87,11 @@ export default function KeyMetrics({ metrics }) {
           <span className="metric-value">${metrics['200d_avg']?.toFixed(2)}</span>
         </div>
         <div className="metric">
-          <span className="metric-label">Beta</span>
+          <span className="metric-label">Beta <Tip term="beta" /></span>
           <span className="metric-value">{metrics.beta?.toFixed(2) ?? 'N/A'}</span>
         </div>
         <div className="metric">
-          <span className="metric-label">Div Yield</span>
+          <span className="metric-label">Div Yield <Tip term="div_yield" /></span>
           <span className="metric-value">
             {metrics.dividend_yield != null ? `${metrics.dividend_yield.toFixed(2)}%` : 'N/A'}
           </span>

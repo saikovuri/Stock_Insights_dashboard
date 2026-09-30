@@ -2,7 +2,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.stockinsights.app',
-  appName: 'Stock Insights',
+  appName: 'StockPilot',
   webDir: 'dist',
   server: {
     // Points to your production backend

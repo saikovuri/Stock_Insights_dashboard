@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { fetchOptionsFlow } from '../api/stockApi';
+import Tip from './Tip';
 
 const money = v => v >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `$${(v / 1e3).toFixed(0)}K` : `$${v}`;
 const num = v => v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(0)}K` : `${v}`;
@@ -12,7 +13,7 @@ export function FlowTable({ trades, showTicker, onSelect }) {
         <thead>
           <tr>
             {showTicker && <th>Ticker</th>}
-            <th>Contract</th><th>Expiry</th><th>Volume / OI</th><th>Premium</th><th>IV</th><th>Side</th>
+            <th>Contract</th><th>Expiry</th><th>Volume / OI <Tip term="open_interest" /></th><th>Premium</th><th>IV <Tip term="iv" /></th><th>Side</th>
           </tr>
         </thead>
         <tbody>
@@ -58,30 +59,30 @@ export default function OptionsFlow({ ticker }) {
       </div>
       {data.summary && <p className="ivrank-verdict-desc">{data.summary}</p>}
       <div className="doctor-stats">
-        <div><span>Put/call volume</span><strong className={pcCls}>{data.pc_volume ?? '—'}</strong></div>
-        <div><span>Put/call open interest</span><strong>{data.pc_oi ?? '—'}</strong></div>
-        <div><span>Call wall (resistance)</span><strong>{data.call_wall ? `$${data.call_wall}` : '—'}</strong></div>
-        <div><span>Put wall (support)</span><strong>{data.put_wall ? `$${data.put_wall}` : '—'}</strong></div>
+        <div><span>Put/call volume <Tip term="pc_ratio" /></span><strong className={pcCls}>{data.pc_volume ?? '—'}</strong></div>
+        <div><span>Put/call open interest <Tip term="open_interest" /></span><strong>{data.pc_oi ?? '—'}</strong></div>
+        <div><span>Call wall (resistance) <Tip term="call_wall" /></span><strong>{data.call_wall ? `$${data.call_wall}` : '—'}</strong></div>
+        <div><span>Put wall (support) <Tip term="put_wall" /></span><strong>{data.put_wall ? `$${data.put_wall}` : '—'}</strong></div>
         <div>
-          <span>Gamma flip</span>
-          <strong title="Above this price dealers dampen moves; below it they tend to amplify them">
+          <span>Gamma flip <Tip term="gamma_flip" /></span>
+          <strong>
             {data.gamma_flip ? `$${data.gamma_flip}` : '—'}
           </strong>
         </div>
         <div>
-          <span>Dealer gamma</span>
+          <span>Dealer gamma <Tip term="dealer_gamma" /></span>
           <strong className={data.gamma_regime === 'positive' ? 'positive' : data.gamma_regime === 'negative' ? 'negative' : ''}>
             {data.gamma_regime ? `${data.gamma_regime} (${money(Math.abs(data.net_gex))}/1%)` : '—'}
           </strong>
         </div>
         {data.max_pain.map(p => (
           <div key={p.expiry}>
-            <span>Max pain {p.expiry} ({p.dte}d)</span>
+            <span>Max pain {p.expiry} ({p.dte}d) <Tip term="max_pain" /></span>
             <strong>${p.max_pain} <span className="market-sub">{p.vs_spot_pct > 0 ? '+' : ''}{p.vs_spot_pct}%</span></strong>
           </div>
         ))}
       </div>
-      <h4 className="sub-chart-title">Unusual activity (volume above open interest, ≥ $25K premium)</h4>
+      <h4 className="sub-chart-title">Unusual activity (volume above open interest, ≥ $25K premium) <Tip term="unusual" /></h4>
       <FlowTable trades={data.unusual} />
       <p className="ivrank-note">
         Call/put walls are the strikes with the most open interest within ±20% of spot. Max pain is the price where
