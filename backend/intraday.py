@@ -1,6 +1,9 @@
 """Day-trading tools: intraday key levels and a 'stocks in play' gap / relative-volume scanner."""
 
+import gc
 import logging
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, time as dtime, timezone
 from zoneinfo import ZoneInfo
@@ -104,56 +107,85 @@ def _screen_members(members: set[str]) -> list[dict]:
 
 
 def _directory() -> dict[str, dict]:
-    """Name and market cap for every US-listed stock (Nasdaq's end-of-day screener)."""
+    """Name and market cap for S&P 500 + Nasdaq 100 members (Nasdaq's end-of-day screener)."""
     def _fetch():
+        keep = _members("sp500") | nasdaq100()
         r = requests.get("https://api.nasdaq.com/api/screener/stocks?tableonly=true&limit=10000&download=true",
                          headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"}, timeout=30)
         out = {}
         for x in (r.json().get("data") or {}).get("rows") or []:
+            sym = x["symbol"].strip().replace("/", "-")
+            if sym not in keep:
+                continue
             try:
                 cap = float(x.get("marketCap") or 0) or None
             except ValueError:
                 cap = None
             name = (x.get("name") or "").split(" Common Stock")[0].split(" Class A")[0].strip()
-            out[x["symbol"].strip().replace("/", "-")] = {"name": name or None, "market_cap": cap}
+            out[sym] = {"name": name or None, "market_cap": cap}
         return out
     return get_or_fetch("nasdaq-directory", _fetch, ttl=6 * 3600)
 
 
+_chart_lock = threading.Lock()
+_chart_cache: dict = {"t": 0.0, "rows": []}
+CHART_TTL = 170
+CHART_BATCH = 100
+
+
 def _chart_quotes(members: set[str]) -> list[dict]:
-    """Screener-shaped quotes from daily chart bars — Yahoo's screener is often blocked on cloud hosts, the chart API isn't."""
-    syms = sorted(members)
-    data = yf.download(syms, period="1mo", interval="1d", group_by="ticker", auto_adjust=False,
-                       threads=True, progress=False)
+    """Screener-shaped quotes from daily chart bars — Yahoo's screener is often blocked on cloud hosts, the chart API isn't.
+
+    One shared download of S&P 500 + Nasdaq 100 serves every view; the lock keeps
+    concurrent requests from each running their own (Render's free tier has 512 MB).
+    """
+    import scanner
+    with _chart_lock:
+        # Don't stack a second big download on top of the nightly scan
+        busy = scanner._running and _chart_cache["rows"]
+        if time.time() - _chart_cache["t"] > CHART_TTL and not busy:
+            _chart_cache["rows"] = _download_quotes(sorted(_members("sp500") | nasdaq100()))
+            _chart_cache["t"] = time.time()
+        rows = _chart_cache["rows"]
+    return [q for q in rows if q["symbol"] in members]
+
+
+def _download_quotes(syms: list[str]) -> list[dict]:
     try:
         directory = _directory()
     except Exception as e:
         log.info("Nasdaq directory unavailable: %s", e)
         directory = {}
-    have = set(data.columns.get_level_values(0))
     out = []
-    for s in syms:
-        if s not in have:
-            continue
-        df = data[s].dropna(subset=["Close"])
-        if len(df) < 5:
-            continue
-        # Latest bar is today's live session (or the last session when closed)
-        last, hist = df.iloc[-1], df.iloc[:-1]
-        prev = float(hist["Close"].iloc[-1])
-        price = float(last["Close"])
-        info = directory.get(s, {})
-        out.append({
-            "symbol": s, "quoteType": "EQUITY", "shortName": info.get("name") or s,
-            "regularMarketPrice": price, "regularMarketPreviousClose": prev,
-            "regularMarketOpen": float(last["Open"]) if last["Open"] == last["Open"] else None,
-            "regularMarketChangePercent": (price / prev - 1) * 100,
-            "regularMarketVolume": float(last["Volume"] or 0),
-            "averageDailyVolume10Day": float(hist["Volume"].tail(10).mean()),
-            "regularMarketDayHigh": float(last["High"]), "regularMarketDayLow": float(last["Low"]),
-            "marketCap": info.get("market_cap"),
-            "sharesOutstanding": info["market_cap"] / price if info.get("market_cap") and price else None,
-        })
+    for i in range(0, len(syms), CHART_BATCH):
+        batch = syms[i:i + CHART_BATCH]
+        data = yf.download(batch, period="1mo", interval="1d", group_by="ticker", auto_adjust=False,
+                           threads=8, progress=False)
+        have = set(data.columns.get_level_values(0))
+        for s in batch:
+            if s not in have:
+                continue
+            df = data[s].dropna(subset=["Close"])
+            if len(df) < 5:
+                continue
+            # Latest bar is today's live session (or the last session when closed)
+            last, hist = df.iloc[-1], df.iloc[:-1]
+            prev = float(hist["Close"].iloc[-1])
+            price = float(last["Close"])
+            info = directory.get(s, {})
+            out.append({
+                "symbol": s, "quoteType": "EQUITY", "shortName": info.get("name") or s,
+                "regularMarketPrice": price, "regularMarketPreviousClose": prev,
+                "regularMarketOpen": float(last["Open"]) if last["Open"] == last["Open"] else None,
+                "regularMarketChangePercent": (price / prev - 1) * 100,
+                "regularMarketVolume": float(last["Volume"] or 0),
+                "averageDailyVolume10Day": float(hist["Volume"].tail(10).mean()),
+                "regularMarketDayHigh": float(last["High"]), "regularMarketDayLow": float(last["Low"]),
+                "marketCap": info.get("market_cap"),
+                "sharesOutstanding": info["market_cap"] / price if info.get("market_cap") and price else None,
+            })
+        del data
+    gc.collect()
     return out
 
 
