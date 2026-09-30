@@ -15,11 +15,13 @@ REPO_URL="${REPO_URL:-https://github.com/saikovuri/Stock_Insights_dashboard.git}
 APP_DIR="$HOME/stock-insights"
 SERVICE_NAME="stock-insights"
 PY_VERSION="3.13"
+# First boot runs unattended-upgrades; wait for its apt lock instead of failing
+APT="sudo DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 -y"
 
 echo "=== 1. System packages ==="
-sudo apt-get update
-sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y
-sudo DEBIAN_FRONTEND=noninteractive apt-get install -y git curl debian-keyring debian-archive-keyring \
+$APT update
+$APT upgrade
+$APT install git curl debian-keyring debian-archive-keyring \
   apt-transport-https iptables-persistent unattended-upgrades
 
 echo "=== 2. Open ports 80/443 in the VM firewall ==="
@@ -41,7 +43,7 @@ echo "=== 3. Caddy (reverse proxy, automatic HTTPS) ==="
 if ! command -v caddy >/dev/null; then
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null
-  sudo apt-get update && sudo apt-get install -y caddy
+  $APT update && $APT install caddy
 fi
 
 echo "=== 4. Code ==="
