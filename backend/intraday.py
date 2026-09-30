@@ -103,6 +103,60 @@ def _screen_members(members: set[str]) -> list[dict]:
     return list(found.values())
 
 
+def _directory() -> dict[str, dict]:
+    """Name and market cap for every US-listed stock (Nasdaq's end-of-day screener)."""
+    def _fetch():
+        r = requests.get("https://api.nasdaq.com/api/screener/stocks?tableonly=true&limit=10000&download=true",
+                         headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"}, timeout=30)
+        out = {}
+        for x in (r.json().get("data") or {}).get("rows") or []:
+            try:
+                cap = float(x.get("marketCap") or 0) or None
+            except ValueError:
+                cap = None
+            name = (x.get("name") or "").split(" Common Stock")[0].split(" Class A")[0].strip()
+            out[x["symbol"].strip().replace("/", "-")] = {"name": name or None, "market_cap": cap}
+        return out
+    return get_or_fetch("nasdaq-directory", _fetch, ttl=6 * 3600)
+
+
+def _chart_quotes(members: set[str]) -> list[dict]:
+    """Screener-shaped quotes from daily chart bars — Yahoo's screener is often blocked on cloud hosts, the chart API isn't."""
+    syms = sorted(members)
+    data = yf.download(syms, period="1mo", interval="1d", group_by="ticker", auto_adjust=False,
+                       threads=True, progress=False)
+    try:
+        directory = _directory()
+    except Exception as e:
+        log.info("Nasdaq directory unavailable: %s", e)
+        directory = {}
+    have = set(data.columns.get_level_values(0))
+    out = []
+    for s in syms:
+        if s not in have:
+            continue
+        df = data[s].dropna(subset=["Close"])
+        if len(df) < 5:
+            continue
+        # Latest bar is today's live session (or the last session when closed)
+        last, hist = df.iloc[-1], df.iloc[:-1]
+        prev = float(hist["Close"].iloc[-1])
+        price = float(last["Close"])
+        info = directory.get(s, {})
+        out.append({
+            "symbol": s, "quoteType": "EQUITY", "shortName": info.get("name") or s,
+            "regularMarketPrice": price, "regularMarketPreviousClose": prev,
+            "regularMarketOpen": float(last["Open"]) if last["Open"] == last["Open"] else None,
+            "regularMarketChangePercent": (price / prev - 1) * 100,
+            "regularMarketVolume": float(last["Volume"] or 0),
+            "averageDailyVolume10Day": float(hist["Volume"].tail(10).mean()),
+            "regularMarketDayHigh": float(last["High"]), "regularMarketDayLow": float(last["Low"]),
+            "marketCap": info.get("market_cap"),
+            "sharesOutstanding": info["market_cap"] / price if info.get("market_cap") and price else None,
+        })
+    return out
+
+
 def nasdaq100() -> set[str]:
     cached = kv_get(NDX_KEY)
     fresh = cached and (datetime.now(timezone.utc) - datetime.fromisoformat(
@@ -163,12 +217,23 @@ def stocks_in_play(universe: str | None = None, limit: int = 40) -> dict:
                 quotes = {q["symbol"]: q for q in _screen_members(members)}
             except Exception as e:
                 log.warning("Index screen %s failed: %s", universe, e)
+            if len(quotes) < 0.8 * len(members):
+                log.info("Index screen %s found %d/%d; using chart data", universe, len(quotes), len(members))
+                quotes = {q["symbol"]: q for q in _chart_quotes(members)}
+        screens_ok = 0
         for direction in (("up", "down") if not index else ()):
             try:
                 for q in _screen(direction):
                     quotes[q["symbol"]] = q
+                screens_ok += 1
             except Exception as e:
                 log.warning("In-play screen %s failed: %s", direction, e)
+        if not index and not screens_ok:
+            try:
+                for q in _chart_quotes(_members("sp500") | nasdaq100()):
+                    quotes.setdefault(q["symbol"], q)
+            except Exception as e:
+                log.warning("Chart-data fallback failed: %s", e)
         if not index:
             try:
                 for q in yf.screen("most_actives", count=100).get("quotes", []):
