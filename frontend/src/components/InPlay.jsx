@@ -14,7 +14,11 @@ const FILTERS = {
   mid: { label: 'Mid $2–10B', test: r => (r.market_cap || 0) >= 2e9 && r.market_cap < 1e10 },
   large: { label: 'Large > $10B', test: r => (r.market_cap || 0) >= 1e10 },
   catalyst: { label: 'With catalyst', test: r => !!r.catalyst },
+  unusual: { label: 'Unusual volume', test: (r, t) => r.rvol >= t.warm },
 };
+
+// Large caps rarely hit 3× volume, so index views use lower bars
+const rvolBars = universe => (universe === 'all' ? { hot: 3, warm: 2 } : { hot: 2, warm: 1.5 });
 
 export default function InPlay({ onSelect }) {
   const [data, setData] = useState(null);
@@ -34,9 +38,9 @@ export default function InPlay({ onSelect }) {
   }, [universe]);
 
   const rows = useMemo(() => (data?.rows || [])
-    .filter(FILTERS[filter].test)
+    .filter(r => FILTERS[filter].test(r, rvolBars(universe)))
     .filter(r => side === 'both' || (side === 'up' ? r.change_pct > 0 : r.change_pct < 0))
-    .filter(r => r.price >= minPrice), [data, filter, side, minPrice]);
+    .filter(r => r.price >= minPrice), [data, filter, side, minPrice, universe]);
 
   if (error && !data) return <div className="card"><p className="error-text">{error}</p></div>;
 
@@ -57,6 +61,7 @@ export default function InPlay({ onSelect }) {
     );
   }
   const isIndex = universe !== 'all';
+  const bars = rvolBars(universe);
 
   return (
     <div className="card">
@@ -69,7 +74,10 @@ export default function InPlay({ onSelect }) {
       </div>
       <p className="structures-intro">
         Movers with unusual volume, gaps or a news catalyst — the names day traders focus on. <b>Rel vol</b> compares
-        today's volume with the 10-day average for the same point in the session (3× = three times normal).
+        today's volume with the 10-day average for the same point in the session
+        ({isIndex
+          ? `${bars.hot}× = twice normal, a big day for a large cap; ${bars.warm}×+ is notable`
+          : `${bars.hot}× = three times normal; ${bars.warm}×+ is notable`}).
         {data.market_state === 'pre-market' && ' Premarket % is shown before the open.'}
         {isIndex && ` Showing the ${UNIVERSES[universe]} members moving most today, ranked by relative volume × move (${data.rows.length} of ${data.members}).`}
       </p>
@@ -77,7 +85,9 @@ export default function InPlay({ onSelect }) {
         {universeTabs}
         <div className="chart-toggle">
           {Object.entries(FILTERS).filter(([k]) => !isIndex || k !== 'small').map(([k, f]) => (
-            <button key={k} className={filter === k ? 'active' : ''} onClick={() => setFilter(k)}>{f.label}</button>
+            <button key={k} className={filter === k ? 'active' : ''} onClick={() => setFilter(k)}>
+              {k === 'unusual' ? `Rel vol ${bars.warm}×+` : f.label}
+            </button>
           ))}
         </div>
         <div className="chart-toggle">
@@ -111,7 +121,7 @@ export default function InPlay({ onSelect }) {
                   {r.postmarket_pct != null && <span className={cls(r.postmarket_pct)}>AH {pct(r.postmarket_pct)}</span>}
                   {r.premarket_pct == null && r.postmarket_pct == null && '—'}
                 </td>
-                <td className={r.rvol >= 3 ? 'positive' : ''}><strong>{r.rvol}×</strong></td>
+                <td className={r.rvol >= bars.hot ? 'positive' : r.rvol >= bars.warm ? 'rvol-warm' : ''}><strong>{r.rvol}×</strong></td>
                 <td>{vol(r.volume)}</td>
                 <td>{cap(r.market_cap)}</td>
                 <td className={r.short_pct >= 15 ? 'negative' : ''}>
