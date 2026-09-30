@@ -17,7 +17,7 @@ CHAT_BUDGET_S = 50
 MIN_ATTEMPT_S = 8
 # One slow/overloaded provider must not eat the whole budget before the next one gets a turn
 MAX_ATTEMPT_S = 20
-_LIGHT_HINTS = ("lite", "20b", "mini", "8b")
+_LIGHT_HINTS = ("-lite", "-20b", "-mini", "-8b")
 
 _clients: dict[str, OpenAI] = {}
 # Models that rejected the reasoning_effort parameter
