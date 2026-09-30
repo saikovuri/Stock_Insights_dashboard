@@ -15,6 +15,13 @@ function fmtDate(d) {
   return new Date(d + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
+const ER_RISK = {
+  cc: 'Premium is inflated because the stock can gap. A gap up can get your shares called away; a gap down is only cushioned by the premium.',
+  csp: 'A gap down can assign you shares well below today\'s price. Only sell if you\'d happily own it at the strike after a bad report.',
+  pcs: 'A gap down through the short put can hit max loss overnight, with no chance to adjust.',
+  ic: 'Condors are the most exposed: a gap either way can blow through a short strike overnight. Most condor traders close before earnings.',
+};
+
 const MODES = {
   cc: {
     label: 'Covered Calls', key: 'covered_calls',
@@ -101,6 +108,11 @@ export default function IncomeIdeas({ ticker }) {
 
   const ideas = data?.[MODES[mode].key] || [];
   const spread = mode === 'pcs' || mode === 'ic';
+  const er = data?.earnings_date;
+  const erDays = er ? Math.round((new Date(er + 'T12:00:00') - new Date()) / 86400000) : null;
+  const erAhead = erDays != null && erDays >= 0;
+  const spansEr = exp => erAhead && exp >= er;
+  const safeExp = erAhead ? data.expirations.filter(e => e.date < er).at(-1) : null;
 
   return (
     <div className="card income-ideas">
@@ -119,8 +131,13 @@ export default function IncomeIdeas({ ticker }) {
         <div className="income-controls">
           <label>
             Expiry
-            <select className="candle-select" value={data.expiry} onChange={e => setExpiry(e.target.value)}>
-              {data.expirations.map(e => <option key={e.date} value={e.date}>{fmtDate(e.date)} ({e.dte}d)</option>)}
+            <select className={`candle-select ${spansEr(data.expiry) ? 'income-er-select' : ''}`} value={data.expiry}
+              onChange={e => setExpiry(e.target.value)}>
+              {data.expirations.map(e => (
+                <option key={e.date} value={e.date}>
+                  {fmtDate(e.date)} ({e.dte}d){spansEr(e.date) ? ' · ⚠️ earnings' : ''}
+                </option>
+              ))}
             </select>
           </label>
           {mode === 'cc' ? (
@@ -149,8 +166,22 @@ export default function IncomeIdeas({ ticker }) {
         </div>
       )}
 
-      {data?.earnings_before_expiry && (
-        <div className="income-warning">⚠️ Earnings on {fmtDate(data.earnings_date)} fall before this expiry — bigger premium, but gap risk.</div>
+      {data && spansEr(data.expiry) && (
+        <div className="income-warning income-er">
+          <strong>
+            ⚠️ Earnings {er === data.expiry ? 'on expiry day' : 'before this expiry'}: {fmtDate(er)}
+            {' '}({erDays === 0 ? 'today' : `in ${erDays}d`}) vs expiry {fmtDate(data.expiry)}
+          </strong>
+          <div>{ER_RISK[mode]}</div>
+          {safeExp && (
+            <button className="link-btn" onClick={() => setExpiry(safeExp.date)}>
+              Use {fmtDate(safeExp.date)} ({safeExp.dte}d) — last expiry before earnings
+            </button>
+          )}
+        </div>
+      )}
+      {data && erAhead && !spansEr(data.expiry) && (
+        <p className="income-er-clear">✓ Earnings {fmtDate(er)} ({erDays}d) is after this expiry.</p>
       )}
       {loading && <p className="loading-text">Loading option chain…</p>}
       {error && <p className="empty-state">{error}</p>}

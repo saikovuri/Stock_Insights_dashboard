@@ -4419,6 +4419,10 @@ tr.alert-triggered {
   border-radius: 0 6px 6px 0; font-size: 0.85rem; margin-bottom: 0.75rem;
 }
 .income-delta { font-size: 0.72rem; color: var(--text-muted); font-weight: 500; margin-left: 0.35rem; }
+.income-er { display: flex; flex-direction: column; gap: 0.3rem; align-items: flex-start; border-left-color: #f87171; background: rgba(248, 113, 113, 0.1); }
+.income-er .link-btn { font-size: 0.85rem; font-weight: 600; }
+.income-er-select { border-color: #f87171 !important; box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.4); }
+.income-er-clear { font-size: 0.8rem; color: var(--positive, #22c55e); margin: 0 0 0.6rem; }
 .structure-stats small { color: var(--text-muted); font-weight: 500; }
 .income-grid { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
 .income-ideas .ivrank-header { flex-wrap: wrap; gap: 0.5rem; }
