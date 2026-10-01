@@ -39,7 +39,11 @@ function IdeaCard({ i, expiry, why }) {
             {l.type === 'shares'
               ? `BUY ${i.qty} ${unit} @ $${l.mid}`
               : `${l.action} ${i.qty} × $${l.strike} ${l.type} · ${fmtDate(expiry)} @ $${l.mid}`}
-            {l.oi != null && <span className="structure-leg-oi"> · OI {l.oi.toLocaleString()}</span>}
+            {l.oi != null && (
+              <span className="structure-leg-oi">
+                {' '}· OI {l.oi.toLocaleString()}{l.spread_pct != null && ` · bid/ask ${l.spread_pct}%`}
+              </span>
+            )}
           </div>
         ))}
       </div>
@@ -92,8 +96,9 @@ export default function Structures({ ticker }) {
         <h3 style={{ margin: 0 }}>🛠 Directional trade finder</h3>
       </div>
       <p className="structures-intro">
-        Pick a direction, how much risk you want and your budget. We size shares, a single option and a debit
-        spread to it — using the most liquid strikes — and highlight the best fit.
+        Pick a direction, how much risk you want and your budget. We pick the most liquid expiry and strikes in
+        that window (high open interest, tight bid/ask), size shares, a single option and a debit spread to it, and
+        highlight the best fit.
       </p>
 
       <div className="structures-controls">
@@ -129,9 +134,10 @@ export default function Structures({ ticker }) {
 
       {data && (
         <div className="structures-meta">
-          Spot ${data.spot} · {data.timeframe}: expiry {fmtDate(data.expiry)} ({data.dte === 0 ? '0DTE — today' : `${data.dte}d`})
+          Spot ${data.spot} · {data.timeframe}: expiry {fmtDate(data.expiry)}{data.monthly ? ' (monthly)' : ''} ({data.dte === 0 ? '0DTE — today' : `${data.dte}d`})
           {em && <> · expected move ±{em.pct}% (${em.low}–${em.high}) <Tip term="expected_move" /></>}
           {data.iv_level && <> · options {data.iv_level === 'high' ? 'expensive' : data.iv_level === 'low' ? 'cheap' : 'fairly priced'}</>}
+          {data.expiry_note && <div className="structure-why">✓ {data.expiry_note}</div>}
         </div>
       )}
 

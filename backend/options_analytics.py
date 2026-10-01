@@ -287,15 +287,16 @@ def _spread_width(S: float) -> float:
     return max((w for w in _WIDTHS if w <= S * 0.025), default=_WIDTHS[0])
 
 
-def _default_income_expiry(exps: list[str], earnings: str | None) -> str | None:
-    """~35 DTE, but the last expiry before earnings when one fits, so the default never holds through a report."""
+def _default_income_expiry(ticker: str, exps: list[str], earnings: str | None, S: float) -> str | None:
+    """~35 DTE favouring liquid (usually monthly) expiries, and the last one before earnings when one fits,
+    so the default never holds through a report."""
     if earnings:
+        pre = [e for e in exps if e < earnings]
         for lo in (20, 10):
-            pre = [e for e in exps if e < earnings]
-            pick = _pick_expiry(pre, 35, lo, 50)
+            pick, _ = _liquid_expiry(ticker, pre, 35, lo, 50, S)
             if pick:
                 return pick
-    return _pick_expiry(exps, 35, 20, 50)
+    return _liquid_expiry(ticker, exps, 35, 20, 50, S)[0]
 
 
 def _add_checks(ideas: list[dict], kind: str, em_range, earnings_before: bool, dte: int) -> None:
@@ -334,7 +335,7 @@ def income_ideas(ticker: str, expiry: str | None = None) -> dict:
         exps = _expirations(ticker)
         choices = [e for e in exps if _dte(e) <= 75 and _live(e)]
         earnings = _earnings_date(ticker)
-        exp = expiry if expiry in choices else _default_income_expiry(exps, earnings) or (choices[0] if choices else None)
+        exp = expiry if expiry in choices else _default_income_expiry(ticker, exps, earnings, S) or (choices[0] if choices else None)
         if not exp:
             raise LookupError("No suitable expirations")
         d = max(_dte(exp), 1)
@@ -594,12 +595,80 @@ _RISK_PLANS = {
 }
 
 
-def _near_delta(rows: list[dict], target: float, band: float = 0.07) -> dict | None:
-    """Strike closest to the target delta, preferring the highest open interest among near matches."""
+def _near_delta(rows: list[dict], target: float, band: float = 0.08) -> dict | None:
+    """Best strike near the target delta, scored on delta fit, open interest and bid/ask tightness.
+    Tradable strikes win; the band widens before falling back to thin ones."""
     if not rows:
         return None
-    near = [r for r in rows if abs(r["delta"] - target) <= band]
-    return max(near, key=lambda r: r["oi"]) if near else min(rows, key=lambda r: abs(r["delta"] - target))
+    for b, need_liquid in ((band, True), (band * 2, True), (band * 2, False)):
+        pool = [r for r in rows if abs(r["delta"] - target) <= b and (not need_liquid or _tradable(r))]
+        if pool:
+            return max(pool, key=lambda r: _strike_score(r, target, b))
+    return min(rows, key=lambda r: abs(r["delta"] - target))
+
+
+def _tradable(r: dict) -> bool:
+    sp = _spread_pct(r["bid"], r["ask"])
+    return r["oi"] >= _MIN_OI and sp is not None and sp <= _MAX_SPREAD_PCT
+
+
+def _oi_score(oi: int) -> float:
+    return min(math.log10(oi + 1) / 4, 1.0)  # 0 at no OI, 1 at 10k+
+
+
+def _strike_score(r: dict, target: float, band: float) -> float:
+    sp = _spread_pct(r["bid"], r["ask"])
+    return (1 - abs(r["delta"] - target) / band) + 0.6 * _oi_score(r["oi"]) - 0.6 * min((sp if sp is not None else 50) / 30, 1)
+
+
+def _leg_spread(r: dict) -> float | None:
+    sp = _spread_pct(r["bid"], r["ask"])
+    return None if sp is None else round(sp, 1)
+
+
+def _is_monthly(expiry: str) -> bool:
+    d = datetime.strptime(expiry, "%Y-%m-%d").date()
+    return d.weekday() == 4 and 15 <= d.day <= 21
+
+
+def _expiry_oi(ticker: str, expiry: str, S: float) -> int:
+    """Open interest across calls and puts within ±10% of spot — a proxy for how tradable the expiry is."""
+    total = 0
+    for df in _chain(ticker, expiry):
+        if df is None or df.empty or "openInterest" not in df.columns:
+            continue
+        near = df[(df["strike"] >= S * 0.9) & (df["strike"] <= S * 1.1)]
+        total += int(near["openInterest"].fillna(0).sum())
+    return total
+
+
+def _liquid_expiry(ticker: str, exps: list[str], target: int, lo: int, hi: int, S: float):
+    """Expiry in [lo, hi] DTE balancing closeness to the target with open interest (monthlies usually win).
+    Returns (expiry, note explaining a switch away from the nearest-to-target expiry)."""
+    cands = sorted((e for e in exps if _live(e) and lo <= _dte(e) <= hi), key=lambda e: abs(_dte(e) - target))[:6]
+    stats = []
+    for e in cands:
+        try:
+            stats.append((e, _expiry_oi(ticker, e, S)))
+        except Exception:
+            continue
+    if not stats:
+        return None, None
+    top = max(oi for _, oi in stats) or 1
+    span = max(hi - lo, 1)
+
+    def score(s):
+        e, oi = s
+        return math.log10(oi + 1) / math.log10(top + 1) - 0.5 * abs(_dte(e) - target) / span + (0.1 if _is_monthly(e) else 0)
+
+    best, nearest = max(stats, key=score), stats[0]
+    note = None
+    if best[0] != nearest[0]:
+        ratio = best[1] / max(nearest[1], 1)
+        if ratio >= 1.5:
+            note = (f"Picked {'the monthly' if _is_monthly(best[0]) else 'this'} expiry over {nearest[0]}: "
+                    f"{ratio:.0f}× the open interest near the money, so tighter fills and easier exits.")
+    return best[0], note
 
 
 def _prob_profit(kind: str, S: float, be: float, T: float, iv: float) -> int:
@@ -630,7 +699,7 @@ def _long_option(rows, kind, S, T, budget, target):
     return {
         "kind": "long", "title": f"Long {kind}",
         "legs": [{"action": "BUY", "type": kind, "strike": K, "mid": round(prem, 2),
-                  "oi": pick["oi"], "delta": round(pick["delta"], 2)}],
+                  "oi": pick["oi"], "delta": round(pick["delta"], 2), "spread_pct": _leg_spread(pick)}],
         "qty": n, "unit": "contract", "cost": round(cost, 2), "max_loss": round(cost, 2),
         "max_profit": "Unlimited" if kind == "call" else round((K - prem) * 100 * n, 2),
         "breakeven": round(be, 2), "move_needed_pct": _move_pct(kind, S, be),
@@ -652,14 +721,16 @@ def _debit_spread(rows, kind, S, T, budget, target, em):
     if not long:
         return None, None
     sign = 1 if kind == "call" else -1
-    goal = long["strike"] + sign * max(em or S * 0.05, _spread_width(S))
+    reach = max(em or S * 0.05, _spread_width(S))
+    goal = long["strike"] + sign * reach
     shorts = [r for r in rows if sign * (r["strike"] - long["strike"]) > 0 and r["bid"] > 0]
+    shorts = [r for r in shorts if _tradable(r)] or shorts
     if not shorts:
         return None, None
-    ideal = min(shorts, key=lambda r: (abs(r["strike"] - goal), -r["oi"]))
+    ideal = max(shorts, key=lambda r: 0.4 * _oi_score(r["oi"]) - abs(r["strike"] - goal) / reach)
     w_ideal = abs(ideal["strike"] - long["strike"])
     narrower = sorted((r for r in shorts if abs(r["strike"] - long["strike"]) < w_ideal),
-                      key=lambda r: (r["oi"] < 100, -abs(r["strike"] - long["strike"])))
+                      key=lambda r: -abs(r["strike"] - long["strike"]))
     cheapest = None
     for s in [ideal] + narrower:
         width = abs(s["strike"] - long["strike"])
@@ -677,9 +748,9 @@ def _debit_spread(rows, kind, S, T, budget, target, em):
         return {
             "kind": "spread", "title": f"{label} debit spread",
             "legs": [{"action": "BUY", "type": kind, "strike": long["strike"], "mid": round(long["mid"], 2),
-                      "oi": long["oi"], "delta": round(long["delta"], 2)},
+                      "oi": long["oi"], "delta": round(long["delta"], 2), "spread_pct": _leg_spread(long)},
                      {"action": "SELL", "type": kind, "strike": s["strike"], "mid": round(s["mid"], 2),
-                      "oi": s["oi"], "delta": round(s["delta"], 2)}],
+                      "oi": s["oi"], "delta": round(s["delta"], 2), "spread_pct": _leg_spread(s)}],
             "qty": n, "unit": "spread", "cost": round(debit * 100 * n, 2), "max_loss": round(debit * 100 * n, 2),
             "max_profit": round((width - debit) * 100 * n, 2),
             "reward_risk": round((width - debit) / debit, 2),
@@ -735,7 +806,7 @@ def directional_ideas(ticker: str, direction: str, budget: float, risk: str) -> 
             raise LookupError("No listed options")
         plan = _RISK_PLANS[risk]
         lo, hi, target_dte = plan["dte"]
-        exp = _pick_expiry(exps, target_dte, lo, hi)
+        exp, exp_note = _liquid_expiry(ticker, exps, target_dte, lo, hi, S)
         if not exp and risk == "low":
             longest = max(exps, key=_dte)
             exp = longest if _dte(longest) >= 120 else None
@@ -783,14 +854,21 @@ def directional_ideas(ticker: str, direction: str, budget: float, risk: str) -> 
         elif spread_cost:
             needed.append(spread_cost)
 
-        best, why = _pick_best(ideas, direction, risk, budget, S, iv_level == "high")
+        args = (direction, risk, budget, S, iv_level == "high")
+        best, why = _pick_best({k: v for k, v in ideas.items() if v["liquidity"] != "thin"}, *args)
+        usual, usual_why = _pick_best(ideas, *args)
+        if not best:
+            best, why = usual, usual_why
+        elif usual != best:
+            why += " (The usual pick here trades too thinly to get a fair fill.)"
         ordered = sorted(ideas.values(), key=lambda i: i["kind"] != best)
         for i in ordered:
             i["best"] = i["kind"] == best
 
         return {
             "ticker": ticker, "spot": round(S, 2), "direction": direction, "risk": risk, "budget": budget,
-            "timeframe": plan["label"], "expiry": exp, "dte": d, "iv_level": iv_level,
+            "timeframe": plan["label"], "expiry": exp, "dte": d, "expiry_note": exp_note,
+            "monthly": _is_monthly(exp), "iv_level": iv_level,
             "expected_move": None if not em else {"move": round(em, 2), "pct": round(em / S * 100, 1),
                                                   "low": round(S - em, 2), "high": round(S + em, 2)},
             "earnings_date": earnings, "earnings_before_expiry": e_days is not None and 0 <= e_days <= d,
