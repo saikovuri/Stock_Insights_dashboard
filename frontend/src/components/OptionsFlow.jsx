@@ -1,15 +1,17 @@
 import { useState, useEffect } from 'react';
 import { fetchOptionsFlow } from '../api/stockApi';
 import Tip from './Tip';
+import ClampText from './ClampText';
 
 const money = v => v >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `$${(v / 1e3).toFixed(0)}K` : `$${v}`;
 const num = v => v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(0)}K` : `${v}`;
 
 export function FlowTable({ trades, showTicker, onSelect }) {
+  const [all, setAll] = useState(false);
   if (!trades?.length) return <p className="empty-state" style={{ padding: 0 }}>No unusual contracts right now.</p>;
   return (
     <div className="financials-table-wrap">
-      <table className="analyst-table flow-table">
+      <table className={`analyst-table flow-table ${all ? '' : 'flow-collapsed'}`}>
         <thead>
           <tr>
             {showTicker && <th>Ticker</th>}
@@ -19,21 +21,26 @@ export function FlowTable({ trades, showTicker, onSelect }) {
         <tbody>
           {trades.map((t, i) => (
             <tr key={i}>
-              {showTicker && <td><button className="link-btn" onClick={() => onSelect?.(t.ticker)}><strong>{t.ticker}</strong></button></td>}
-              <td className={t.kind === 'call' ? 'positive' : 'negative'}>
+              {showTicker && <td className="flow-cell-wide"><button className="link-btn" onClick={() => onSelect?.(t.ticker)}><strong>{t.ticker}</strong></button></td>}
+              <td className={`flow-cell-wide ${t.kind === 'call' ? 'positive' : 'negative'}`}>
                 ${t.strike} {t.kind.toUpperCase()} <span className="market-sub">({t.otm_pct === 0 ? 'ATM' : t.otm_pct > 0 ? `${t.otm_pct}% OTM` : `${Math.abs(t.otm_pct)}% ITM`})</span>
               </td>
-              <td>{t.expiry} <span className="market-sub">{t.dte}d</span></td>
-              <td>{num(t.volume)} / {num(t.open_interest)}{t.vol_oi ? <span className="market-sub"> ({t.vol_oi}×)</span> : null}</td>
-              <td><strong>{money(t.premium)}</strong></td>
-              <td>{t.iv_pct ? `${t.iv_pct}%` : '—'}</td>
-              <td title="Last trade vs bid/ask: at the ask suggests a buyer, at the bid a seller">
+              <td data-label="Expiry">{t.expiry} <span className="market-sub">{t.dte}d</span></td>
+              <td data-label="Vol / OI">{num(t.volume)} / {num(t.open_interest)}{t.vol_oi ? <span className="market-sub"> ({t.vol_oi}×)</span> : null}</td>
+              <td data-label="Premium"><strong>{money(t.premium)}</strong></td>
+              <td data-label="IV">{t.iv_pct ? `${t.iv_pct}%` : '—'}</td>
+              <td data-label="Side" title="Last trade vs bid/ask: at the ask suggests a buyer, at the bid a seller">
                 {t.side === 'bought' ? '🟢 at ask' : t.side === 'sold' ? '🔴 at bid' : '⚪ mid'}
               </td>
             </tr>
           ))}
         </tbody>
       </table>
+      {trades.length > 5 && (
+        <button className="clamp-toggle show-mobile" onClick={() => setAll(a => !a)}>
+          {all ? 'Show fewer ▴' : `Show all ${trades.length} ▾`}
+        </button>
+      )}
     </div>
   );
 }
@@ -57,7 +64,7 @@ export default function OptionsFlow({ ticker }) {
         <h3 style={{ margin: 0 }}>🌊 Flow & positioning</h3>
         <span className="market-sub">Spot ${data.spot}</span>
       </div>
-      {data.summary && <p className="ivrank-verdict-desc">{data.summary}</p>}
+      {data.summary && <ClampText className="ivrank-verdict-desc">{data.summary}</ClampText>}
       <div className="doctor-stats">
         <div><span>Put/call volume <Tip term="pc_ratio" /></span><strong className={pcCls}>{data.pc_volume ?? '—'}</strong></div>
         <div><span>Put/call open interest <Tip term="open_interest" /></span><strong>{data.pc_oi ?? '—'}</strong></div>

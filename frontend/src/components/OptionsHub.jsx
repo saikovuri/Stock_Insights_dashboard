@@ -5,10 +5,10 @@ import Structures from './Structures';
 import OptionsFlow from './OptionsFlow';
 
 const TABS = {
-  volatility: { label: '📊 Volatility', Comp: IvRank },
-  income: { label: '💵 Sell premium', Comp: IncomeIdeas },
-  directional: { label: '🛠 Directional', Comp: Structures },
-  flow: { label: '🌊 Flow & positioning', Comp: OptionsFlow },
+  volatility: { icon: '📊', label: 'Volatility', short: 'Volatility', Comp: IvRank },
+  income: { icon: '💵', label: 'Sell premium', short: 'Income', Comp: IncomeIdeas },
+  directional: { icon: '🛠', label: 'Directional', short: 'Directional', Comp: Structures },
+  flow: { icon: '🌊', label: 'Flow & positioning', short: 'Flow', Comp: OptionsFlow },
 };
 
 export default function OptionsHub({ ticker, tabs }) {
@@ -21,7 +21,9 @@ export default function OptionsHub({ ticker, tabs }) {
         <span className="options-hub-title">Options</span>
         {tabs.map(id => (
           <button key={id} className={`sub-tab ${tab === id ? 'active' : ''}`} onClick={() => setTab(id)}>
-            {TABS[id].label}
+            <span className="hub-tab-icon">{TABS[id].icon}</span>{' '}
+            <span className="hide-mobile">{TABS[id].label}</span>
+            <span className="show-mobile">{TABS[id].short}</span>
           </button>
         ))}
       </nav>

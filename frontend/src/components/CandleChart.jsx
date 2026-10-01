@@ -98,14 +98,15 @@ export default function CandleChart({ ticker, data, events, period, interval, pr
     fetchKeyLevels(ticker).then(setLevels).catch(() => setLevels(null));
   }, [ticker, isIntraday, data]);
 
-  // Intraday strings are exchange-local; encoding them as UTC makes the axis show exchange time
+  // Intraday strings are exchange-local; encoding them as UTC makes the axis show exchange time.
+  // Format comes from the data (not `interval`) so a stale fetch during an interval switch can't crash the chart.
   const bars = useMemo(() => {
     if (!data?.length) return [];
     const seen = new Set();
     return data
-      .map(d => ({ ...d, time: isIntraday ? Date.parse(d.date.replace(' ', 'T') + ':00Z') / 1000 : d.date }))
+      .map(d => ({ ...d, time: d.date.length > 10 ? Date.parse(d.date.replace(' ', 'T') + ':00Z') / 1000 : d.date }))
       .filter(d => !seen.has(d.time) && seen.add(d.time));
-  }, [data, isIntraday]);
+  }, [data]);
 
   const candles = useMemo(() => (candleStyle === 'heikin' ? heikinAshi(bars) : bars), [bars, candleStyle]);
 

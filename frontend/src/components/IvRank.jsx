@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { fetchIvRank } from '../api/stockApi';
 import Tip from './Tip';
+import ClampText from './ClampText';
 
 const LEVEL = {
   high: { text: 'Premium expensive', cls: 'ivrank-high' },
@@ -43,7 +44,7 @@ export default function IvRank({ ticker }) {
         {level && <span className={`ivrank-badge ${level.cls}`}>{level.text}</span>}
       </div>
 
-      <p className="ivrank-verdict-desc">{data.summary}</p>
+      <ClampText className="ivrank-verdict-desc">{data.summary}</ClampText>
 
       {data.iv_rank != null ? (
         <div className="ivrank-bar-wrap">
@@ -78,9 +79,9 @@ export default function IvRank({ ticker }) {
       <div className="ivrank-grid">
         {data.moves.map(m => (
           <div key={m.expiry} className="ivrank-stat">
-            <div className="ivrank-stat-label">{m.label} · by {fmtDate(m.expiry)} ({m.dte}d)</div>
+            <div className="ivrank-stat-label">{m.label} · by {fmtDate(m.expiry)} ({m.dte}d) <Tip term="expected_move" /></div>
             <div className="ivrank-stat-value">${m.low.toFixed(2)} – ${m.high.toFixed(2)}</div>
-            <div className="ivrank-stat-sub">±${m.move.toFixed(2)} (±{m.move_pct}%) · ~68% chance it ends in this range</div>
+            <div className="ivrank-stat-sub">±${m.move.toFixed(2)} (±{m.move_pct}%)<span className="hide-mobile"> · ~68% chance it ends in this range</span></div>
           </div>
         ))}
         <div className={`ivrank-stat ${data.earnings_in_window ? 'ivrank-warn' : ''}`}>
@@ -88,7 +89,7 @@ export default function IvRank({ ticker }) {
           <div className="ivrank-stat-value">{data.earnings_date ? fmtDate(data.earnings_date) : 'Not scheduled'}</div>
           {data.earnings_in_days != null && (
             <div className="ivrank-stat-sub">
-              in {data.earnings_in_days} days{data.earnings_in_window ? ' — inside the monthly window, expect a jump in premium' : ''}
+              in {data.earnings_in_days} days{data.earnings_in_window ? ' — inside the monthly window' : ''}
             </div>
           )}
         </div>
