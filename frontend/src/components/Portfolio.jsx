@@ -710,8 +710,10 @@ export default function Portfolio() {
                       </td>
                       <td>{o.contracts}</td>
                       <td>${o.premium.toFixed(2)}</td>
-                      <td title={`Bid: $${(o.bid || 0).toFixed(2)} / Ask: $${(o.ask || 0).toFixed(2)}`}>
-                        ${o.market_price.toFixed(2)}
+                      <td title={o.quoted === false
+                        ? 'No live quote for this exact contract (expired or not listed) — valued at intrinsic value'
+                        : `Bid: $${(o.bid || 0).toFixed(2)} / Ask: $${(o.ask || 0).toFixed(2)}`}>
+                        ${o.market_price.toFixed(2)}{o.quoted === false && <small className="market-sub"> est.</small>}
                       </td>
                       <td title="Implied Volatility">{o.iv ? `${o.iv}%` : '—'}</td>
                       <td className={o.pnl >= 0 ? 'positive' : 'negative'}>

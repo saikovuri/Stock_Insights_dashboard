@@ -133,17 +133,31 @@ def _pick_expiry(expirations: list[str], target: int, lo: int, hi: int) -> str |
 
 
 def _atm_iv(ticker: str, expiry: str, S: float) -> float | None:
+    """ATM implied vol from the 4 calls and 4 puts nearest spot with tight quotes, weighted toward the
+    closest strikes; falls back to the single nearest strike when nothing is quoted (e.g. after hours)."""
     calls, puts = _chain(ticker, expiry)
     T = _years(expiry)
-    ivs = []
+    num = den = 0.0
+    fallback = []
     for df, kind in ((calls, "call"), (puts, "put")):
         if df is None or df.empty:
             continue
-        row = df.loc[(df["strike"] - S).abs().idxmin()]
-        iv = _row_iv(row, S, T, kind)
-        if iv:
-            ivs.append(iv)
-    return sum(ivs) / len(ivs) if ivs else None
+        near = df.assign(_d=(df["strike"] - S).abs()).nsmallest(4, "_d")
+        for i, (_, row) in enumerate(near.iterrows()):
+            iv = _row_iv(row, S, T, kind)
+            if not iv:
+                continue
+            if i == 0:
+                fallback.append(iv)
+            sp = _spread_pct(float(row.get("bid") or 0), float(row.get("ask") or 0))
+            if sp is None or sp > 40:
+                continue
+            w = 1 / (row["_d"] + S * 0.005)
+            num += iv * w
+            den += w
+    if den:
+        return num / den
+    return sum(fallback) / len(fallback) if fallback else None
 
 
 def _earnings_date(ticker: str) -> str | None:
@@ -180,8 +194,8 @@ def volatility_overview(ticker: str) -> dict:
         if not exps:
             raise LookupError("No listed options")
 
-        monthly = _pick_expiry(exps, 30, 20, 60) or _pick_expiry(exps, 30, 5, 120)
-        weekly = _pick_expiry(exps, 7, 4, 12)
+        monthly = _liquid_expiry(ticker, exps, 30, 20, 60, S)[0] or _pick_expiry(exps, 30, 5, 120)
+        weekly = _liquid_expiry(ticker, exps, 7, 4, 12, S)[0]
         iv30 = _atm_iv(ticker, monthly, S) if monthly else None
 
         closes = get_stock_data(ticker, period="1y", interval="1d")["Close"]

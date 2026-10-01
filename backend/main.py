@@ -660,12 +660,9 @@ def options_summary_endpoint(user: dict = Depends(get_current_user)):
         key = (yf_sym, expiry)
         if key not in chain_cache:
             try:
-                available = options_analytics._expirations(yf_sym)
-                if expiry not in available:
-                    expiry = min(available, key=lambda e: abs(
-                        (datetime.strptime(e, "%Y-%m-%d").date() - datetime.strptime(expiry, "%Y-%m-%d").date()).days
-                    )) if available else None
-                calls, puts = options_analytics._chain(yf_sym, expiry) if expiry else (None, None)
+                # Only the exact contract counts: a neighbouring expiry or strike would give a wrong mark
+                listed = expiry in options_analytics._expirations(yf_sym)
+                calls, puts = options_analytics._chain(yf_sym, expiry) if listed else (None, None)
                 chain_cache[key] = {"calls": calls, "puts": puts}
             except Exception:
                 chain_cache[key] = {"calls": None, "puts": None}
@@ -676,8 +673,7 @@ def options_summary_endpoint(user: dict = Depends(get_current_user)):
             return {}
         match = df[df["strike"] == strike]
         if match.empty:
-            closest_idx = (df["strike"] - strike).abs().idxmin()
-            match = df.loc[[closest_idx]]
+            return {}
         row = match.iloc[0]
         return {
             "last_price": float(row.get("lastPrice", 0) or 0),
@@ -724,7 +720,7 @@ def options_summary_endpoint(user: dict = Depends(get_current_user)):
             "strike": strike, "expiry": o["expiry"], "dte": dte,
             "contracts": contracts, "premium": premium, "cost": round(cost, 2),
             "current_price": current, "intrinsic": round(intrinsic, 2),
-            "market_price": round(market_price, 2),
+            "market_price": round(market_price, 2), "quoted": bool(market),
             "bid": round(market.get("bid", 0), 2) if market else 0,
             "ask": round(market.get("ask", 0), 2) if market else 0,
             "iv": round(iv * 100, 1), "volume": volume, "open_interest": oi,
