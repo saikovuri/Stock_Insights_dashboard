@@ -320,7 +320,7 @@ export default function Watchlist({ onSelect, onSignIn }) {
         <p className="empty-state">Your watchlist is empty. Add tickers above to start tracking.</p>
       ) : (
         <div className="screener-table-wrap">
-          <table className="portfolio-table screener-table">
+          <table className="portfolio-table screener-table watchlist-table">
             <thead>
               <tr>
                 <th className="drag-handle-col"></th>

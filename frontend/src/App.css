@@ -4589,6 +4589,31 @@ button.signal-chip { cursor: pointer; }
   }
   .flow-collapsed tbody tr:nth-child(n+6) { display: none; }
   .clamp-toggle.show-mobile { display: block; margin-top: 0.3rem; }
+
+  .chart-header-row .chart-period-pills { flex: 1 1 100%; }
+
+  /* Sub-tab strips wrap into a grid so no tab is hidden off-screen */
+  .sub-tabs:not(.options-hub-tabs) {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(80px, 1fr)); overflow: visible;
+  }
+  .sub-tabs:not(.options-hub-tabs) .sub-tab {
+    min-width: 0; white-space: normal; line-height: 1.2; border-right: none; padding: 0.4rem 0.3rem;
+  }
+
+  /* Wide tables keep their first column (ticker / line item) pinned while scrolling sideways */
+  .table-scroll table tr > :first-child,
+  .peer-table-wrap table tr > :first-child,
+  .analyst-table:not(.flow-table) tr > :first-child {
+    position: sticky; left: 0; z-index: 1; background: var(--surface);
+    box-shadow: 2px 0 6px rgba(0, 0, 0, 0.2);
+  }
+  .table-scroll .inplay-name { max-width: 84px; }
+
+  /* Watchlist: drop the drag handle and secondary columns (all still sortable via the Sort menu); pin the ticker */
+  .watchlist-table tr > :is(:nth-child(1), :nth-child(3), :nth-child(6), :nth-child(7), :nth-child(9), :nth-child(12), :nth-child(14)) { display: none; }
+  .watchlist-table tr > :nth-child(2) {
+    position: sticky; left: 0; z-index: 1; background: var(--surface); box-shadow: 2px 0 6px rgba(0, 0, 0, 0.2);
+  }
 }
 
 .smart-list { list-style: none; padding: 0; margin: 0.25rem 0 0; display: flex; flex-direction: column; gap: 0.4rem; font-size: 0.88rem; }
