@@ -1397,46 +1397,6 @@ def batch_sparklines(request: Request, req: SparklineRequest):
 
 # ── Options analytics: IV rank, expected move, suggested structures ─────────
 
-def _nearest_expiry(expirations: list[str], min_days: int = 5, max_days: int = 60) -> Optional[str]:
-    """Pick the soonest expiry within [min_days, max_days] days from today."""
-    today = _date.today()
-    candidates = []
-    for e in expirations or []:
-        try:
-            d = datetime.strptime(e, "%Y-%m-%d").date()
-            dte = (d - today).days
-            if min_days <= dte <= max_days:
-                candidates.append((dte, e))
-        except Exception:
-            continue
-    if not candidates:
-        return None
-    candidates.sort()
-    return candidates[0][1]
-
-
-def _atm_row(df, target_strike: float):
-    """Return the row in an option-chain dataframe whose strike is closest to target."""
-    if df is None or df.empty:
-        return None
-    idx = (df["strike"] - target_strike).abs().idxmin()
-    return df.loc[idx]
-
-
-def _mid_price(row) -> Optional[float]:
-    """Mid (or last) price for an option-chain row."""
-    if row is None:
-        return None
-    try:
-        bid = float(row.get("bid") or 0)
-        ask = float(row.get("ask") or 0)
-        if bid > 0 and ask > 0:
-            return (bid + ask) / 2
-        last = float(row.get("lastPrice") or 0)
-        return last if last > 0 else None
-    except Exception:
-        return None
-
 
 @app.get("/api/stock/{ticker}/iv-rank")
 @limiter.limit("30/minute")
@@ -1470,128 +1430,16 @@ def stock_income(request: Request, ticker: str,
 def stock_structures(
     request: Request,
     ticker: str,
-    direction: str = Query("bull"),
-    budget: float = Query(500.0, ge=50.0, le=100000.0),
+    direction: str = Query("bull", pattern="^(bull|bear)$"),
+    budget: float = Query(500.0, ge=50.0, le=1000000.0),
+    risk: str = Query("moderate", pattern="^(high|moderate|low)$"),
 ):
-    """Compare a long single-leg trade against a defined-risk debit spread.
-
-    Both legs use the soonest expiry between 14 and 45 days out.
-    Structures returned: long ATM call/put, and an ATM/+5% debit call spread
-    (or ATM/-5% debit put spread for bears).
-    """
+    """Shares vs long option vs debit spread, sized to the budget, with the expiry set by risk appetite."""
     ticker = _valid_ticker(ticker)
-    direction = direction.lower().strip()
-    if direction not in ("bull", "bear"):
-        raise HTTPException(status_code=400, detail="direction must be 'bull' or 'bear'")
-
-    def _fetch():
-        spot = get_quote(ticker).get("price")
-        if not spot:
-            raise HTTPException(status_code=404, detail="Spot price unavailable")
-
-        try:
-            expirations = options_analytics._expirations(ticker)
-        except Exception:
-            expirations = []
-        expiry = _nearest_expiry(expirations, min_days=14, max_days=45) or (expirations[0] if expirations else None)
-        if not expiry:
-            raise HTTPException(status_code=404, detail="No options available")
-
-        try:
-            calls, puts = options_analytics._chain(ticker, expiry)
-        except Exception as e:
-            log.warning("Option chain failed for %s: %s", ticker, e)
-            raise HTTPException(status_code=502, detail="Option chain unavailable")
-
-        df = calls if direction == "bull" else puts
-        if df is None or df.empty:
-            raise HTTPException(status_code=404, detail="Empty option chain")
-
-        long_row = _atm_row(df, spot)
-        long_strike = float(long_row.get("strike"))
-        long_mid = _mid_price(long_row)
-
-        short_target = spot * (1.05 if direction == "bull" else 0.95)
-        short_row = _atm_row(df, short_target)
-        short_strike = float(short_row.get("strike"))
-        short_mid = _mid_price(short_row)
-
-        exp_date = datetime.strptime(expiry, "%Y-%m-%d").date()
-        dte = (exp_date - _date.today()).days
-        leg_label = "Call" if direction == "bull" else "Put"
-        spread_label = "Bull Call" if direction == "bull" else "Bear Put"
-
-        structures = []
-
-        # 1) Long single-leg
-        if long_mid:
-            cost_per = long_mid * 100
-            contracts = max(0, int(budget // cost_per))
-            if contracts > 0:
-                if direction == "bull":
-                    breakeven = long_strike + long_mid
-                    move_needed_pct = (breakeven - spot) / spot * 100
-                    max_profit = "Unlimited"
-                else:
-                    breakeven = long_strike - long_mid
-                    move_needed_pct = (spot - breakeven) / spot * 100
-                    max_profit = round((long_strike - long_mid) * 100 * contracts, 2)
-                structures.append({
-                    "type": f"Long {leg_label}",
-                    "legs": [{"action": "BUY", "strike": long_strike, "mid": round(long_mid, 2)}],
-                    "contracts": contracts,
-                    "cost": round(cost_per * contracts, 2),
-                    "max_loss": round(cost_per * contracts, 2),
-                    "max_profit": max_profit,
-                    "breakeven": round(breakeven, 2),
-                    "move_needed_pct": round(move_needed_pct, 2),
-                    "notes": "Pure directional bet. Pays for full IV + theta. Needs direction AND timing.",
-                })
-
-        # 2) Debit spread (defined risk)
-        if long_mid and short_mid and short_strike != long_strike:
-            net_debit = long_mid - short_mid
-            if net_debit > 0:
-                width = abs(short_strike - long_strike)
-                cost_per = net_debit * 100
-                max_profit_per = (width - net_debit) * 100
-                contracts = max(0, int(budget // cost_per))
-                if contracts > 0:
-                    if direction == "bull":
-                        breakeven = long_strike + net_debit
-                        move_needed_pct = (breakeven - spot) / spot * 100
-                    else:
-                        breakeven = long_strike - net_debit
-                        move_needed_pct = (spot - breakeven) / spot * 100
-                    structures.append({
-                        "type": f"{spread_label} Debit Spread",
-                        "legs": [
-                            {"action": "BUY", "strike": long_strike, "mid": round(long_mid, 2)},
-                            {"action": "SELL", "strike": short_strike, "mid": round(short_mid, 2)},
-                        ],
-                        "contracts": contracts,
-                        "cost": round(cost_per * contracts, 2),
-                        "max_loss": round(cost_per * contracts, 2),
-                        "max_profit": round(max_profit_per * contracts, 2),
-                        "breakeven": round(breakeven, 2),
-                        "move_needed_pct": round(move_needed_pct, 2),
-                        "notes": "Capped profit, but cheaper, lower theta bleed, and survives a sluggish move.",
-                    })
-
-        return {
-            "ticker": ticker,
-            "spot": round(float(spot), 2),
-            "direction": direction,
-            "expiry": expiry,
-            "dte": dte,
-            "budget": budget,
-            "structures": structures,
-        }
-
     try:
-        return get_or_fetch(f"structures:{ticker}:{direction}:{int(budget)}", _fetch, ttl=120)
-    except HTTPException:
-        raise
+        return options_analytics.directional_ideas(ticker, direction, budget, risk)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="No listed options for this ticker")
     except Exception as e:
         raise _upstream_error(e)
 

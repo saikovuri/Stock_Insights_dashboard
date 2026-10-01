@@ -4250,6 +4250,17 @@ tr.alert-triggered {
 .structures-dir-btn.active.bear { background: rgba(248,113,113,0.15); border-color: #f87171; color: #f87171; }
 
 .structures-meta { color: var(--text-secondary); font-size: 0.82rem; margin-bottom: 0.6rem; }
+.structures-controls:has(.structures-risk-btn) { grid-template-columns: auto 1.4fr 110px auto; }
+.structures-risk-btn { display: flex; flex-direction: column; align-items: center; line-height: 1.2; padding: 0.35rem 0.4rem; }
+.structures-risk-btn small { font-size: 0.66rem; font-weight: 500; opacity: 0.8; }
+.structures-dir-btn.active.risk { background: rgba(99,102,241,0.15); border-color: var(--accent); color: var(--accent); }
+.structure-card.structure-best { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.structure-best-badge {
+  margin-left: 0.5rem; font-size: 0.7rem; font-weight: 700; padding: 0.1rem 0.45rem; border-radius: 999px;
+  background: rgba(99,102,241,0.18); color: var(--accent); vertical-align: middle;
+}
+.structure-why { margin: 0 0 0.5rem; font-size: 0.8rem; color: var(--text-secondary); }
+.structure-leg-oi { opacity: 0.7; font-size: 0.75rem; }
 .structures-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.85rem; }
 
 .structure-card {
@@ -4281,6 +4292,7 @@ tr.alert-triggered {
 @media (max-width: 700px) {
   .ivrank-grid { grid-template-columns: 1fr; }
   .structures-controls { grid-template-columns: 1fr; }
+  .structures-controls:has(.structures-risk-btn) { grid-template-columns: 1fr; }
   .structures-grid { grid-template-columns: 1fr; }
 }
 

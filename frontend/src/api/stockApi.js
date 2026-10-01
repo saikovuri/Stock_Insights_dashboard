@@ -399,8 +399,8 @@ export const saveThesis = (t, thesis) => sendJson(`${BASE}/thesis/${t}`, 'PUT', 
 export const deleteThesis = (t) => sendJson(`${BASE}/thesis/${t}`, 'DELETE', null, 'Failed to delete thesis');
 export const checkThesis = (t) => sendJson(`${BASE}/thesis/${t}/check`, 'POST', null, 'Thesis check failed');
 
-export async function fetchStructures(ticker, direction, budget) {
-  const params = new URLSearchParams({ direction, budget: String(budget) });
+export async function fetchStructures(ticker, direction, budget, risk) {
+  const params = new URLSearchParams({ direction, budget: String(budget), risk });
   const res = await fetch(`${BASE}/stock/${ticker}/structures?${params}`);
   if (!res.ok) throw new Error(await readError(res, 'Failed to fetch structures'));
   return res.json();
