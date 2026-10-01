@@ -274,9 +274,12 @@ def _vol_summary(level, iv, rv, iv_rank, earnings_in_window, e_days) -> str:
 
 # ── Income ideas: covered calls, cash-secured puts, credit spreads, condors ──
 
-_TARGETS = [("Conservative", 0.15), ("Balanced", 0.25), ("Aggressive", 0.35)]
-_CONDOR_TARGETS = [("Conservative", 0.10), ("Balanced", 0.16), ("Aggressive", 0.25)]
+_TARGETS = [("Conservative", 0.10), ("Balanced", 0.16), ("Aggressive", 0.25)]
+_CONDOR_TARGETS = [("Conservative", 0.08), ("Balanced", 0.12), ("Aggressive", 0.16)]
 _WIDTHS = (0.5, 1, 2.5, 5, 10, 25, 50)
+_MIN_OI = 100
+_MAX_SPREAD_PCT = 25
+_MIN_CREDIT_RATIO = 0.10  # spread credit vs width; below this you risk >9x what you can make
 
 
 def _spread_width(S: float) -> float:
@@ -284,19 +287,60 @@ def _spread_width(S: float) -> float:
     return max((w for w in _WIDTHS if w <= S * 0.025), default=_WIDTHS[0])
 
 
+def _default_income_expiry(exps: list[str], earnings: str | None) -> str | None:
+    """~35 DTE, but the last expiry before earnings when one fits, so the default never holds through a report."""
+    if earnings:
+        for lo in (20, 10):
+            pre = [e for e in exps if e < earnings]
+            pick = _pick_expiry(pre, 35, lo, 50)
+            if pick:
+                return pick
+    return _pick_expiry(exps, 35, 20, 50)
+
+
+def _add_checks(ideas: list[dict], kind: str, em_range, earnings_before: bool, dte: int) -> None:
+    """Attach pass/fail safety checks and an overall grade to each idea."""
+    for i in ideas:
+        checks = [(i["liquidity"] != "thin",
+                   f"Liquid (OI {i['open_interest']:,})" if i["liquidity"] != "thin"
+                   else "Thin market — wide bid/ask, hard to exit at a fair price")]
+        if em_range:
+            if kind == "ic":
+                out = i["put_short"] < em_range[0] and i["call_short"] > em_range[1]
+            elif kind == "call":
+                out = i["strike"] > em_range[1]
+            else:
+                out = i.get("short_strike", i.get("strike")) < em_range[0]
+            checks.append((out, "Outside the expected move" if out
+                           else "Inside the expected move — a normal move can test it"))
+        if "width" in i:
+            ratio = i["credit"] / i["width"]
+            checks.append((ratio >= _MIN_CREDIT_RATIO,
+                           f"Credit is {ratio * 100:.0f}% of the width" if ratio >= _MIN_CREDIT_RATIO else
+                           f"Credit is only {ratio * 100:.0f}% of the width — risking ${i['max_loss']:,.0f} "
+                           f"to make ${i['premium']:,.0f}"))
+        if earnings_before:
+            checks.append((False, "Earnings before expiry — overnight gap risk"))
+        if dte <= 6:
+            checks.append((False, "Expires within days — high gamma risk"))
+        fails = sum(not ok for ok, _ in checks)
+        i["checks"] = [{"ok": ok, "text": t} for ok, t in checks]
+        i["safety"] = "safer" if fails == 0 else "caution" if fails == 1 else "risky"
+
+
 def income_ideas(ticker: str, expiry: str | None = None) -> dict:
     def _fetch():
         S = _spot(ticker)
         exps = _expirations(ticker)
         choices = [e for e in exps if _dte(e) <= 75 and _live(e)]
-        exp = expiry if expiry in choices else _pick_expiry(exps, 35, 20, 50) or (choices[0] if choices else None)
+        earnings = _earnings_date(ticker)
+        exp = expiry if expiry in choices else _default_income_expiry(exps, earnings) or (choices[0] if choices else None)
         if not exp:
             raise LookupError("No suitable expirations")
         d = max(_dte(exp), 1)
         T = _years(exp)
         calls, puts = _chain(ticker, exp)
 
-        earnings = _earnings_date(ticker)
         e_days = (datetime.strptime(earnings, "%Y-%m-%d").date() - date.today()).days if earnings else None
         earnings_before = e_days is not None and 0 <= e_days <= d
 
@@ -314,13 +358,26 @@ def income_ideas(ticker: str, expiry: str | None = None) -> dict:
                     "(your real cost is the strike minus the premium).", fill],
             "pcs": ["Needs no shares and far less cash than a cash-secured put: the most you can lose is the width "
                     "minus the credit.",
-                    "Many traders take profit at ~50% of the credit, and close or roll if the stock breaks the short "
-                    "strike. Close before expiry to avoid assignment.", fill + " Enter both legs as one spread order."],
+                    "Take profit at ~50% of the credit. If the stock breaks the short strike, roll down and out for a "
+                    "credit (see Roll / repair below) or close — don't hold into expiry.", fill + " Enter both legs as one spread order."],
             "ic": ["Works best when IV is high and you expect no big move. Avoid holding through earnings — a gap "
                    "can blow through one side.",
                    "Manage at ~50% profit, or close the tested side if price reaches a short strike.",
                    fill + " Enter all four legs as one order."],
         }
+        for k in ("cc", "csp"):
+            tips[k].append("Take profit at ~50% of the premium and re-sell; if the strike is breached, roll out for a "
+                           "credit (see Roll / repair below) rather than paying to escape.")
+
+        ideas = {
+            "covered_calls": _ideas(call_rows, "call", S, d),
+            "cash_secured_puts": _ideas(put_rows, "put", S, d),
+            "put_credit_spreads": _put_credit_spreads(put_rows, put_q, S, T, em_range),
+            "iron_condors": _iron_condors(put_rows, put_q, call_rows, call_q, S, T, em_range),
+        }
+        for key, kind in (("covered_calls", "call"), ("cash_secured_puts", "put"),
+                          ("put_credit_spreads", "put"), ("iron_condors", "ic")):
+            _add_checks(ideas[key], kind, em_range, earnings_before, _dte(exp))
 
         return {
             "ticker": ticker, "spot": round(S, 2), "expiry": exp, "dte": _dte(exp),
@@ -328,10 +385,7 @@ def income_ideas(ticker: str, expiry: str | None = None) -> dict:
             "earnings_date": earnings, "earnings_before_expiry": earnings_before,
             "expected_move": None if not em else {"move": round(em, 2), "low": round(em_range[0], 2),
                                                   "high": round(em_range[1], 2)},
-            "covered_calls": _ideas(call_rows, "call", S, d),
-            "cash_secured_puts": _ideas(put_rows, "put", S, d),
-            "put_credit_spreads": _put_credit_spreads(put_rows, put_q, S, T, em_range),
-            "iron_condors": _iron_condors(put_rows, put_q, call_rows, call_q, S, T, em_range),
+            **ideas,
             "tips": tips,
         }
 
@@ -376,6 +430,9 @@ def _quotes(df) -> dict[float, dict]:
 
 def _pick(rows: list[dict], target: float, used=()) -> dict | None:
     cands = [x for x in rows if x["strike"] not in used]
+    # Liquid strikes first; thin ones only if nothing else trades
+    liquid = [x for x in cands if x["oi"] >= _MIN_OI and (_spread_pct(x["bid"], x["ask"]) or 0) <= _MAX_SPREAD_PCT]
+    cands = liquid or cands
     if not cands:
         return None
     near = [x for x in cands if abs(x["delta"] - target) <= 0.05]
@@ -742,3 +799,169 @@ def directional_ideas(ticker: str, direction: str, budget: float, risk: str) -> 
         }
 
     return get_or_fetch(f"directional:{ticker}:{direction}:{risk}:{int(budget)}", _fetch, ttl=180)
+
+
+# ── Roll / repair a tested short option position ────────────────────────────
+
+_ROLL_RULES = [
+    "Roll when the short strike is breached or its delta passes ~0.50 — ideally with 2–3 weeks left, not on expiry day.",
+    "Only roll for a net credit. Paying to roll just adds risk; if no credit roll exists, close or accept assignment.",
+    "Avoid rolling into an earnings date unless you accept the gap risk.",
+    "Two or three rolls is the limit. If the stock keeps running against you, the thesis is broken — take the loss.",
+]
+
+
+def _roll_candidate(r, wing, K, width, close_mid, credit, kind, e, cur_dte, earnings):
+    sign = 1 if kind == "call" else -1
+    K2 = r["strike"]
+    new_credit = r["mid"] - (wing["mid"] if wing else 0)
+    if new_credit <= 0:
+        return None
+    net = new_credit - close_mid
+    if net < 0:
+        return None
+    oi = min(r["oi"], wing["oi"]) if wing else r["oi"]
+    worst = max(_spread_pct(r["bid"], r["ask"]) or 0,
+                (_spread_pct(wing["bid"], wing["ask"]) or (100 if wing["bid"] <= 0 else 0)) if wing else 0)
+    total = (credit or 0) + net  # premium collected across the original trade and this roll
+    d2 = _dte(e)
+    cand = {
+        "expiry": e, "dte": d2, "added_days": d2 - cur_dte,
+        "short_strike": K2, "long_strike": None if width is None else K2 - width,
+        "strike_change": round(sign * (K2 - K), 2) + 0.0,  # + 0.0 turns -0.0 into 0.0
+        "new_credit": round(new_credit * 100, 2), "net_credit": round(net * 100, 2),
+        "delta": round(r["delta"], 2), "prob_otm_pct": round((1 - r["p_itm"]) * 100),
+        "open_interest": oi, "liquidity": _liquidity(oi, worst),
+        "spans_earnings": bool(earnings and date.today().isoformat() <= earnings <= e),
+    }
+    if credit is not None:
+        if kind == "call":
+            cand["outcome"] = f"If called: sell at ${K2:g} + ${total:.2f} total premium = ${K2 + total:.2f}/share"
+        elif width is None:
+            cand["outcome"] = f"If assigned: buy at ${K2:g} − ${total:.2f} total premium = ${K2 - total:.2f}/share"
+        else:
+            cand["outcome"] = (f"Breakeven ${K2 - total:.2f} · max loss ${max(width - total, 0) * 100:,.0f}"
+                               f" (was ${max(width - credit, 0) * 100:,.0f})")
+    return cand
+
+
+def roll_ideas(ticker: str, strategy: str, expiry: str, short_strike: float,
+               long_strike: float | None = None, credit: float | None = None) -> dict:
+    def _fetch():
+        S = _spot(ticker)
+        exps = [e for e in _expirations(ticker) if _live(e)]
+        if expiry not in exps:
+            raise ValueError("That expiry isn't listed for this ticker, or has already expired.")
+        kind = "call" if strategy == "cc" else "put"
+        sign = 1 if kind == "call" else -1  # direction that moves the short strike away from the stock
+        calls, puts = _chain(ticker, expiry)
+        df = calls if kind == "call" else puts
+        q = _quotes(df)
+        K = float(short_strike)
+        short = q.get(K)
+        if not short:
+            raise ValueError(f"No quote for the ${K:g} {kind} expiring {expiry}.")
+        long = width = None
+        if strategy == "pcs":
+            if long_strike is None or float(long_strike) >= K:
+                raise ValueError("A put credit spread needs a long strike below the short strike.")
+            long = q.get(float(long_strike))
+            if not long:
+                raise ValueError(f"No quote for the ${float(long_strike):g} put expiring {expiry}.")
+            width = K - float(long_strike)
+
+        close_mid = short["mid"] - (long["mid"] if long else 0)
+        close_nat = short["ask"] - (long["bid"] if long else 0)
+        rows = {r["strike"]: r for r in _otm_rows(df, kind, S, _years(expiry), otm_only=False)}
+        delta = rows.get(K, {}).get("delta")
+        cur_dte = _dte(expiry)
+        itm = S > K if kind == "call" else S < K
+        tested = itm or (delta or 0) >= 0.4
+        status = {
+            "itm": itm, "tested": tested, "dte": cur_dte,
+            "cushion_pct": round(sign * (K - S) / S * 100, 1),
+            "delta": None if delta is None else round(delta, 2),
+            "close_cost": round(close_mid * 100, 2), "close_cost_natural": round(max(close_nat, 0) * 100, 2),
+            "pnl": None if credit is None else round((credit - close_mid) * 100, 2),
+        }
+
+        earnings = _earnings_date(ticker)
+        later = [e for e in exps if cur_dte < _dte(e) <= cur_dte + 63 and _dte(e) >= 7][:10]
+
+        def rank(x):  # prefer liquid, then the biggest strike improvement, then the most credit
+            return x["liquidity"] != "thin", x["strike_change"], x["net_credit"]
+
+        rolls = []
+        for e in later:
+            try:
+                c2, p2 = _chain(ticker, e)
+            except Exception:
+                continue
+            df2 = c2 if kind == "call" else p2
+            q2 = _quotes(df2)
+            same = furthest = None
+            for r in _otm_rows(df2, kind, S, _years(e), otm_only=False):
+                gain = sign * (r["strike"] - K)
+                if gain < 0 or gain > S * 0.2:
+                    continue
+                wing = None
+                if width is not None:
+                    wing = q2.get(r["strike"] - width)
+                    if not wing:
+                        continue
+                c = _roll_candidate(r, wing, K, width, close_mid, credit, kind, e, cur_dte, earnings)
+                if not c:
+                    continue
+                if gain == 0:
+                    same = c
+                if not furthest or rank(c) > rank(furthest):
+                    furthest = c
+            for c in (same, furthest):
+                if c and not any(x["expiry"] == c["expiry"] and x["short_strike"] == c["short_strike"] for x in rolls):
+                    c["type"] = "out" if c["strike_change"] == 0 else "improve"
+                    rolls.append(c)
+
+        safe = [r for r in rolls if not r["spans_earnings"] and r["liquidity"] != "thin" and r["added_days"] <= 45]
+        best = tested and max(safe or rolls, key=lambda r: (r["strike_change"], -r["added_days"], r["net_credit"]),
+                              default=None)
+        for r in rolls:
+            r["best"] = r is best
+        rolls.sort(key=lambda r: (not r["best"], r["dte"], -r["strike_change"]))
+
+        alt = []
+        cost = status["close_cost"]
+        if strategy == "cc":
+            alt.append({"title": "Let the shares be called away",
+                        "text": f"You sell at ${K:g}" + (f" plus ${credit:.2f} premium (${K + credit:.2f}/share)" if credit else "")
+                                + " — a fine outcome if you'd be happy selling there."})
+            alt.append({"title": "Buy the call back", "text": f"Costs about ${cost:,.0f} per contract and keeps the shares uncapped."})
+        elif strategy == "csp":
+            alt.append({"title": "Take assignment and run the wheel",
+                        "text": f"Buy 100 shares at ${K:g}" + (f" (net ${K - credit:.2f} after premium)" if credit else "")
+                                + ", then sell covered calls at or above that price to lower your cost further."})
+            alt.append({"title": "Close it", "text": f"Buy the put back for about ${cost:,.0f} per contract."})
+        else:
+            if credit is not None:
+                alt.append({"title": "Close now",
+                            "text": f"Costs about ${cost:,.0f}: a {'loss' if cost > credit * 100 else 'gain'} of "
+                                    f"${abs(cost - credit * 100):,.0f} vs a max loss of ${max(width - credit, 0) * 100:,.0f} at expiry."})
+            else:
+                alt.append({"title": "Close now", "text": f"Costs about ${cost:,.0f} per spread."})
+            if S < float(long_strike):
+                alt.append({"title": "Both strikes are in the money",
+                            "text": "The spread is near max loss, so a credit roll is unlikely. Close it rather than "
+                                    "risk early assignment on the short put."})
+
+        verdict = (None if tested else
+                   "Not in trouble yet — the short strike still has cushion. No need to roll; consider taking profit "
+                   "at ~50% of the credit.")
+        if tested and not rolls:
+            verdict = "No roll pays a net credit within the next ~2 months. Consider closing or accepting assignment."
+        return {
+            "ticker": ticker, "spot": round(S, 2), "strategy": strategy, "expiry": expiry,
+            "short_strike": K, "long_strike": long_strike, "width": width, "earnings_date": earnings,
+            "status": status, "verdict": verdict, "rolls": rolls[:8], "alternatives": alt, "rules": _ROLL_RULES,
+        }
+
+    key = f"roll:{ticker}:{strategy}:{expiry}:{short_strike}:{long_strike}:{credit}"
+    return get_or_fetch(key, _fetch, ttl=120)

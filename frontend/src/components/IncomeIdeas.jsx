@@ -1,6 +1,27 @@
 import { useState, useEffect } from 'react';
 import { fetchIncomeIdeas } from '../api/stockApi';
 import Tip from './Tip';
+import RollRepair from './RollRepair';
+
+const SAFETY = {
+  safer: { text: '🛡 Passes checks', cls: 'safety-ok' },
+  caution: { text: 'Caution', cls: 'safety-warn' },
+  risky: { text: 'Risky', cls: 'safety-bad' },
+};
+
+function Checks({ i }) {
+  if (!i.checks) return null;
+  return (
+    <ul className="idea-checks">
+      {i.checks.map((c, k) => <li key={k} className={c.ok ? 'positive' : 'rvol-warm'}>{c.ok ? '✓' : '⚠'} {c.text}</li>)}
+    </ul>
+  );
+}
+
+function SafetyBadge({ i }) {
+  const s = SAFETY[i.safety];
+  return s ? <span className={`safety-badge ${s.cls}`}>{s.text}</span> : null;
+}
 
 const LIQ = {
   good: { text: 'Liquid', cls: 'positive' },
@@ -42,16 +63,16 @@ const MODES = {
   },
 };
 
-function SpreadCard({ i, mode, expiry, contracts, em }) {
+function SpreadCard({ i, mode, expiry, contracts }) {
   const n = Math.max(contracts, 0);
   const legs = mode === 'ic'
     ? [['BUY', i.put_long, 'put'], ['SELL', i.put_short, 'put'], ['SELL', i.call_short, 'call'], ['BUY', i.call_long, 'call']]
     : [['SELL', i.short_strike, 'put'], ['BUY', i.long_strike, 'put']];
   const liq = LIQ[i.liquidity];
   return (
-    <div className="structure-card">
+    <div className={`structure-card safety-${i.safety}`}>
       <div className="structure-title">
-        {i.label} <span className="income-delta">Δ {i.delta.toFixed(2)}</span> <Tip term="delta" />
+        {i.label} <span className="income-delta">Δ {i.delta.toFixed(2)}</span> <Tip term="delta" /> <SafetyBadge i={i} />
       </div>
       <div className="structure-legs">
         {legs.map(([action, strike, kind]) => (
@@ -70,13 +91,7 @@ function SpreadCard({ i, mode, expiry, contracts, em }) {
           ? <div><span>Profit zone at expiry</span><strong>${i.breakeven_low} – ${i.breakeven_high}</strong></div>
           : <div><span>Breakeven</span><strong>${i.breakeven} <small>(−{i.breakeven_pct}%)</small></strong></div>}
       </div>
-      {em && i.outside_expected_move != null && (
-        <p className={`structure-notes ${i.outside_expected_move ? 'positive' : ''}`}>
-          {i.outside_expected_move
-            ? `✓ Short strike${mode === 'ic' ? 's' : ''} outside the ±$${em.move} expected move`
-            : `Short strike${mode === 'ic' ? 's are' : ' is'} inside the ±$${em.move} expected move — more likely to be tested`}
-        </p>
-      )}
+      <Checks i={i} />
       <p className="structure-notes">
         Limit ~${i.credit} net credit (natural ${i.natural_credit} <Tip term="natural_credit" />) · ${i.width} wide · OI {i.open_interest.toLocaleString()} ·{' '}
         <span className={liq.cls}>{liq.text}</span>
@@ -201,16 +216,16 @@ export default function IncomeIdeas({ ticker }) {
           {ideas.map(i => {
             if (spread) {
               const n = risk ? Math.floor(Number(risk) / i.max_loss) : 1;
-              return <SpreadCard key={i.label} i={i} mode={mode} expiry={data.expiry} contracts={n} em={data.expected_move} />;
+              return <SpreadCard key={i.label} i={i} mode={mode} expiry={data.expiry} contracts={n} />;
             }
             const contracts = mode === 'cc'
               ? Math.floor(shares / 100)
               : (cash ? Math.floor(Number(cash) / i.capital_required) : 1);
             const liq = LIQ[i.liquidity];
             return (
-              <div key={i.strike} className="structure-card">
+              <div key={i.strike} className={`structure-card safety-${i.safety}`}>
                 <div className="structure-title">
-                  {i.label} <span className="income-delta">Δ {Math.abs(i.delta).toFixed(2)}</span>
+                  {i.label} <span className="income-delta">Δ {Math.abs(i.delta).toFixed(2)}</span> <SafetyBadge i={i} />
                 </div>
                 <div className="structure-legs">
                   <div className="structure-leg leg-sell">
@@ -234,6 +249,7 @@ export default function IncomeIdeas({ ticker }) {
                     </>
                   )}
                 </div>
+                <Checks i={i} />
                 <p className="structure-notes">
                   Limit ~${i.mid} (bid ${i.bid} / ask ${i.ask}) · OI {i.open_interest.toLocaleString()} ·{' '}
                   <span className={liq.cls}>{liq.text}</span>
@@ -260,6 +276,7 @@ export default function IncomeIdeas({ ticker }) {
           {(data.tips?.[mode] || []).map((t, k) => <li key={k}>{t}</li>)}
         </ul>
       )}
+      {data && <RollRepair ticker={ticker} mode={mode} expirations={data.expirations} />}
       <p className="ivrank-note">Probabilities are model estimates from option prices, not guarantees. Educational only — not financial advice.</p>
     </div>
   );

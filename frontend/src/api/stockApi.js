@@ -324,6 +324,15 @@ export async function fetchIncomeIdeas(ticker, expiry) {
   return res.json();
 }
 
+export async function fetchRollIdeas(ticker, { strategy, expiry, shortStrike, longStrike, credit }) {
+  const params = new URLSearchParams({ strategy, expiry, short_strike: String(shortStrike) });
+  if (strategy === 'pcs' && longStrike) params.set('long_strike', String(longStrike));
+  if (credit !== '' && credit != null) params.set('credit', String(credit));
+  const res = await fetch(`${BASE}/stock/${ticker}/roll?${params}`);
+  if (!res.ok) throw new Error(await readError(res, 'Failed to find rolls'));
+  return res.json();
+}
+
 async function getJson(url, fallback, auth = false) {
   const res = auth ? await authFetch(url) : await netFetch(url);
   if (!res.ok) throw new Error(await readError(res, fallback));

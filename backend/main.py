@@ -1425,6 +1425,26 @@ def stock_income(request: Request, ticker: str,
         raise _upstream_error(e)
 
 
+@app.get("/api/stock/{ticker}/roll")
+@limiter.limit("20/minute")
+def stock_roll(request: Request, ticker: str,
+               strategy: str = Query(..., pattern="^(cc|csp|pcs)$"),
+               expiry: str = Query(..., pattern=r"^\d{4}-\d{2}-\d{2}$"),
+               short_strike: float = Query(..., gt=0, le=100000),
+               long_strike: Optional[float] = Query(None, gt=0, le=100000),
+               credit: Optional[float] = Query(None, ge=0, le=100000)):
+    """Credit rolls (out / out-and-away) and alternatives for a tested covered call, CSP or put credit spread."""
+    ticker = _valid_ticker(ticker)
+    try:
+        return options_analytics.roll_ideas(ticker, strategy, expiry, short_strike, long_strike, credit)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="No listed options for this ticker")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise _upstream_error(e)
+
+
 @app.get("/api/stock/{ticker}/structures")
 @limiter.limit("30/minute")
 def stock_structures(
