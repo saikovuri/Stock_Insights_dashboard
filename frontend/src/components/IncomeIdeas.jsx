@@ -151,7 +151,7 @@ export default function IncomeIdeas({ ticker }) {
               onChange={e => setExpiry(e.target.value)}>
               {data.expirations.map(e => (
                 <option key={e.date} value={e.date}>
-                  {fmtDate(e.date)} ({e.dte === 0 ? '0DTE — today' : `${e.dte}d`}){spansEr(e.date) ? ' · ⚠️ earnings' : ''}
+                  {fmtDate(e.date)} ({e.dte === 0 ? '0DTE — today' : `${e.dte}d`}){e.monthly ? ' · monthly' : ''}{spansEr(e.date) ? ' · ⚠️ earnings' : ''}
                 </option>
               ))}
             </select>

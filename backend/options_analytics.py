@@ -292,7 +292,7 @@ def _default_income_expiry(ticker: str, exps: list[str], earnings: str | None, S
     so the default never holds through a report."""
     if earnings:
         pre = [e for e in exps if e < earnings]
-        for lo in (20, 10):
+        for lo in (20, 10):  # shorter than ~20 days only when nothing else ends before the report
             pick, _ = _liquid_expiry(ticker, pre, 35, lo, 50, S)
             if pick:
                 return pick
@@ -382,7 +382,7 @@ def income_ideas(ticker: str, expiry: str | None = None) -> dict:
 
         return {
             "ticker": ticker, "spot": round(S, 2), "expiry": exp, "dte": _dte(exp),
-            "expirations": [{"date": e, "dte": _dte(e)} for e in choices],
+            "expirations": [{"date": e, "dte": _dte(e), "monthly": _is_monthly(e)} for e in choices],
             "earnings_date": earnings, "earnings_before_expiry": earnings_before,
             "expected_move": None if not em else {"move": round(em, 2), "low": round(em_range[0], 2),
                                                   "high": round(em_range[1], 2)},
@@ -437,8 +437,9 @@ def _pick(rows: list[dict], target: float, used=()) -> dict | None:
     if not cands:
         return None
     near = [x for x in cands if abs(x["delta"] - target) <= 0.05]
-    # Among similar deltas, favour the most liquid strike
-    pick = max(near, key=lambda x: x["oi"]) if near else min(cands, key=lambda x: abs(x["delta"] - target))
+    # Among similar deltas, favour high open interest and a tight bid/ask
+    pick = (max(near, key=lambda x: _strike_score(x, target, 0.05)) if near
+            else min(cands, key=lambda x: abs(x["delta"] - target)))
     return pick if abs(pick["delta"] - target) <= 0.12 else None
 
 
@@ -456,14 +457,17 @@ def _prob_above(S: float, X: float, T: float, iv: float) -> float:
 
 
 def _vertical(short: dict, quotes: dict, kind: str, S: float) -> dict | None:
-    """Sell `short`, buy the listed strike closest to a standard width further OTM."""
+    """Sell `short`, buy a protective wing about a standard width further OTM, favouring wings with open interest."""
     K = short["strike"]
     w = _spread_width(S)
     goal = K - w if kind == "put" else K + w
-    wings = [k for k in quotes if (k < K if kind == "put" else k > K)]
+    wings = [k for k in quotes if (k < K if kind == "put" else k > K) and 0.5 * w <= abs(k - K) <= 2 * w]
+    if not wings:
+        wings = [k for k in quotes if (k < K if kind == "put" else k > K)]
     if not wings:
         return None
-    L = min(wings, key=lambda k: abs(k - goal))
+    liquid = [k for k in wings if quotes[k]["oi"] >= _MIN_OI]
+    L = max(liquid or wings, key=lambda k: 0.3 * _oi_score(quotes[k]["oi"]) - abs(k - goal) / w)
     long = quotes[L]
     width, credit = abs(K - L), short["mid"] - long["mid"]
     if credit <= 0 or credit >= width:
