@@ -20,6 +20,7 @@ log = logging.getLogger(__name__)
 
 RISK_FREE = 0.04
 MIN_IV_HISTORY = 20
+_ET = ZoneInfo("America/New_York")
 
 
 # ── Black-Scholes helpers ────────────────────────────────────────────────
@@ -108,17 +109,32 @@ def _chain(ticker: str, expiry: str):
 
 
 def _dte(expiry: str) -> int:
-    return (datetime.strptime(expiry, "%Y-%m-%d").date() - date.today()).days
+    return (datetime.strptime(expiry, "%Y-%m-%d").date() - datetime.now(_ET).date()).days
+
+
+def _close_at(expiry: str) -> datetime:
+    return datetime.strptime(expiry, "%Y-%m-%d").replace(hour=16, tzinfo=_ET)
+
+
+def _live(expiry: str) -> bool:
+    """False once the expiry's 4pm ET close has passed (0DTE chains are dead after the bell)."""
+    return datetime.now(_ET) < _close_at(expiry)
+
+
+def _years(expiry: str) -> float:
+    """Time to the expiry-day close in years; intraday-accurate so 0DTE pricing isn't overstated."""
+    secs = (_close_at(expiry) - datetime.now(_ET)).total_seconds()
+    return max(secs, 3600) / (365 * 86400)
 
 
 def _pick_expiry(expirations: list[str], target: int, lo: int, hi: int) -> str | None:
-    cands = [(abs(_dte(e) - target), e) for e in expirations if lo <= _dte(e) <= hi]
+    cands = [(abs(_dte(e) - target), e) for e in expirations if lo <= _dte(e) <= hi and _live(e)]
     return min(cands)[1] if cands else None
 
 
 def _atm_iv(ticker: str, expiry: str, S: float) -> float | None:
     calls, puts = _chain(ticker, expiry)
-    T = max(_dte(expiry), 1) / 365
+    T = _years(expiry)
     ivs = []
     for df, kind in ((calls, "call"), (puts, "put")):
         if df is None or df.empty:
@@ -272,12 +288,12 @@ def income_ideas(ticker: str, expiry: str | None = None) -> dict:
     def _fetch():
         S = _spot(ticker)
         exps = _expirations(ticker)
-        choices = [e for e in exps if 5 <= _dte(e) <= 75]
-        exp = expiry if expiry in exps else _pick_expiry(exps, 35, 20, 50) or (choices[0] if choices else None)
+        choices = [e for e in exps if _dte(e) <= 75 and _live(e)]
+        exp = expiry if expiry in choices else _pick_expiry(exps, 35, 20, 50) or (choices[0] if choices else None)
         if not exp:
             raise LookupError("No suitable expirations")
         d = max(_dte(exp), 1)
-        T = d / 365
+        T = _years(exp)
         calls, puts = _chain(ticker, exp)
 
         earnings = _earnings_date(ticker)
@@ -307,7 +323,7 @@ def income_ideas(ticker: str, expiry: str | None = None) -> dict:
         }
 
         return {
-            "ticker": ticker, "spot": round(S, 2), "expiry": exp, "dte": d,
+            "ticker": ticker, "spot": round(S, 2), "expiry": exp, "dte": _dte(exp),
             "expirations": [{"date": e, "dte": _dte(e)} for e in choices],
             "earnings_date": earnings, "earnings_before_expiry": earnings_before,
             "expected_move": None if not em else {"move": round(em, 2), "low": round(em_range[0], 2),
@@ -514,6 +530,7 @@ def _ideas(rows: list[dict], kind: str, S: float, dte: int) -> list[dict]:
 
 _RISK_PLANS = {
     # (min DTE, max DTE, target DTE), target delta of the bought option
+    "extreme": {"label": "0DTE / this week", "dte": (0, 6, 0), "delta": 0.45},
     "high": {"label": "Near-dated (1–3 weeks)", "dte": (7, 21, 14), "delta": 0.40},
     "moderate": {"label": "30–45 days out", "dte": (28, 50, 38), "delta": 0.50},
     "low": {"label": "LEAPS (6+ months)", "dte": (180, 900, 365), "delta": 0.75},
@@ -626,9 +643,11 @@ def _pick_best(ideas: dict, direction: str, risk: str, budget: float, S: float, 
     if shares and direction == "bull" and budget >= 100 * S:
         return "shares", (f"Your budget buys {shares['qty']} shares — at least the 100 shares one option contract "
                           "controls — so owning the stock gives the same exposure with no expiry and no time decay.")
-    if risk == "high":
+    if risk in ("high", "extreme"):
         if long and not long["stretched"] and not (iv_high and spread):
-            return "long", ("Most leverage for a quick move. Near-dated options lose value fast, so this can expire "
+            return "long", ("Expires within days: the cheapest, most leveraged bet — it can double or go to zero "
+                            "within hours, so size it as money you can lose." if risk == "extreme" else
+                            "Most leverage for a quick move. Near-dated options lose value fast, so this can expire "
                             "worthless if the move doesn't come within days.")
         if spread:
             return "spread", ("Options are expensive right now; selling the higher strike pays for part of the premium."
@@ -663,11 +682,11 @@ def directional_ideas(ticker: str, direction: str, budget: float, risk: str) -> 
         if not exp and risk == "low":
             longest = max(exps, key=_dte)
             exp = longest if _dte(longest) >= 120 else None
-        exp = exp or _pick_expiry(exps, target_dte, 3, 1000)
+        exp = exp or _pick_expiry(exps, target_dte, 0, 1000)
         if not exp:
             raise LookupError("No suitable expirations")
-        d = max(_dte(exp), 1)
-        T = d / 365
+        d = _dte(exp)
+        T = _years(exp)
         kind = "call" if direction == "bull" else "put"
         calls, puts = _chain(ticker, exp)
         rows = [r for r in _otm_rows(calls if kind == "call" else puts, kind, S, T, otm_only=False) if r["ask"] > 0]

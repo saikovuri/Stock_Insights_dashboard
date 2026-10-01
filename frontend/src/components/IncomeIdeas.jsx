@@ -136,7 +136,7 @@ export default function IncomeIdeas({ ticker }) {
               onChange={e => setExpiry(e.target.value)}>
               {data.expirations.map(e => (
                 <option key={e.date} value={e.date}>
-                  {fmtDate(e.date)} ({e.dte}d){spansEr(e.date) ? ' · ⚠️ earnings' : ''}
+                  {fmtDate(e.date)} ({e.dte === 0 ? '0DTE — today' : `${e.dte}d`}){spansEr(e.date) ? ' · ⚠️ earnings' : ''}
                 </option>
               ))}
             </select>
@@ -168,6 +168,13 @@ export default function IncomeIdeas({ ticker }) {
         </div>
       )}
 
+      {data && data.dte <= 6 && (
+        <div className="income-warning">
+          <strong>⚡ {data.dte === 0 ? 'Expires today (0DTE)' : `Expires in ${data.dte} day${data.dte === 1 ? '' : 's'}`}</strong>
+          <div>Time decay is fastest now, but so is gamma risk: a normal intraday swing can push the stock through
+            your short strike in minutes and turn a small credit into a full loss. Use small size and have an exit plan.</div>
+        </div>
+      )}
       {data && spansEr(data.expiry) && (
         <div className="income-warning income-er">
           <strong>

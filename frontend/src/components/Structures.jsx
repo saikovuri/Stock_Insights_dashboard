@@ -3,6 +3,7 @@ import { fetchStructures } from '../api/stockApi';
 import Tip from './Tip';
 
 const RISKS = {
+  extreme: { label: '⚡ Extreme', sub: '0–6 days', hint: '0DTE / this-week options: lottery-ticket odds, can go to zero in hours.' },
   high: { label: '🔥 High', sub: '1–3 weeks', hint: 'Near-dated options: most leverage, can go to zero fast.' },
   moderate: { label: '⚖️ Moderate', sub: '30–45 days', hint: 'Enough time for the idea to work, still leveraged.' },
   low: { label: '🛡 Low', sub: 'LEAPS / shares', hint: 'Long-dated in-the-money options or shares — slow time decay.' },
@@ -128,7 +129,7 @@ export default function Structures({ ticker }) {
 
       {data && (
         <div className="structures-meta">
-          Spot ${data.spot} · {data.timeframe}: expiry {fmtDate(data.expiry)} ({data.dte}d)
+          Spot ${data.spot} · {data.timeframe}: expiry {fmtDate(data.expiry)} ({data.dte === 0 ? '0DTE — today' : `${data.dte}d`})
           {em && <> · expected move ±{em.pct}% (${em.low}–${em.high}) <Tip term="expected_move" /></>}
           {data.iv_level && <> · options {data.iv_level === 'high' ? 'expensive' : data.iv_level === 'low' ? 'cheap' : 'fairly priced'}</>}
         </div>
@@ -146,7 +147,7 @@ export default function Structures({ ticker }) {
         <p className="empty-state">
           Nothing fits a ${budget.toLocaleString()} budget for {ticker}
           {data.min_budget_needed ? ` — the cheapest idea needs about $${Math.ceil(data.min_budget_needed).toLocaleString()}` : ''}.
-          {risk !== 'high' && ' A higher-risk (shorter-dated) choice is cheaper.'}
+          {!['high', 'extreme'].includes(risk) && ' A higher-risk (shorter-dated) choice is cheaper.'}
         </p>
       )}
 

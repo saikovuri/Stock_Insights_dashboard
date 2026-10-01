@@ -1432,7 +1432,7 @@ def stock_structures(
     ticker: str,
     direction: str = Query("bull", pattern="^(bull|bear)$"),
     budget: float = Query(500.0, ge=50.0, le=1000000.0),
-    risk: str = Query("moderate", pattern="^(high|moderate|low)$"),
+    risk: str = Query("moderate", pattern="^(extreme|high|moderate|low)$"),
 ):
     """Shares vs long option vs debit spread, sized to the budget, with the expiry set by risk appetite."""
     ticker = _valid_ticker(ticker)
