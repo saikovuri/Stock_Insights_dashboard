@@ -40,18 +40,18 @@ function RollCard({ r, strat, data }) {
   );
 }
 
-export default function RollRepair({ ticker, mode, expirations }) {
-  const [strategy, setStrategy] = useState(STRATS[mode] ? mode : 'pcs');
-  const [expiry, setExpiry] = useState('');
-  const [shortStrike, setShortStrike] = useState('');
+export default function RollRepair({ ticker, mode, expirations, initial, standalone = false }) {
+  const [strategy, setStrategy] = useState(initial?.strategy || (STRATS[mode] ? mode : 'pcs'));
+  const [expiry, setExpiry] = useState(initial?.expiry || '');
+  const [shortStrike, setShortStrike] = useState(initial?.shortStrike ?? '');
   const [longStrike, setLongStrike] = useState('');
-  const [credit, setCredit] = useState('');
+  const [credit, setCredit] = useState(initial?.credit ?? '');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   useEffect(() => { if (STRATS[mode]) setStrategy(mode); }, [mode]);
-  useEffect(() => { setData(null); setError(null); }, [ticker]);
+  useEffect(() => { if (!initial) { setData(null); setError(null); } }, [ticker, initial]);
 
   const ready = expiry && Number(shortStrike) > 0 && (strategy !== 'pcs' || Number(longStrike) > 0);
   const run = async () => {
@@ -64,12 +64,17 @@ export default function RollRepair({ ticker, mode, expirations }) {
       setLoading(false);
     }
   };
+  // Prefilled from a portfolio position: check it straight away
+  useEffect(() => { if (initial) run(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const expiryOptions = expirations?.length ? expirations
+    : expiry ? [{ date: expiry, dte: Math.max(0, Math.round((new Date(expiry + 'T16:00:00') - new Date()) / 86400000)) }] : [];
   const st = data?.status;
   const kind = STRATS[strategy].kind;
+  const Wrap = standalone ? 'div' : 'details';
   return (
-    <details className="setup-guide roll-repair">
-      <summary>🔧 Position being tested? Roll / repair it</summary>
+    <Wrap className={standalone ? 'roll-repair-standalone' : 'setup-guide roll-repair'}>
+      {!standalone && <summary>🔧 Position being tested? Roll / repair it</summary>}
       <p className="structures-intro">
         Enter a short option you already hold. We find rolls to a later expiry that pay a <b>net credit</b> — ideally
         moving the strike away from the stock — plus the alternatives if no good roll exists.
@@ -83,7 +88,7 @@ export default function RollRepair({ ticker, mode, expirations }) {
         <label>Expiry
           <select className="candle-select" value={expiry} onChange={e => setExpiry(e.target.value)}>
             <option value="">Select…</option>
-            {(expirations || []).map(e => <option key={e.date} value={e.date}>{fmtDate(e.date)} ({e.dte}d)</option>)}
+            {expiryOptions.map(e => <option key={e.date} value={e.date}>{fmtDate(e.date)} ({e.dte}d)</option>)}
           </select>
         </label>
         <label>Short {kind} strike
@@ -142,6 +147,7 @@ export default function RollRepair({ ticker, mode, expirations }) {
           <ul className="ivrank-help">{data.rules.map(r => <li key={r}>{r}</li>)}</ul>
         </>
       )}
-    </details>
+      {loading && standalone && <p className="loading-text">Checking rolls…</p>}
+    </Wrap>
   );
 }

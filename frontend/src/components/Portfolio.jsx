@@ -11,6 +11,7 @@ import PortfolioChart from './PortfolioChart';
 import SectorAllocation from './SectorAllocation';
 import PortfolioDoctor from './PortfolioDoctor';
 import PortfolioInsights from './PortfolioInsights';
+import RollRepair from './RollRepair';
 
 const GUEST_HOLDINGS_KEY = 'guest_holdings';
 
@@ -43,6 +44,7 @@ export default function Portfolio() {
   const [confirmDelete, setConfirmDelete] = useState(null); // { type: 'stock'|'option', id }
   const [sellLotId, setSellLotId] = useState(null);    // lot id being sold
   const [expanded, setExpanded] = useState({});         // { ticker: true/false } for collapsibles
+  const [repairOpt, setRepairOpt] = useState(null);     // short option position open in Roll / repair
 
   // ── Guest: build portfolio summary from localStorage + live prices ──
 
@@ -720,6 +722,10 @@ export default function Portfolio() {
                         ${o.pnl.toFixed(2)} ({o.pnl_pct.toFixed(1)}%)
                       </td>
                       <td className="action-cell">
+                        {side === 'short' && o.dte >= 0 && (
+                          <button className="btn-icon" title="Roll / repair this short option"
+                            onClick={() => setRepairOpt(repairOpt?.id === o.id ? null : o)}>🔧</button>
+                        )}
                         <button className="btn-icon" title="Edit option" onClick={() => startEditOption(o)}>✏️</button>
                         {confirmDelete?.type === 'option' && confirmDelete?.id === o.id ? (
                           <>
@@ -735,6 +741,20 @@ export default function Portfolio() {
                   })}
                 </tbody>
               </table>
+              {repairOpt && (
+                <div className="card roll-panel">
+                  <div className="ivrank-header">
+                    <h3 style={{ margin: 0 }}>
+                      🔧 Roll / repair: {repairOpt.ticker} short ${repairOpt.strike} {repairOpt.type} · {repairOpt.expiry}
+                    </h3>
+                    <button className="btn-icon" title="Close" onClick={() => setRepairOpt(null)}>✕</button>
+                  </div>
+                  <RollRepair key={repairOpt.id} ticker={repairOpt.ticker} standalone initial={{
+                    strategy: repairOpt.type === 'call' ? 'cc' : 'csp',
+                    expiry: repairOpt.expiry, shortStrike: repairOpt.strike, credit: repairOpt.premium,
+                  }} />
+                </div>
+              )}
             </>
           ) : (
             <p className="empty-state">No options positions yet. Use the form above to add calls or puts.</p>

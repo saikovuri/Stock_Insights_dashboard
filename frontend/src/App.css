@@ -4270,6 +4270,7 @@ tr.alert-triggered {
 .idea-checks { list-style: none; padding: 0; margin: 0 0 0.5rem; font-size: 0.76rem; display: flex; flex-direction: column; gap: 0.15rem; }
 
 .roll-repair { margin-top: 1rem; border-top: 1px solid var(--border); padding-top: 0.75rem; }
+.roll-panel { margin-top: 1rem; }
 .roll-list { display: flex; flex-direction: column; gap: 0.5rem; margin: 0.6rem 0; }
 .roll-card { border: 1px solid var(--border); border-radius: 8px; padding: 0.55rem 0.7rem; background: var(--bg-subtle); }
 .roll-card.structure-best { border-color: var(--accent); }
