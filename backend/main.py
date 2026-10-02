@@ -1712,6 +1712,19 @@ def ideas_wheel(request: Request):
     return wheel.get_wheel()
 
 
+@app.post("/api/ideas/wheel/ask/{ticker}")
+@limiter.limit("6/minute")
+def ideas_wheel_ask(request: Request, ticker: str, user: dict = Depends(get_current_user)):
+    """Wheel suitability checks and put-strike ladder for any ticker, plus an AI verdict."""
+    ticker = _valid_ticker(ticker)
+    try:
+        return wheel.ask(ticker)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise _upstream_error(e)
+
+
 # ── Macro, short interest, smart money ───────────────────────────────────────
 
 @app.get("/api/market/calendar")

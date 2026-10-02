@@ -353,6 +353,8 @@ async function sendJson(url, method, body, fallback) {
 }
 
 // ── Profile & custom alerts ──────────────────────────────────────
+export const askWheel = (ticker) =>
+  sendJson(`${BASE}/ideas/wheel/ask/${encodeURIComponent(ticker)}`, 'POST', null, 'Could not analyze that ticker');
 export const fetchProfile = () => getJson(`${BASE}/profile`, 'Failed to load profile', true);
 export const saveProfile = (profile) => sendJson(`${BASE}/profile`, 'PUT', { profile }, 'Failed to save profile');
 export const fetchCustomAlerts = (ticker) =>

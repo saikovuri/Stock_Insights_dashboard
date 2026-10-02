@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { fetchWheelIdeas } from '../api/stockApi';
 import Tip from './Tip';
 import WheelManager from './WheelManager';
+import WheelAsk from './WheelAsk';
 
 const LIQ = { good: ['Liquid', 'positive'], ok: ['OK liquidity', ''], thin: ['Thin', 'negative'] };
 const money = v => `$${Math.round(v).toLocaleString()}`;
@@ -123,6 +124,7 @@ export default function WheelIdeas({ onSelect }) {
       </ul>
       <p className="ivrank-note">Quotes refresh every few hours during market hours. Probabilities are model estimates, not guarantees. Not financial advice.</p>
     </div>
+    <WheelAsk onManage={manage} onSelect={onSelect} />
     <WheelManager preset={preset} />
     </>
   );
