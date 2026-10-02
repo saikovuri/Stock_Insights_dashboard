@@ -35,6 +35,7 @@ import portfolio_insights
 import thesis
 import intraday
 import backtester
+import wheel
 from providers import finnhub_enabled, finnhub_quote, finnhub_peers, finnhub_recommendations, \
     finnhub_basic_financials, finnhub_earnings_calendar, finnhub_insider_transactions, finnhub_profile, \
     finra_short_interest
@@ -1687,6 +1688,13 @@ def ideas_unusual_options(request: Request):
         return options_flow.unusual_scan()
     except Exception as e:
         raise _upstream_error(e)
+
+
+@app.get("/api/ideas/wheel")
+@limiter.limit("20/minute")
+def ideas_wheel(request: Request):
+    """Quality stocks ranked by the risk-adjusted premium of a conservative cash-secured put."""
+    return wheel.get_wheel()
 
 
 # ── Macro, short interest, smart money ───────────────────────────────────────

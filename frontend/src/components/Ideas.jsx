@@ -3,13 +3,14 @@ import SetupScanner from './SetupScanner';
 import EconomicCalendar from './EconomicCalendar';
 import InPlay from './InPlay';
 import StrategyTester from './StrategyTester';
+import WheelIdeas from './WheelIdeas';
 import { useProfile } from '../ProfileContext';
 import { FlowTable } from './OptionsFlow';
 import { fetchUnusualOptions, fetchInsiderBuying, fetchSuperinvestors } from '../api/stockApi';
 
 const money = v => v >= 1e9 ? `$${(v / 1e9).toFixed(1)}B` : v >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : `$${(v / 1e3).toFixed(0)}K`;
 const TABS = [
-  ['inplay', '⚡ In play'], ['setups', '🎯 Setups'], ['flow', '🌊 Unusual options'], ['insiders', '🕴️ Insider buying'],
+  ['inplay', '⚡ In play'], ['setups', '🎯 Setups'], ['wheel', '🎡 Wheel'], ['flow', '🌊 Unusual options'], ['insiders', '🕴️ Insider buying'],
   ['super', '🧠 Superinvestors'], ['macro', '📅 Macro calendar'], ['tester', '🧪 Strategy tester'],
 ];
 const ACTION = { new: ['🆕 New', 'positive'], added: ['➕ Added', 'positive'], reduced: ['➖ Reduced', 'negative'], sold: ['❌ Sold', 'negative'] };
@@ -205,6 +206,7 @@ export default function Ideas({ onSelect }) {
       </nav>
       {tab === 'inplay' && <InPlay onSelect={onSelect} />}
       {tab === 'setups' && <SetupScanner onSelect={onSelect} />}
+      {tab === 'wheel' && <WheelIdeas onSelect={onSelect} />}
       {tab === 'flow' && <UnusualOptions onSelect={onSelect} />}
       {tab === 'insiders' && <InsiderBuying onSelect={onSelect} />}
       {tab === 'super' && <Superinvestors onSelect={onSelect} />}

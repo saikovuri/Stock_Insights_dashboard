@@ -357,6 +357,7 @@ def _loop() -> None:
     last_weekly_day = None
     last_thesis_day = None
     last_custom = datetime.min.replace(tzinfo=ET)
+    last_wheel = datetime.min.replace(tzinfo=ET)
     while True:
         try:
             now = datetime.now(ET)
@@ -364,6 +365,11 @@ def _loop() -> None:
                 last_scan_day = now.date()
                 import scanner
                 scanner.run_scan()
+            # Wheel candidates need live option quotes, so refresh during the session only
+            if _market_open(now) and now.hour >= 10 and now - last_wheel >= timedelta(hours=3):
+                last_wheel = now
+                import wheel
+                wheel._safe_run()
             if _market_open(now) and now - last_custom >= timedelta(minutes=2):
                 last_custom = now
                 n = check_custom_alerts()
