@@ -12,6 +12,7 @@ import SectorAllocation from './SectorAllocation';
 import PortfolioDoctor from './PortfolioDoctor';
 import PortfolioInsights from './PortfolioInsights';
 import RollRepair from './RollRepair';
+import OptionsDesk from './OptionsDesk';
 
 const GUEST_HOLDINGS_KEY = 'guest_holdings';
 
@@ -326,6 +327,19 @@ export default function Portfolio() {
           tickers={[...new Set((portfolio?.holdings || []).map(h => h.ticker))]}
           version={(portfolio?.holdings || []).map(h => `${h.id}:${h.shares}`).join(',') + `|${closedStocks?.trades?.length || 0}`}
           onImported={loadStocks}
+        />
+      )}
+      {!isGuest && (optionsSummary?.options?.length > 0 || portfolio?.holdings?.length > 0) && (
+        <OptionsDesk
+          options={optionsSummary?.options || []}
+          holdings={portfolio?.holdings || []}
+          closedCount={closedOpts?.trades?.length || 0}
+          onRepair={(id) => {
+            const o = optionsSummary?.options?.find(x => x.id === id);
+            if (!o) return;
+            setTab('options'); setView('current'); setRepairOpt(o);
+            setTimeout(() => document.getElementById('roll-panel')?.scrollIntoView({ behavior: 'smooth' }), 100);
+          }}
         />
       )}
 
@@ -742,7 +756,7 @@ export default function Portfolio() {
                 </tbody>
               </table>
               {repairOpt && (
-                <div className="card roll-panel">
+                <div className="card roll-panel" id="roll-panel">
                   <div className="ivrank-header">
                     <h3 style={{ margin: 0 }}>
                       🔧 Roll / repair: {repairOpt.ticker} short ${repairOpt.strike} {repairOpt.type} · {repairOpt.expiry}

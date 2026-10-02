@@ -36,6 +36,8 @@ import thesis
 import intraday
 import backtester
 import wheel
+import options_desk
+import track_record
 from providers import finnhub_enabled, finnhub_quote, finnhub_peers, finnhub_recommendations, \
     finnhub_basic_financials, finnhub_insider_transactions, finnhub_profile, \
     finra_short_interest
@@ -1443,6 +1445,85 @@ def stock_roll(request: Request, ticker: str,
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise _upstream_error(e)
+
+
+@app.get("/api/stock/{ticker}/earnings-moves")
+@limiter.limit("30/minute")
+def stock_earnings_moves(request: Request, ticker: str):
+    """Actual moves on past reports vs the move options price for the next one."""
+    ticker = _valid_ticker(ticker)
+    try:
+        return options_analytics.earnings_moves(ticker)
+    except Exception as e:
+        raise _upstream_error(e)
+
+
+# ── Options desk: position actions, earnings exposure, wheel ledger, reviews ──
+
+def _options_version(uid: int) -> str:
+    return ",".join(f"{o['id']}:{o['contracts']}" for o in get_user_options(uid))
+
+
+@app.get("/api/portfolio/options/actions")
+@limiter.limit("20/minute")
+def portfolio_option_actions(request: Request, user: dict = Depends(get_current_user)):
+    uid = int(user["user_id"])
+    try:
+        return get_or_fetch(f"opt-actions:{uid}:{_options_version(uid)}", lambda: options_desk.position_actions(uid), ttl=120)
+    except Exception as e:
+        raise _upstream_error(e)
+
+
+@app.get("/api/portfolio/earnings")
+@limiter.limit("20/minute")
+def portfolio_earnings(request: Request, user: dict = Depends(get_current_user)):
+    uid = int(user["user_id"])
+    key = f"pearn:{uid}:{len(get_user_holdings(uid))}:{_options_version(uid)}"
+    try:
+        return get_or_fetch(key, lambda: options_desk.earnings_exposure(uid), ttl=1800)
+    except Exception as e:
+        raise _upstream_error(e)
+
+
+@app.get("/api/portfolio/wheel-ledger")
+@limiter.limit("20/minute")
+def portfolio_wheel_ledger(request: Request, user: dict = Depends(get_current_user)):
+    try:
+        return options_desk.wheel_ledger(int(user["user_id"]))
+    except Exception as e:
+        raise _upstream_error(e)
+
+
+@app.get("/api/portfolio/options/review")
+@limiter.limit("20/minute")
+def portfolio_options_review(request: Request, user: dict = Depends(get_current_user)):
+    return options_desk.options_review(int(user["user_id"]))
+
+
+@app.get("/api/portfolio/options/coach")
+@limiter.limit("6/minute")
+def portfolio_options_coach(request: Request, user: dict = Depends(get_current_user)):
+    uid = int(user["user_id"])
+    closed = get_closed_options(uid)
+    key = f"opt-coach:{uid}:{len(closed)}:{max((c['id'] for c in closed), default=0)}"
+    try:
+        return get_or_fetch(key, lambda: options_desk.options_coach(uid), ttl=3600)
+    except Exception as e:
+        log.warning("Options coach failed: %s", e)
+        raise HTTPException(status_code=503, detail="AI review temporarily unavailable. Try again shortly.")
+
+
+@app.get("/api/ideas/track-record")
+@limiter.limit("20/minute")
+def ideas_track_record(request: Request):
+    return get_or_fetch("idea-track-record", track_record.summary, ttl=600)
+
+
+@app.get("/api/ideas/wheel/plan")
+@limiter.limit("20/minute")
+def ideas_wheel_plan(request: Request, capital: float = Query(..., ge=1000, le=10_000_000),
+                     max_pct: float = Query(25, ge=5, le=100), max_per_sector: int = Query(2, ge=1, le=10)):
+    return wheel.plan(capital, max_pct, max_per_sector)
 
 
 @app.get("/api/stock/{ticker}/structures")

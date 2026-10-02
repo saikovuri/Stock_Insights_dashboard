@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { fetchWheelIdeas } from '../api/stockApi';
+import { fetchWheelIdeas, fetchWheelPlan } from '../api/stockApi';
 import Tip from './Tip';
 import WheelManager from './WheelManager';
 import WheelAsk from './WheelAsk';
@@ -54,6 +54,73 @@ function WheelCard({ c, onSelect, onManage }) {
           📞 If assigned: covered calls
         </button>
       </div>
+    </div>
+  );
+}
+
+function WheelPlan({ onSelect }) {
+  const [capital, setCapital] = useState(50000);
+  const [maxPct, setMaxPct] = useState(25);
+  const [perSector, setPerSector] = useState(2);
+  const [plan, setPlan] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const build = () => {
+    setBusy(true); setErr(null);
+    fetchWheelPlan(capital, maxPct, perSector).then(setPlan).catch(e => setErr(e.message)).finally(() => setBusy(false));
+  };
+  return (
+    <div className="card">
+      <h3 style={{ margin: 0 }}>🧮 Wheel capital planner</h3>
+      <p className="structures-intro">
+        Spread your cash across several puts instead of one big one, so a single bad stock or sector can't sink the account.
+      </p>
+      <div className="income-controls">
+        <label>Cash for the wheel ($)
+          <input type="number" className="tool-input" min={1000} step={5000} value={capital} onChange={e => setCapital(+e.target.value)} />
+        </label>
+        <label>Max per stock (%)
+          <input type="number" className="tool-input" min={5} max={100} step={5} value={maxPct} onChange={e => setMaxPct(+e.target.value)} />
+        </label>
+        <label>Max stocks per sector
+          <input type="number" className="tool-input" min={1} max={10} value={perSector} onChange={e => setPerSector(+e.target.value)} />
+        </label>
+        <button className="btn-primary btn-sm" onClick={build} disabled={busy || capital < 1000}>{busy ? 'Planning…' : 'Build plan'}</button>
+      </div>
+      {err && <p className="error-text">{err}</p>}
+      {plan && (plan.picks.length === 0 ? (
+        <p className="empty-state">No candidates fit {money(plan.capital)} with these limits.
+          {plan.skipped_expensive.length > 0 && ` ${plan.skipped_expensive[0].reason}.`}</p>
+      ) : (
+        <>
+          <div className="doctor-stats">
+            <div><span>Cash used</span><strong>{money(plan.used)} <small className="market-sub">({money(plan.cash_left)} left)</small></strong></div>
+            <div><span>Premium now</span><strong className="positive">{money(plan.income)}</strong></div>
+            <div><span>~ per month</span><strong className="positive">{money(plan.monthly_income)}</strong></div>
+            <div><span>Annualized on cash used</span><strong>{plan.annualized_pct}%</strong></div>
+          </div>
+          <table className="market-table">
+            <thead><tr><th>Stock</th><th>Sell put</th><th>Contracts</th><th>Cash</th><th>Premium</th><th>Cushion</th></tr></thead>
+            <tbody>
+              {plan.picks.map(p => (
+                <tr key={p.ticker}>
+                  <td><button className="link-btn" onClick={() => onSelect(p.ticker)}><strong>{p.ticker}</strong></button>
+                    <div className="market-sub">{p.sector}</div></td>
+                  <td>${p.strike} · {fmtDate(p.expiry)} <span className="market-sub">Δ {p.delta}</span></td>
+                  <td>{p.contracts}</td>
+                  <td>{money(p.capital)}</td>
+                  <td className="positive">{money(p.income)}</td>
+                  <td>{p.cushion_pct}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {plan.skipped_expensive.length > 0 && (
+            <p className="market-sub">Too expensive for the per-stock cap: {plan.skipped_expensive.map(s => s.ticker).join(', ')}</p>
+          )}
+          <p className="ivrank-note">{plan.note}</p>
+        </>
+      ))}
     </div>
   );
 }
@@ -127,6 +194,7 @@ export default function WheelIdeas({ onSelect }) {
       </ul>
       <p className="ivrank-note">Quotes refresh every few hours during market hours. Probabilities are model estimates, not guarantees. Not financial advice.</p>
     </div>
+    <WheelPlan onSelect={onSelect} />
     <WheelAsk onManage={manage} onSelect={onSelect} />
     <WheelManager preset={preset} />
     </>

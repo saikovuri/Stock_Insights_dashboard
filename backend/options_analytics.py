@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import yfinance as yf
 
+import track_record
 from cache import get_or_fetch
 from database import record_iv, get_iv_history
 from providers import cboe_chains, finnhub_earnings_calendar
@@ -217,6 +218,83 @@ def _earnings_extra(ticker: str) -> dict:
     return {"earnings_confirmed": i.get("next_confirmed", False), "earnings_alt": i.get("next_alt"),
             "earnings_timing": i.get("next_timing"), "last_earnings": i.get("last"),
             "last_earnings_timing": i.get("last_timing"), "days_since_earnings": i.get("days_since_last")}
+
+
+def _past_earnings_moves(ticker: str) -> list[dict]:
+    """Close-to-close reaction to each of the last ~12 reports (after-close: that day → next day)."""
+    def _fetch():
+        ed = yf.Ticker(ticker).get_earnings_dates(limit=16)
+        closes = get_stock_data(ticker, period="5y", interval="1d")["Close"]
+        days = [d.date() for d in closes.index]
+        today = datetime.now(_ET).date()
+        out = []
+        for when, _ in (ed.iterrows() if ed is not None else []):
+            d = when.date()
+            if d >= today:
+                continue
+            after = when.hour >= 12
+            try:
+                i = days.index(d)
+            except ValueError:
+                continue
+            a, b = (i, i + 1) if after else (i - 1, i)
+            if a < 0 or b >= len(days):
+                continue
+            out.append({"date": d.isoformat(), "timing": "after close" if after else "before open",
+                        "move_pct": round((float(closes.iloc[b]) / float(closes.iloc[a]) - 1) * 100, 2)})
+        return sorted(out, key=lambda m: m["date"], reverse=True)[:12]
+    return get_or_fetch(f"earnings-moves:{ticker}", _fetch, ttl=12 * 3600)
+
+
+def earnings_moves(ticker: str) -> dict:
+    """How far the stock really moved on past reports vs how far options price the next one."""
+    def _fetch():
+        from database import kv_get, kv_set
+        moves = _past_earnings_moves(ticker)
+        info = earnings_info(ticker)
+        for m in moves:
+            saved = kv_get(f"em-implied:{ticker}:{m['date']}")
+            m["implied_pct"] = saved["data"] if saved else None
+        absm = sorted(abs(m["move_pct"]) for m in moves)
+        avg = round(sum(absm) / len(absm), 2) if absm else None
+        implied = expiry = None
+        nxt = info.get("next")
+        if nxt and 0 <= (date.fromisoformat(nxt) - datetime.now(_ET).date()).days <= 45:
+            S = _spot(ticker)
+            # The first expiry that settles after the reaction day
+            after = [e for e in _expirations(ticker) if _live(e) and
+                     (e > nxt if info.get("next_timing") != "before open" else e >= nxt)]
+            if after:
+                expiry = after[0]
+                calls, puts = _chain(ticker, expiry)
+                c = calls.iloc[(calls["strike"] - S).abs().argsort()[:1]] if calls is not None and not calls.empty else None
+                p = puts.iloc[(puts["strike"] - S).abs().argsort()[:1]] if puts is not None and not puts.empty else None
+                cm = _mid(c.iloc[0]) if c is not None else None
+                pm = _mid(p.iloc[0]) if p is not None else None
+                if cm and pm:
+                    straddle = (cm + pm) / S * 100
+                    # Strip the normal day-to-day movement priced into the other days before expiry
+                    rets = get_stock_data(ticker, period="3mo", interval="1d")["Close"].pct_change().dropna().tail(30)
+                    rets = rets[rets.abs() < rets.abs().max()]  # drop the biggest day (often the last report)
+                    days = max(int(np.busday_count(datetime.now(_ET).date(), date.fromisoformat(expiry))) - 1, 0)
+                    base = 0.8 * float(rets.std()) * math.sqrt(days) * 100 if len(rets) > 5 else 0
+                    implied = round(math.sqrt(max(straddle ** 2 - base ** 2, (straddle * 0.5) ** 2)), 2)
+                    kv_set(f"em-implied:{ticker}:{nxt}", implied)
+        ratio = round(implied / avg, 2) if implied and avg else None
+        verdict = None
+        if ratio:
+            verdict = ("rich" if ratio >= 1.2 else "cheap" if ratio <= 0.85 else "fair")
+        return {
+            "ticker": ticker, "moves": moves, "avg_abs_move_pct": avg,
+            "median_abs_move_pct": absm[len(absm) // 2] if absm else None,
+            "max_abs_move_pct": absm[-1] if absm else None,
+            "up_count": sum(1 for m in moves if m["move_pct"] > 0), "count": len(moves),
+            "next_earnings": nxt, "next_confirmed": info.get("next_confirmed"), "implied_move_pct": implied,
+            "implied_expiry": expiry, "ratio": ratio, "verdict": verdict,
+            "note": "Implied move = at-the-money straddle for the first expiry after the report, minus the normal daily "
+                    "movement priced into the other days before that expiry. Actual moves are close-to-close.",
+        }
+    return get_or_fetch(f"earnings-moves-full:{ticker}", _fetch, ttl=900)
 
 
 def _spot(ticker: str) -> float:
@@ -441,7 +519,7 @@ def income_ideas(ticker: str, expiry: str | None = None) -> dict:
                           ("put_credit_spreads", "put"), ("iron_condors", "ic")):
             _add_checks(ideas[key], kind, em_range, earnings_before, _dte(exp))
 
-        return {
+        result = {
             "ticker": ticker, "spot": round(S, 2), "expiry": exp, "dte": _dte(exp),
             "expirations": [{"date": e, "dte": _dte(e), "monthly": _is_monthly(e)} for e in choices],
             "earnings_date": earnings, "earnings_before_expiry": earnings_before, **_earnings_extra(ticker),
@@ -450,6 +528,8 @@ def income_ideas(ticker: str, expiry: str | None = None) -> dict:
             **ideas,
             "tips": tips,
         }
+        track_record.record_income(result)
+        return result
 
     return get_or_fetch(f"income:{ticker}:{expiry or 'auto'}", _fetch, ttl=300)
 
@@ -930,7 +1010,7 @@ def directional_ideas(ticker: str, direction: str, budget: float, risk: str) -> 
         for i in ordered:
             i["best"] = i["kind"] == best
 
-        return {
+        result = {
             "ticker": ticker, "spot": round(S, 2), "direction": direction, "risk": risk, "budget": budget,
             "timeframe": plan["label"], "expiry": exp, "dte": d, "expiry_note": exp_note,
             "monthly": _is_monthly(exp), "iv_level": iv_level,
@@ -941,6 +1021,8 @@ def directional_ideas(ticker: str, direction: str, budget: float, risk: str) -> 
             "ideas": ordered, "best_why": why,
             "min_budget_needed": round(min(needed), 2) if not ordered and needed else None,
         }
+        track_record.record_directional(result)
+        return result
 
     return get_or_fetch(f"directional:{ticker}:{direction}:{risk}:{int(budget)}", _fetch, ttl=180)
 

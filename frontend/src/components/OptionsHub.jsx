@@ -3,9 +3,12 @@ import IvRank from './IvRank';
 import IncomeIdeas from './IncomeIdeas';
 import Structures from './Structures';
 import OptionsFlow from './OptionsFlow';
+import EarningsMoves from './EarningsMoves';
+
+const Volatility = ({ ticker }) => <><IvRank ticker={ticker} /><EarningsMoves ticker={ticker} /></>;
 
 const TABS = {
-  volatility: { icon: '📊', label: 'Volatility', short: 'Volatility', Comp: IvRank },
+  volatility: { icon: '📊', label: 'Volatility', short: 'Volatility', Comp: Volatility },
   income: { icon: '💵', label: 'Sell premium', short: 'Income', Comp: IncomeIdeas },
   directional: { icon: '🛠', label: 'Directional', short: 'Directional', Comp: Structures },
   flow: { icon: '🌊', label: 'Flow & positioning', short: 'Flow', Comp: OptionsFlow },

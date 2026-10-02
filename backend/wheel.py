@@ -6,10 +6,12 @@ import json
 import math
 import threading
 import time
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 import options_analytics as oa
+import track_record
 import yfinance as yf
 from cache import get_or_fetch
 from database import kv_get, kv_set
@@ -143,6 +145,7 @@ def run_wheel_scan() -> dict:
                   "target_delta": TARGET_DELTA, "updated_at": datetime.now(timezone.utc).isoformat(),
                   "seconds": round(time.time() - started)}
         kv_set(WHEEL_KEY, result)
+        track_record.record_wheel(rows[:20])
         log.info("Wheel scan: %d candidates from %d in %ds", len(rows), len(pool), result["seconds"])
         return result
     finally:
@@ -165,6 +168,43 @@ def get_wheel(start_if_stale: bool = True) -> dict:
     if not cached:
         return {"status": "building", "rows": []}
     return {**cached["data"], "status": "running" if _running else "ready"}
+
+
+# ── Ask about any ticker: deterministic wheel checks + an AI verdict ────────
+
+
+def plan(capital: float, max_pct: float = 25, max_per_sector: int = 2) -> dict:
+    """Spread `capital` across the best-scored puts: capped per stock and per sector, skipping earnings risk."""
+    rows = [c for c in get_wheel(start_if_stale=False).get("rows", []) if not c.get("earnings_before_expiry")]
+    cap = capital * max_pct / 100
+    left, picks, sectors, skipped = capital, [], defaultdict(int), []
+    for c in rows:
+        cost = c["strike"] * 100
+        if cost > cap:
+            skipped.append({"ticker": c["ticker"], "reason": f"${cost:,.0f} per contract is over the ${cap:,.0f} per-stock cap"})
+            continue
+        sector = c.get("sector") or "Other"
+        if sectors[sector] >= max_per_sector or cost > left:
+            continue
+        n = int(min(cap, left) // cost)
+        if n < 1:
+            continue
+        sectors[sector] += 1
+        left -= n * cost
+        picks.append({**{k: c[k] for k in ("ticker", "name", "sector", "price", "strike", "expiry", "dte", "delta",
+                                          "premium", "annualized_pct", "cushion_pct", "liquidity", "score")},
+                      "contracts": n, "capital": round(n * cost, 2), "income": round(n * c["premium"], 2)})
+    used = capital - left
+    income = sum(p["income"] for p in picks)
+    monthly = sum(p["income"] * 30 / max(p["dte"], 1) for p in picks)
+    return {
+        "capital": capital, "used": round(used, 2), "cash_left": round(left, 2), "picks": picks,
+        "income": round(income, 2), "monthly_income": round(monthly, 2),
+        "annualized_pct": round(monthly * 12 / used * 100, 1) if used else None,
+        "sectors": dict(sectors), "skipped_expensive": skipped[:5],
+        "note": f"At most {max_pct:g}% of the money in one stock and {max_per_sector} stocks per sector. Stocks with "
+                "earnings before expiry are left out. Keep the full strike × 100 in cash for every put.",
+    }
 
 
 # ── Ask about any ticker: deterministic wheel checks + an AI verdict ────────

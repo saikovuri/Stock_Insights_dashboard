@@ -4269,6 +4269,19 @@ tr.alert-triggered {
 .structure-card.safety-safer { border-color: rgba(52,211,153,0.45); }
 .idea-checks { list-style: none; padding: 0; margin: 0 0 0.5rem; font-size: 0.76rem; display: flex; flex-direction: column; gap: 0.15rem; }
 
+.desk-item { border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem 0.7rem; margin-bottom: 0.5rem; background: var(--bg-subtle); }
+.desk-head { font-size: 0.85rem; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem; margin-bottom: 0.3rem; }
+.desk-pnl { margin-left: auto; }
+.desk-item .idea-checks { font-size: 0.8rem; gap: 0.3rem; margin: 0; }
+.desk-act { color: #34d399; }
+.desk-warn { color: #fbbf24; }
+.desk-info { color: var(--text-secondary); }
+.whatif-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.6rem 1rem; margin: 0.4rem 0 0.8rem; }
+.whatif-controls label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.78rem; color: var(--text-muted); }
+.whatif-controls input[type=range] { width: 100%; accent-color: var(--accent); }
+.whatif-controls .whatif-check { flex-direction: row; align-items: center; gap: 0.4rem; }
+.coach-box { margin-top: 0.8rem; border-top: 1px dashed var(--border); padding-top: 0.6rem; font-size: 0.85rem; }
+
 .roll-repair { margin-top: 1rem; border-top: 1px solid var(--border); padding-top: 0.75rem; }
 .roll-panel { margin-top: 1rem; }
 .wheel-actions { display: flex; flex-wrap: wrap; gap: 0.3rem 1rem; font-size: 0.8rem; border-top: 1px dashed var(--border); padding-top: 0.45rem; }

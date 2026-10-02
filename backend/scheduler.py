@@ -348,6 +348,27 @@ def _record_iv_snapshots() -> None:
             continue
 
 
+def _run_position_checks() -> None:
+    """Push the day's must-act items for open option positions (take profit, ex-div assignment, expired)."""
+    import options_desk
+    from database import get_option_user_ids
+    day = datetime.now(ET).date().isoformat()
+    for uid in get_option_user_ids():
+        try:
+            r = options_desk.position_actions(uid)
+        except Exception as e:
+            log.info("Position check failed for user %s: %s", uid, e)
+            continue
+        for p in r["positions"]:
+            for a in p["actions"]:
+                if a["level"] == "info" or (a["level"] == "warn" and a["code"] not in ("tested", "early_put")):
+                    continue
+                title = (f"🛠 {p['ticker']} {p['position']} ${p['strike']:g} {p['type']} {p['expiry']}: "
+                         + a["code"].replace("_", " "))
+                if add_notification(uid, "position", title, a["text"], f"pos:{day}:{p['id']}:{a['code']}", ticker=p["ticker"]):
+                    push_ntfy(get_ntfy_topic(uid), title, a["text"], tags="wrench")
+
+
 def _loop() -> None:
     last_scan = datetime.min.replace(tzinfo=ET)
     last_briefing_day = None
@@ -358,9 +379,18 @@ def _loop() -> None:
     last_thesis_day = None
     last_custom = datetime.min.replace(tzinfo=ET)
     last_wheel = datetime.min.replace(tzinfo=ET)
+    last_positions_day = None
+    last_settle_day = None
     while True:
         try:
             now = datetime.now(ET)
+            if _market_open(now) and (now.hour, now.minute) >= (10, 15) and last_positions_day != now.date():
+                last_positions_day = now.date()
+                _run_position_checks()
+            if now.weekday() < 5 and (now.hour, now.minute) >= (16, 45) and last_settle_day != now.date():
+                last_settle_day = now.date()
+                import track_record
+                track_record.settle()
             if now.weekday() < 5 and (now.hour, now.minute) >= (16, 30) and last_scan_day != now.date():
                 last_scan_day = now.date()
                 import scanner

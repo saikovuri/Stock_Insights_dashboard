@@ -212,9 +212,65 @@ def wash_sales(user_id: int) -> dict:
                              "text": f"You bought {ticker} in the last 30 days. Selling an older losing lot before "
                                      f"{until} would trigger a wash sale."})
     order = {"high": 0, "medium": 1, "info": 2}
+    warnings += _option_wash_sales(user_id, lots, today)
     warnings.sort(key=lambda w: order[w["level"]])
-    return {"warnings": warnings,
+    return {"warnings": warnings, "lots": _holding_terms(lots, today),
             "note": "Based only on trades recorded here. Your broker's 1099-B is authoritative. Not tax advice."}
+
+
+def _option_wash_sales(user_id: int, lots: list[dict], today: date) -> list[dict]:
+    """Options on the same stock can be 'substantially identical': a losing close followed by a new position
+    within 30 days may be a wash sale."""
+    from database import get_closed_options, get_user_options
+    opened = [(o["ticker"], _d(o.get("date_added")), "option") for o in get_user_options(user_id)]
+    opened += [(h["ticker"], _d(h.get("date_added")), "shares") for h in lots]
+    out = []
+    for c in get_closed_options(user_id):
+        closed = _d(c.get("closed_at"))
+        if (c.get("pnl") or 0) >= 0 or not closed or (today - closed).days > 60:
+            continue
+        hits = [(t, d, w) for t, d, w in opened if t == c["ticker"] and d and 0 <= (d - closed).days <= 30]
+        if hits:
+            out.append({"level": "medium", "ticker": c["ticker"], "date": closed.isoformat(),
+                        "text": f"Closed a {c['ticker']} ${c['strike']:g} {c['option_type']} at a ${abs(c['pnl']):,.2f} loss on "
+                                f"{closed} and opened new {c['ticker']} {hits[0][2]} on {hits[0][1]}. Rolling a losing option "
+                                "into a similar one can be treated as a wash sale — check with your broker."})
+        elif (today - closed).days <= 30:
+            out.append({"level": "info", "ticker": c["ticker"], "date": closed.isoformat(),
+                        "text": f"${abs(c['pnl']):,.2f} option loss on {c['ticker']} on {closed}. Re-entering a similar "
+                                f"position before {closed + timedelta(days=31)} may defer that loss."})
+    return out
+
+
+def _holding_terms(lots: list[dict], today: date) -> list[dict]:
+    """Short- vs long-term status per lot, flagging gains that turn long-term soon."""
+    prices, out = {}, []
+    for h in lots:
+        acq = _d(h.get("date_added"))
+        if not acq or h["shares"] <= 0:
+            continue
+        t = h["ticker"]
+        if t not in prices:
+            try:
+                prices[t] = get_quote(t).get("price")
+            except Exception:
+                prices[t] = None
+        px = prices[t]
+        lt_day = acq.replace(year=acq.year + 1) + timedelta(days=1) if not (acq.month == 2 and acq.day == 29) \
+            else date(acq.year + 1, 3, 1)
+        held = (today - acq).days
+        gain = (px - h["buy_price"]) * h["shares"] if px else None
+        long_term = today >= lt_day
+        note = None
+        if not long_term and gain and gain > 0 and (lt_day - today).days <= 60:
+            note = f"Turns long-term on {lt_day} ({(lt_day - today).days} days). Selling before then taxes the gain at short-term rates."
+        elif not long_term and gain is not None and gain < 0:
+            note = "Short-term loss: offsets short-term gains first if you harvest it."
+        out.append({"ticker": t, "shares": h["shares"], "acquired": acq.isoformat(), "days_held": held,
+                    "term": "long" if long_term else "short", "long_term_on": None if long_term else lt_day.isoformat(),
+                    "gain": None if gain is None else round(gain, 2), "note": note})
+    out.sort(key=lambda r: (r["note"] is None, r["long_term_on"] or "9999"))
+    return out
 
 
 # ── Broker CSV import ────────────────────────────────────────────────────

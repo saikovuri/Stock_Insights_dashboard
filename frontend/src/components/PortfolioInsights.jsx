@@ -119,6 +119,25 @@ function TaxCheck({ version }) {
           ))}
         </ul>
       )}
+      {d.lots?.length > 0 && (
+        <>
+          <h4 className="sub-chart-title">Holding period by lot</h4>
+          <table className="market-table">
+            <thead><tr><th>Stock</th><th>Bought</th><th>Term</th><th>Unrealized</th><th>Note</th></tr></thead>
+            <tbody>
+              {d.lots.map((l, i) => (
+                <tr key={i}>
+                  <td><strong>{l.ticker}</strong> <span className="market-sub">{l.shares} sh</span></td>
+                  <td>{l.acquired} <span className="market-sub">({l.days_held}d)</span></td>
+                  <td>{l.term === 'long' ? 'Long-term' : <>Short-term<div className="market-sub">long-term on {l.long_term_on}</div></>}</td>
+                  <td className={cls(l.gain)}>{usd(l.gain)}</td>
+                  <td className={l.note ? 'rvol-warm' : ''}>{l.note || ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
       <p className="ivrank-note">{d.note}</p>
     </>
   );
@@ -200,7 +219,7 @@ function ImportCsv({ onImported }) {
   );
 }
 
-const TABS = [['spy', '📈 vs S&P 500'], ['divs', '💰 Dividend income'], ['tax', '🧾 Wash sales'],
+const TABS = [['spy', '📈 vs S&P 500'], ['divs', '💰 Dividend income'], ['tax', '🧾 Tax'],
   ['corr', '🔗 Correlation'], ['weekly', '🗞️ Weekly review'], ['import', '📥 Import CSV']];
 
 export default function PortfolioInsights({ tickers, version, onImported }) {

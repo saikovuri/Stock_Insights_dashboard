@@ -395,6 +395,17 @@ export const fetchSmartMoney = (t) => getJson(`${BASE}/stock/${t}/smart-money`, 
 export const fetchPerformance = () => getJson(`${BASE}/portfolio/performance`, 'Failed to load performance', true);
 export const fetchDividendIncome = () => getJson(`${BASE}/portfolio/dividends`, 'Failed to load dividend income', true);
 export const fetchTaxWarnings = () => getJson(`${BASE}/portfolio/tax`, 'Failed to load tax check', true);
+
+// ── Options desk & track record ──────────────────────────────────
+export const fetchOptionActions = () => getJson(`${BASE}/portfolio/options/actions`, 'Failed to check positions', true);
+export const fetchPortfolioEarnings = () => getJson(`${BASE}/portfolio/earnings`, 'Failed to load earnings', true);
+export const fetchWheelLedger = () => getJson(`${BASE}/portfolio/wheel-ledger`, 'Failed to load wheel ledger', true);
+export const fetchOptionsReview = () => getJson(`${BASE}/portfolio/options/review`, 'Failed to load review', true);
+export const fetchOptionsCoach = () => getJson(`${BASE}/portfolio/options/coach`, 'Failed to load AI review', true);
+export const fetchTrackRecord = () => getJson(`${BASE}/ideas/track-record`, 'Failed to load track record');
+export const fetchWheelPlan = (capital, maxPct, maxPerSector) =>
+  getJson(`${BASE}/ideas/wheel/plan?capital=${capital}&max_pct=${maxPct}&max_per_sector=${maxPerSector}`, 'Failed to build plan');
+export const fetchEarningsMoves = (t) => getJson(`${BASE}/stock/${t}/earnings-moves`, 'Failed to load earnings moves');
 export const importPortfolioCsv = (csv, commit) =>
   sendJson(`${BASE}/portfolio/import`, 'POST', { csv, commit }, 'Import failed');
 export const fetchWeeklyReview = (refresh = false) =>

@@ -397,6 +397,29 @@ def init_db():
             UNIQUE(user_id, ticker)
         )
     """)
+    cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS idea_log (
+            id {serial},
+            kind TEXT NOT NULL,
+            label TEXT,
+            ticker TEXT NOT NULL,
+            expiry TEXT NOT NULL,
+            legs TEXT NOT NULL,
+            legs_key TEXT NOT NULL,
+            net DOUBLE PRECISION NOT NULL,
+            risk DOUBLE PRECISION,
+            spot DOUBLE PRECISION NOT NULL,
+            delta DOUBLE PRECISION,
+            created_day TEXT NOT NULL,
+            settle_price DOUBLE PRECISION,
+            pnl DOUBLE PRECISION,
+            UNIQUE(kind, ticker, expiry, legs_key)
+        )
+    """)
+    if USE_PG:
+        cur.execute("ALTER TABLE closed_options ADD COLUMN IF NOT EXISTS opened_at TEXT")
+    elif "opened_at" not in [r[1] for r in cur.execute("PRAGMA table_info(closed_options)").fetchall()]:
+        cur.execute("ALTER TABLE closed_options ADD COLUMN opened_at TEXT")
     conn.commit()
 
     # ── Indexes (idempotent for both PG and SQLite) ──
@@ -414,6 +437,7 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_user_alerts_active ON user_alerts(active)",
         "CREATE INDEX IF NOT EXISTS idx_journal_user ON journal(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_idea_log_open ON idea_log(pnl, expiry)",
     ]
     for stmt in idx_stmts:
         idx.execute(stmt)
@@ -668,8 +692,8 @@ def close_user_option(user_id: int, ticker: str, option_type: str, strike: float
     cost_basis = opt["premium"] * closed * 100
     pnl_pct = (pnl / cost_basis * 100) if cost_basis else 0
     cur.execute(
-        f"INSERT INTO closed_options (user_id, ticker, option_type, position, strike, expiry, open_premium, close_premium, contracts, pnl, pnl_pct) VALUES ({PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH})",
-        (user_id, ticker, option_type.lower(), position.lower(), strike, expiry, opt["premium"], close_premium, closed, round(pnl, 2), round(pnl_pct, 2)),
+        f"INSERT INTO closed_options (user_id, ticker, option_type, position, strike, expiry, open_premium, close_premium, contracts, pnl, pnl_pct, opened_at) VALUES ({PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH})",
+        (user_id, ticker, option_type.lower(), position.lower(), strike, expiry, opt["premium"], close_premium, closed, round(pnl, 2), round(pnl_pct, 2), str(opt.get("date_added") or "")[:10] or None),
     )
     close_action = "STC" if position == "long" else "BTC"
     cur.execute(
@@ -931,6 +955,10 @@ def get_all_user_tickers() -> dict[int, set[str]]:
     return out
 
 
+def get_option_user_ids() -> list[int]:
+    return [r["user_id"] for r in _run("SELECT DISTINCT user_id FROM options", (), "all")]
+
+
 def get_ntfy_topic(user_id: int) -> str | None:
     conn = get_db()
     cur = conn.cursor()
@@ -1135,6 +1163,47 @@ def kv_set(key: str, data) -> None:
     _run(f"INSERT INTO kv_cache (key, data, updated_at) VALUES ({PH}, {PH}, {PH}) "
          f"ON CONFLICT (key) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at",
          (key, json.dumps(data), now))
+
+
+# ── Idea track record ─────────────────────────────────────────────────────────────────────────
+
+_IDEA_COLS = ("kind", "label", "ticker", "expiry", "legs", "legs_key", "net", "risk", "spot", "delta", "created_day")
+
+
+def log_ideas(rows: list[dict]) -> None:
+    """Insert ideas; one already logged for the same contract(s) is kept as first shown."""
+    if not rows:
+        return
+    verb = "INSERT INTO" if USE_PG else "INSERT OR IGNORE INTO"
+    suffix = " ON CONFLICT (kind, ticker, expiry, legs_key) DO NOTHING" if USE_PG else ""
+    sql = f"{verb} idea_log ({', '.join(_IDEA_COLS)}) VALUES ({', '.join([PH] * len(_IDEA_COLS))}){suffix}"
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        for r in rows:
+            cur.execute(sql, tuple(json.dumps(r[c]) if c == "legs" else r.get(c) for c in _IDEA_COLS))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        _release(conn)
+
+
+def unsettled_ideas(through_day: str) -> list[dict]:
+    rows = _run(f"SELECT * FROM idea_log WHERE pnl IS NULL AND expiry <= {PH}", (through_day,), "all")
+    for r in rows:
+        r["legs"] = json.loads(r["legs"])
+    return rows
+
+
+def settle_idea(idea_id: int, price: float, pnl: float) -> None:
+    _run(f"UPDATE idea_log SET settle_price={PH}, pnl={PH} WHERE id={PH}", (price, pnl, idea_id))
+
+
+def idea_log_rows() -> list[dict]:
+    return _run("SELECT kind, label, ticker, expiry, net, risk, delta, created_day, settle_price, pnl FROM idea_log",
+                (), "all")
 
 
 # Initialize DB on import

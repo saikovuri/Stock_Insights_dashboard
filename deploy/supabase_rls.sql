@@ -70,6 +70,24 @@ CREATE TABLE IF NOT EXISTS public.theses (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(user_id, ticker)
 );
+CREATE TABLE IF NOT EXISTS public.idea_log (
+    id SERIAL PRIMARY KEY,
+    kind TEXT NOT NULL,
+    label TEXT,
+    ticker TEXT NOT NULL,
+    expiry TEXT NOT NULL,
+    legs TEXT NOT NULL,
+    legs_key TEXT NOT NULL,
+    net DOUBLE PRECISION NOT NULL,
+    risk DOUBLE PRECISION,
+    spot DOUBLE PRECISION NOT NULL,
+    delta DOUBLE PRECISION,
+    created_day TEXT NOT NULL,
+    settle_price DOUBLE PRECISION,
+    pnl DOUBLE PRECISION,
+    UNIQUE(kind, ticker, expiry, legs_key)
+);
+ALTER TABLE public.closed_options ADD COLUMN IF NOT EXISTS opened_at TEXT;
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON public.notifications(user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_user_alerts_active ON public.user_alerts(active);
 CREATE INDEX IF NOT EXISTS idx_journal_user ON public.journal(user_id);
@@ -97,7 +115,7 @@ BEGIN
   FOREACH t IN ARRAY ARRAY[
     'users', 'holdings', 'options', 'transactions', 'watchlist', 'closed_trades',
     'closed_options', 'refresh_tokens', 'notifications', 'iv_history',
-    'user_alerts', 'journal', 'kv_cache', 'theses'
+    'user_alerts', 'journal', 'kv_cache', 'theses', 'idea_log'
   ] LOOP
     IF to_regclass('public.' || t) IS NULL THEN
       RAISE NOTICE 'Skipping missing table %', t;

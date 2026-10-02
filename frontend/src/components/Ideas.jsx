@@ -6,12 +6,12 @@ import StrategyTester from './StrategyTester';
 import WheelIdeas from './WheelIdeas';
 import { useProfile } from '../ProfileContext';
 import { FlowTable } from './OptionsFlow';
-import { fetchUnusualOptions, fetchInsiderBuying, fetchSuperinvestors } from '../api/stockApi';
+import { fetchUnusualOptions, fetchInsiderBuying, fetchSuperinvestors, fetchTrackRecord } from '../api/stockApi';
 
 const money = v => v >= 1e9 ? `$${(v / 1e9).toFixed(1)}B` : v >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : `$${(v / 1e3).toFixed(0)}K`;
 const TABS = [
   ['inplay', '⚡ In play'], ['setups', '🎯 Setups'], ['wheel', '🎡 Wheel'], ['flow', '🌊 Unusual options'], ['insiders', '🕴️ Insider buying'],
-  ['super', '🧠 Superinvestors'], ['macro', '📅 Macro calendar'], ['tester', '🧪 Strategy tester'],
+  ['super', '🧠 Superinvestors'], ['macro', '📅 Macro calendar'], ['tester', '🧪 Strategy tester'], ['record', '📋 Options track record'],
 ];
 const ACTION = { new: ['🆕 New', 'positive'], added: ['➕ Added', 'positive'], reduced: ['➖ Reduced', 'negative'], sold: ['❌ Sold', 'negative'] };
 
@@ -193,6 +193,47 @@ function Superinvestors({ onSelect }) {
   );
 }
 
+function TrackRecord() {
+  const [data, error] = useLoad(fetchTrackRecord);
+  if (error) return <div className="card"><p className="error-text">{error}</p></div>;
+  if (!data) return <div className="card"><p className="loading-text">Loading…</p></div>;
+  const pct = v => v == null ? '—' : `${v > 0 ? '+' : ''}${v}%`;
+  return (
+    <div className="card">
+      <h3>📋 How our option ideas actually did</h3>
+      <p className="structures-intro">
+        Every income, wheel and directional idea is recorded the first time it's shown and scored at expiry from the
+        closing price. {data.settled} settled, {data.open} still open{data.since ? ` (tracking since ${data.since})` : ''}.
+      </p>
+      {data.groups.length === 0 ? (
+        <p className="empty-state">
+          No ideas have expired yet{data.next_expiry ? ` — the first results come in after ${data.next_expiry}` : ''}.
+        </p>
+      ) : (
+        <div className="table-scroll">
+          <table className="market-table">
+            <thead><tr><th>Idea</th><th>Count</th><th>Avg delta</th><th>Profitable</th><th>Kept full premium</th><th>Avg return on risk</th><th>Worst</th></tr></thead>
+            <tbody>
+              {data.groups.map(g => (
+                <tr key={g.kind + g.label}>
+                  <td><strong>{g.name}</strong>{g.label && <span className="market-sub"> · {g.label}</span>}</td>
+                  <td>{g.ideas}</td>
+                  <td>{g.avg_delta}</td>
+                  <td className={g.win_rate >= 60 ? 'positive' : g.win_rate < 45 ? 'negative' : ''}><strong>{g.win_rate}%</strong></td>
+                  <td>{g.expired_worthless_pct != null ? `${g.expired_worthless_pct}%` : '—'}</td>
+                  <td className={g.avg_return_on_risk_pct >= 0 ? 'positive' : 'negative'}>{pct(g.avg_return_on_risk_pct)}</td>
+                  <td className="negative">{pct(g.worst_pct)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="ivrank-note">{data.note}</p>
+    </div>
+  );
+}
+
 export default function Ideas({ onSelect }) {
   const { profile } = useProfile();
   const [tab, setTab] = useState(() => sessionStorage.getItem('ideas_tab') || (profile === 'day' ? 'inplay' : 'setups'));
@@ -212,6 +253,7 @@ export default function Ideas({ onSelect }) {
       {tab === 'super' && <Superinvestors onSelect={onSelect} />}
       {tab === 'macro' && <EconomicCalendar />}
       {tab === 'tester' && <StrategyTester />}
+      {tab === 'record' && <TrackRecord />}
     </div>
   );
 }
