@@ -91,8 +91,10 @@ def _actions(o: dict, S: float, c: dict, shares_held: float, earnings: dict, div
     acts = []
     if dte < 0 or (dte == 0 and not oa._live(o["expiry"])):
         verb = ("was likely assigned" if itm else "expired worthless") if short else ("expired in the money — check if it was exercised" if itm else "expired worthless")
-        return [{"level": "act", "code": "expired",
-                 "text": f"Expired {o['expiry']}: {verb}. Close it out in the portfolio so P&L stays accurate."}]
+        return [{"level": "act", "code": "expired", "assign": short and itm,
+                 "text": f"Expired {o['expiry']}: {verb}. "
+                         + ("Mark it assigned to move the shares into your holdings." if short and itm else
+                            "Close it out in the portfolio so P&L stays accurate.")}]
     mid = c.get("mid")
     if short:
         if mid is not None and o["premium"] > 0:
@@ -227,9 +229,27 @@ def earnings_exposure(user_id: int) -> dict:
     return {"upcoming": upcoming, "recent": recent}
 
 
+def _legs_key(o: dict) -> tuple:
+    return o["ticker"], o["option_type"], o["expiry"]
+
+
+def _spread_longs(opts: list[dict], closed: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Long options sharing ticker, type and expiry with a short one: the protective legs of credit spreads."""
+    keys = {_legs_key(o) for o in opts + closed if o.get("position") == "short"}
+    return ([o for o in opts if o.get("position") == "long" and _legs_key(o) in keys],
+            [c for c in closed if c.get("position") == "long" and _legs_key(c) in keys])
+
+
+def _put_capital(short: dict, longs: list[dict]) -> float:
+    """Cash at risk on a short put: the spread width when a lower long put protects it, else the strike."""
+    wings = [l["strike"] for l in longs if _legs_key(l) == _legs_key(short) and l["strike"] < short["strike"]]
+    return ((short["strike"] - max(wings)) if wings else short["strike"]) * 100 * short["contracts"]
+
+
 def wheel_ledger(user_id: int) -> dict:
     """Per-stock wheel results: option premium kept, stock P&L, adjusted cost basis, vs buy-and-hold."""
     opts, closed = get_user_options(user_id), get_closed_options(user_id)
+    long_open, long_closed = _spread_longs(opts, closed)
     tickers = sorted({o["ticker"] for o in opts + closed if o.get("position") == "short"})
     lots = defaultdict(list)
     for h in get_user_holdings(user_id):
@@ -241,8 +261,11 @@ def wheel_ledger(user_id: int) -> dict:
     for t in tickers[:30]:
         shorts_closed = [c for c in closed if c["ticker"] == t and c["position"] == "short"]
         shorts_open = [o for o in opts if o["ticker"] == t and o.get("position") == "short"]
-        realized_opts = sum(c["pnl"] for c in shorts_closed)
-        open_premium = sum(o["premium"] * 100 * o["contracts"] for o in shorts_open)
+        wings_open = [o for o in long_open if o["ticker"] == t]
+        wings_closed = [c for c in long_closed if c["ticker"] == t]
+        realized_opts = sum(c["pnl"] for c in shorts_closed + wings_closed)
+        open_premium = (sum(o["premium"] * 100 * o["contracts"] for o in shorts_open)
+                        - sum(o["premium"] * 100 * o["contracts"] for o in wings_open))
         sh = sum(h["shares"] for h in lots[t])
         stock_cost = sum(h["shares"] * h["buy_price"] for h in lots[t])
         realized_stock = sum(x["pnl"] for x in sold[t])
@@ -256,8 +279,9 @@ def wheel_ledger(user_id: int) -> dict:
                              + [_d(h.get("date_added")) for h in lots[t]]) if d]
         start = min(dates) if dates else date.today()
         days = max((date.today() - start).days, 1)
-        capital = max([stock_cost] + [o["strike"] * 100 * o["contracts"] for o in shorts_open if o["option_type"] == "put"]
-                      + [c["strike"] * 100 * c["contracts"] for c in shorts_closed if c["option_type"] == "put"])
+        capital = max([stock_cost]
+                      + [_put_capital(o, wings_open) for o in shorts_open if o["option_type"] == "put"]
+                      + [_put_capital(c, wings_closed) for c in shorts_closed if c["option_type"] == "put"])
         total = realized_opts + open_premium + realized_stock + unreal_stock
         hold_pct = None
         try:
@@ -280,8 +304,64 @@ def wheel_ledger(user_id: int) -> dict:
         })
     rows.sort(key=lambda r: r["total_pnl"], reverse=True)
     return {"rows": rows, "total_pnl": round(sum(r["total_pnl"] for r in rows), 2),
-            "note": "Counts every short option on the stock as part of the wheel. Open premium is counted as received; "
-                    "buy-backs of open positions would reduce it. Capital is the largest cash-secured put or share cost."}
+            "note": "Counts every short option on the stock, plus long options with the same expiry and type (spread "
+                    "wings). Open premium is net of wings and counted as received; buy-backs would reduce it. Capital "
+                    "is the largest cash-secured put, spread width or share cost."}
+
+
+def premium_income(user_id: int, months: int = 12) -> dict:
+    """Premium collected and paid back per month, realized option P&L per month, and progress to a monthly goal."""
+    from database import kv_get
+    opts, closed = get_user_options(user_id), get_closed_options(user_id)
+    long_open, long_closed = _spread_longs(opts, closed)
+    m = defaultdict(lambda: {"collected": 0.0, "paid": 0.0, "realized": 0.0, "trades": 0})
+    key = lambda d: d.strftime("%Y-%m") if d else None
+    for o in opts:
+        k = key(_d(o.get("date_added")))
+        if not k:
+            continue
+        amt = o["premium"] * 100 * o["contracts"]
+        if o.get("position") == "short":
+            m[k]["collected"] += amt
+            m[k]["trades"] += 1
+        elif o in long_open:
+            m[k]["paid"] += amt
+    for c in closed:
+        if c["position"] != "short" and c not in long_closed:
+            continue
+        n = c["contracts"] * 100
+        opened, done = key(_d(c.get("opened_at")) or _d(c.get("closed_at"))), key(_d(c.get("closed_at")))
+        if c["position"] == "short":
+            m[opened]["collected"] += c["open_premium"] * n
+            m[opened]["trades"] += 1
+            m[done]["paid"] += (c["close_premium"] or 0) * n
+        else:
+            m[opened]["paid"] += c["open_premium"] * n
+            m[done]["collected"] += (c["close_premium"] or 0) * n
+        m[done]["realized"] += c["pnl"]
+    today = date.today()
+    first = today.replace(day=1)
+    keys = []
+    for i in range(months - 1, -1, -1):
+        y, mo = first.year, first.month - i
+        while mo <= 0:
+            y, mo = y - 1, mo + 12
+        keys.append(f"{y}-{mo:02d}")
+    rows = [{"month": k, **{f: round(v, 2) if isinstance(v, float) else v for f, v in m[k].items()},
+             "net": round(m[k]["collected"] - m[k]["paid"], 2)} for k in keys]
+    ytd = [r for r in rows if r["month"].startswith(str(today.year))]
+    goal = kv_get(f"income-goal:{user_id}")
+    goal = goal["data"] if goal else None
+    this = rows[-1]
+    return {
+        "months": rows, "goal": goal, "this_month": this,
+        "goal_pct": round(this["net"] / goal * 100) if goal else None,
+        "ytd_net": round(sum(r["net"] for r in ytd), 2), "ytd_realized": round(sum(r["realized"] for r in ytd), 2),
+        "avg_net_3m": round(sum(r["net"] for r in rows[-4:-1]) / 3, 2),
+        "note": "Collected = premium received when you sell (counted in the month you opened). Paid = buy-backs and "
+                "spread wings. Realized = P&L of trades closed that month. Trades closed before open dates were "
+                "recorded are counted in their close month.",
+    }
 
 
 def _dte_bucket(c: dict) -> str:

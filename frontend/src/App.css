@@ -4281,6 +4281,13 @@ tr.alert-triggered {
 .whatif-controls input[type=range] { width: 100%; accent-color: var(--accent); }
 .whatif-controls .whatif-check { flex-direction: row; align-items: center; gap: 0.4rem; }
 .coach-box { margin-top: 0.8rem; border-top: 1px dashed var(--border); padding-top: 0.6rem; font-size: 0.85rem; }
+.income-goal { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.6rem 1rem; margin: 0.3rem 0 0.8rem; }
+.income-goal label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.78rem; color: var(--text-muted); }
+.income-goal .tool-input { width: 120px; }
+.goal-progress { flex: 1; min-width: 220px; display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.8rem; }
+.goal-track { height: 10px; border-radius: 999px; background: var(--bg-subtle); border: 1px solid var(--border); overflow: hidden; }
+.goal-fill { height: 100%; background: #7c6cf0; transition: width 0.4s; }
+.goal-fill.goal-done { background: #34d399; }
 
 .roll-repair { margin-top: 1rem; border-top: 1px solid var(--border); padding-top: 0.75rem; }
 .roll-panel { margin-top: 1rem; }

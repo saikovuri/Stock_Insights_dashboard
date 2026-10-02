@@ -49,6 +49,7 @@ from database import (
     get_user_holdings, add_user_holding, update_user_holding, delete_user_holding, sell_user_holding,
     sell_user_holding_by_lot,
     get_user_options, add_user_option, close_user_option, update_user_option, delete_user_option,
+    assign_user_option, kv_set,
     get_user_transactions, get_user_watchlist, add_to_watchlist, remove_from_watchlist,
     get_closed_trades, get_closed_options,
     store_refresh_token, get_refresh_token, delete_refresh_token, delete_user_refresh_tokens,
@@ -773,6 +774,34 @@ def options_delete(option_id: int, user: dict = Depends(get_current_user)):
     if result is None:
         raise HTTPException(status_code=404, detail="Option not found")
     return result
+
+
+@app.post("/api/portfolio/options/{option_id}/assign")
+def options_assign(option_id: int, user: dict = Depends(get_current_user)):
+    """Short put assigned → shares bought at the strike; short call assigned → shares sold at the strike."""
+    try:
+        return assign_user_option(int(user["user_id"]), option_id)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+class IncomeGoal(BaseModel):
+    goal: Optional[float] = Field(None, ge=0, le=10_000_000)
+
+
+@app.get("/api/portfolio/premium-income")
+@limiter.limit("30/minute")
+def portfolio_premium_income(request: Request, user: dict = Depends(get_current_user)):
+    return options_desk.premium_income(int(user["user_id"]))
+
+
+@app.put("/api/portfolio/income-goal")
+@limiter.limit("20/minute")
+def portfolio_income_goal(request: Request, req: IncomeGoal, user: dict = Depends(get_current_user)):
+    kv_set(f"income-goal:{int(user['user_id'])}", req.goal or None)
+    return {"goal": req.goal or None}
 
 
 # ── Screener / Watchlist (auth required) ────────────────────────────────────

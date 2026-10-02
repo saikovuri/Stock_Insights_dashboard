@@ -5,7 +5,7 @@ import {
   fetchPortfolioSummary, buyStock, sellStock, sellStockLot,
   fetchOptionsSummary, buyOption, closeOption,
   editHolding, deleteHolding, editOption, deleteOption,
-  fetchClosedTrades, fetchClosedOptions,
+  fetchClosedTrades, fetchClosedOptions, assignOption,
 } from '../api/stockApi';
 import PortfolioChart from './PortfolioChart';
 import SectorAllocation from './SectorAllocation';
@@ -281,6 +281,21 @@ export default function Portfolio() {
     } catch (e) { setMsg(e.message); }
   };
 
+  const handleAssign = async (o) => {
+    const n = 100 * o.contracts;
+    const what = o.type === 'put'
+      ? `buy ${n} ${o.ticker} shares at $${o.strike}`
+      : `sell ${n} ${o.ticker} shares at $${o.strike} (called away)`;
+    if (!window.confirm(`Mark the short $${o.strike} ${o.type} as assigned? This closes it at $0 (premium kept) and will ${what}.`)) return;
+    try {
+      const r = await assignOption(o.id);
+      setMsg(r.action === 'ASSIGNED_PUT' ? `Assigned: added ${r.shares} ${r.ticker} shares at $${r.price}`
+        : `Called away: sold ${r.shares} ${r.ticker} shares at $${r.price}`);
+      setRepairOpt(null);
+      loadStocks(); loadOptions(); loadClosed();
+    } catch (e) { setMsg(e.message); }
+  };
+
   const cancelEdit = () => {
     setEditIdx(null);
     setEditOptIdx(null);
@@ -339,6 +354,10 @@ export default function Portfolio() {
             if (!o) return;
             setTab('options'); setView('current'); setRepairOpt(o);
             setTimeout(() => document.getElementById('roll-panel')?.scrollIntoView({ behavior: 'smooth' }), 100);
+          }}
+          onAssign={(id) => {
+            const o = optionsSummary?.options?.find(x => x.id === id);
+            if (o) handleAssign(o);
           }}
         />
       )}
@@ -739,6 +758,10 @@ export default function Portfolio() {
                         {side === 'short' && o.dte >= 0 && (
                           <button className="btn-icon" title="Roll / repair this short option"
                             onClick={() => setRepairOpt(repairOpt?.id === o.id ? null : o)}>🔧</button>
+                        )}
+                        {side === 'short' && (
+                          <button className="btn-icon" title={o.type === 'put' ? 'Assigned: add the shares at the strike' : 'Called away: sell the shares at the strike'}
+                            onClick={() => handleAssign(o)}>📥</button>
                         )}
                         <button className="btn-icon" title="Edit option" onClick={() => startEditOption(o)}>✏️</button>
                         {confirmDelete?.type === 'option' && confirmDelete?.id === o.id ? (

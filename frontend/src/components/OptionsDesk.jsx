@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, Legend, CartesianGrid, ReferenceLine } from 'recharts';
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, Legend, CartesianGrid, ReferenceLine, ComposedChart, Bar } from 'recharts';
 import {
   fetchOptionActions, fetchPortfolioEarnings, fetchWheelLedger, fetchOptionsReview, fetchOptionsCoach,
+  fetchPremiumIncome, saveIncomeGoal,
 } from '../api/stockApi';
 
 const usd = v => v == null ? '—' : `${v < 0 ? '-' : ''}$${Math.abs(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
@@ -22,7 +23,7 @@ function useLoad(fn, dep) {
   return [data, error];
 }
 
-function Today({ version, onRepair }) {
+function Today({ version, onRepair, onAssign }) {
   const [d, err] = useLoad(fetchOptionActions, version);
   if (err) return <p className="error-text">{err}</p>;
   if (!d) return <p className="loading-text">Checking your option positions…</p>;
@@ -51,6 +52,7 @@ function Today({ version, onRepair }) {
               <li key={i} className={`desk-${a.level}`}>
                 {ICON[a.level]} {a.text}
                 {a.repair && <> <button className="link-btn" onClick={() => onRepair(p.id)}>🔧 Repair</button></>}
+                {a.assign && <> <button className="link-btn" onClick={() => onAssign(p.id)}>📥 Mark assigned</button></>}
               </li>
             ))}
           </ul>
@@ -287,10 +289,62 @@ function Review({ version }) {
   );
 }
 
-const TABS = [['today', '🛠 Today'], ['earnings', '📅 Earnings ahead'], ['whatif', '🎚 What-if'],
+function PremiumIncome({ version }) {
+  const [d, err] = useLoad(fetchPremiumIncome, version);
+  const [goal, setGoal] = useState('');
+  const [saved, setSaved] = useState(null);
+  useEffect(() => { if (d) { setGoal(d.goal ?? ''); setSaved(d.goal); } }, [d]);
+  if (err) return <p className="error-text">{err}</p>;
+  if (!d) return <p className="loading-text">Adding up premium…</p>;
+  const save = () => saveIncomeGoal(goal === '' ? null : Number(goal)).then(r => setSaved(r.goal)).catch(() => {});
+  const t = d.this_month;
+  const pct = saved ? Math.round(t.net / saved * 100) : null;
+  const label = m => new Date(m + '-15').toLocaleDateString(undefined, { month: 'short', year: '2-digit' });
+  return (
+    <>
+      <div className="doctor-stats">
+        <div><span>This month (net)</span><strong className={cls(t.net)}>{usd(t.net)}</strong></div>
+        <div><span>Realized this month</span><strong className={cls(t.realized)}>{usd(t.realized)}</strong></div>
+        <div><span>Year to date (net)</span><strong className={cls(d.ytd_net)}>{usd(d.ytd_net)}</strong></div>
+        <div><span>Avg last 3 months</span><strong className={cls(d.avg_net_3m)}>{usd(d.avg_net_3m)}</strong></div>
+      </div>
+      <div className="income-goal">
+        <label>Monthly goal ($)
+          <input type="number" className="tool-input" min={0} step={100} value={goal} placeholder="e.g. 1000"
+            onChange={e => setGoal(e.target.value)} />
+        </label>
+        <button className="btn-secondary btn-sm" onClick={save} disabled={String(goal) === String(saved ?? '')}>Save</button>
+        {saved > 0 && (
+          <div className="goal-progress">
+            <div className="goal-track"><div className={`goal-fill ${pct >= 100 ? 'goal-done' : ''}`} style={{ width: `${Math.min(Math.max(pct, 0), 100)}%` }} /></div>
+            <span>{usd(t.net)} of {usd(saved)} this month ({pct}%){pct >= 100 ? ' 🎉' : ''}</span>
+          </div>
+        )}
+      </div>
+      <ResponsiveContainer width="100%" height={240}>
+        <ComposedChart data={d.months.map(r => ({ ...r, label: label(r.month), paid: -r.paid }))}>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+          <XAxis dataKey="label" {...axis} />
+          <YAxis {...axis} width={60} tickFormatter={v => usd(v)} />
+          <Tooltip {...tip} formatter={(v, n) => [usd(n === 'Paid back' ? -v : v), n]} />
+          <Legend />
+          <ReferenceLine y={0} stroke="var(--text-muted)" />
+          {saved > 0 && <ReferenceLine y={saved} stroke="#ffb300" strokeDasharray="5 3" label={{ value: 'Goal', fill: '#ffb300', fontSize: 11 }} />}
+          <Bar dataKey="collected" name="Collected" fill="#66bb6a" radius={[3, 3, 0, 0]} />
+          <Bar dataKey="paid" name="Paid back" fill="#ef5350" radius={[0, 0, 3, 3]} />
+          <Line dataKey="net" name="Net" stroke="#7c6cf0" strokeWidth={2} dot />
+          <Line dataKey="realized" name="Realized P&L" stroke="var(--text-muted)" strokeDasharray="4 3" dot={false} />
+        </ComposedChart>
+      </ResponsiveContainer>
+      <p className="ivrank-note">{d.note}</p>
+    </>
+  );
+}
+
+const TABS = [['today', '🛠 Today'], ['income', '💵 Premium income'], ['earnings', '📅 Earnings ahead'], ['whatif', '🎚 What-if'],
   ['ledger', '🎡 Wheel ledger'], ['review', '🧠 Options review']];
 
-export default function OptionsDesk({ options, holdings, closedCount, onRepair }) {
+export default function OptionsDesk({ options, holdings, closedCount, onRepair, onAssign }) {
   const [tab, setTab] = useState(options.length ? 'today' : 'earnings');
   const version = options.map(o => `${o.id}:${o.contracts}`).join(',') + `|${holdings.length}|${closedCount}`;
   return (
@@ -300,7 +354,8 @@ export default function OptionsDesk({ options, holdings, closedCount, onRepair }
           <button key={id} className={`sub-tab ${tab === id ? 'active' : ''}`} onClick={() => setTab(id)}>{label}</button>
         ))}
       </nav>
-      {tab === 'today' && <Today version={version} onRepair={onRepair} />}
+      {tab === 'today' && <Today version={version} onRepair={onRepair} onAssign={onAssign} />}
+      {tab === 'income' && <PremiumIncome version={version} />}
       {tab === 'earnings' && <Earnings version={version} />}
       {tab === 'whatif' && <WhatIf options={options} holdings={holdings} />}
       {tab === 'ledger' && <Ledger version={version} />}

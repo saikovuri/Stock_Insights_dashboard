@@ -406,6 +406,9 @@ export const fetchTrackRecord = () => getJson(`${BASE}/ideas/track-record`, 'Fai
 export const fetchWheelPlan = (capital, maxPct, maxPerSector) =>
   getJson(`${BASE}/ideas/wheel/plan?capital=${capital}&max_pct=${maxPct}&max_per_sector=${maxPerSector}`, 'Failed to build plan');
 export const fetchEarningsMoves = (t) => getJson(`${BASE}/stock/${t}/earnings-moves`, 'Failed to load earnings moves');
+export const assignOption = (id) => sendJson(`${BASE}/portfolio/options/${id}/assign`, 'POST', null, 'Could not record assignment');
+export const fetchPremiumIncome = () => getJson(`${BASE}/portfolio/premium-income`, 'Failed to load premium income', true);
+export const saveIncomeGoal = (goal) => sendJson(`${BASE}/portfolio/income-goal`, 'PUT', { goal }, 'Failed to save goal');
 export const importPortfolioCsv = (csv, commit) =>
   sendJson(`${BASE}/portfolio/import`, 'POST', { csv, commit }, 'Import failed');
 export const fetchWeeklyReview = (refresh = false) =>

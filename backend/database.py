@@ -707,6 +707,34 @@ def close_user_option(user_id: int, ticker: str, option_type: str, strike: float
             "expiry": expiry, "close_premium": close_premium, "contracts": closed, "pnl": round(pnl, 2)}
 
 
+def assign_user_option(user_id: int, option_id: int) -> dict:
+    """Record assignment of a short option: close it at $0 (premium kept) and buy/sell the shares at the strike."""
+    opt = _run(f"SELECT * FROM options WHERE id={PH} AND user_id={PH}", (option_id, user_id), "one")
+    if not opt:
+        raise LookupError("Option not found")
+    if opt["position"] != "short":
+        raise ValueError("Only short options get assigned")
+    shares = 100 * opt["contracts"]
+    if opt["option_type"] == "call":
+        lots = [h for h in get_user_holdings(user_id) if h["ticker"] == opt["ticker"]]
+        if sum(h["shares"] for h in lots) < shares:
+            raise ValueError(f"Only {sum(h['shares'] for h in lots):g} {opt['ticker']} shares recorded; "
+                             f"assignment needs {shares}")
+    close_user_option(user_id, opt["ticker"], opt["option_type"], opt["strike"], opt["expiry"], 0.0,
+                      opt["contracts"], "short")
+    if opt["option_type"] == "put":
+        add_user_holding(user_id, opt["ticker"], shares, opt["strike"])
+        return {"action": "ASSIGNED_PUT", "ticker": opt["ticker"], "shares": shares, "price": opt["strike"]}
+    left, pnl = shares, 0.0
+    for h in lots:
+        if left <= 0:
+            break
+        r = sell_user_holding_by_lot(user_id, h["id"], min(left, h["shares"]), opt["strike"])
+        left -= r["shares"]
+        pnl += r["pnl"]
+    return {"action": "CALLED_AWAY", "ticker": opt["ticker"], "shares": shares, "price": opt["strike"], "pnl": round(pnl, 2)}
+
+
 def update_user_option(user_id: int, option_id: int, ticker: str, option_type: str,
                        strike: float, expiry: str, premium: float, contracts: int,
                        position: str = "long") -> dict | None:
