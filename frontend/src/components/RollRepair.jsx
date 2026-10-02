@@ -10,7 +10,7 @@ const STRATS = {
 const LIQ = { good: ['Liquid', 'positive'], ok: ['OK liquidity', ''], thin: ['Thin', 'negative'] };
 
 const fmtDate = d => new Date(d + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-const usd = v => `${v < 0 ? '−' : ''}$${Math.abs(Math.round(v)).toLocaleString()}`;
+const usd = v => `${Math.round(v) < 0 ? '−' : ''}$${Math.abs(Math.round(v)).toLocaleString()}`;
 
 function RollCard({ r, strat, data }) {
   const s = STRATS[strat];
@@ -86,10 +86,14 @@ export default function RollRepair({ ticker, mode, expirations, initial, standal
           </select>
         </label>
         <label>Expiry
-          <select className="candle-select" value={expiry} onChange={e => setExpiry(e.target.value)}>
-            <option value="">Select…</option>
-            {expiryOptions.map(e => <option key={e.date} value={e.date}>{fmtDate(e.date)} ({e.dte}d)</option>)}
-          </select>
+          {expiryOptions.length ? (
+            <select className="candle-select" value={expiry} onChange={e => setExpiry(e.target.value)}>
+              <option value="">Select…</option>
+              {expiryOptions.map(e => <option key={e.date} value={e.date}>{fmtDate(e.date)} ({e.dte}d)</option>)}
+            </select>
+          ) : (
+            <input type="date" className="tool-input" value={expiry} onChange={e => setExpiry(e.target.value)} />
+          )}
         </label>
         <label>Short {kind} strike
           <input type="number" className="tool-input" value={shortStrike} min={0} step={0.5}

@@ -897,6 +897,93 @@ def directional_ideas(ticker: str, direction: str, budget: float, risk: str) -> 
     return get_or_fetch(f"directional:{ticker}:{direction}:{risk}:{int(budget)}", _fetch, ttl=180)
 
 
+# ── Covered calls after assignment (wheel step 2) ───────────────────────────
+
+_CC_TARGETS = [("Keep the shares", 0.15), ("Balanced", 0.25), ("Max premium", 0.35)]
+
+
+def assigned_calls(ticker: str, cost_basis: float, shares: int = 100) -> dict:
+    """Covered calls on assigned shares, never below the cost basis, so being called away is never a loss."""
+    def _fetch():
+        S = _spot(ticker)
+        exps = _expirations(ticker)
+        earnings = _earnings_date(ticker)
+        choices = [e for e in exps if _live(e) and 7 <= _dte(e) <= 75]
+        exp = _default_income_expiry(ticker, exps, earnings, S) or (choices[0] if choices else None)
+        if not exp:
+            raise LookupError("No suitable expirations")
+        d, T = max(_dte(exp), 1), _years(exp)
+        calls, _ = _chain(ticker, exp)
+        eligible = [r for r in _otm_rows(calls, "call", S, T) if r["strike"] >= cost_basis]
+        contracts = shares // 100
+
+        def idea(label, r, e=exp):
+            K, mid = r["strike"], r["mid"]
+            days = max(_dte(e), 1)
+            return {
+                "label": label, "expiry": e, "dte": _dte(e), "strike": K, "delta": round(r["delta"], 2),
+                "mid": round(mid, 2), "bid": round(r["bid"], 2), "ask": round(r["ask"], 2),
+                "premium": round(mid * 100, 2), "total_premium": round(mid * 100 * contracts, 2),
+                "return_pct": round(mid / cost_basis * 100, 2),
+                "annualized_pct": round(mid / cost_basis * 365 / days * 100, 1),
+                "if_called_pct": round((K - cost_basis + mid) / cost_basis * 100, 2),
+                "prob_called_pct": round(r["p_itm"] * 100), "otm_pct": round((K - S) / S * 100, 1),
+                "open_interest": r["oi"], "liquidity": _liquidity(r["oi"], _spread_pct(r["bid"], r["ask"])),
+            }
+
+        ideas, used = [], set()
+        for _, target in _CC_TARGETS:
+            p = _pick(eligible, target, used)
+            if p:
+                used.add(p["strike"])
+                # Label by the delta actually found: the liquid strike may sit away from the target
+                label = "Keep the shares" if p["delta"] < 0.2 else "Balanced" if p["delta"] <= 0.32 else "Max premium"
+                ideas.append(idea(label, p))
+        below = S < cost_basis
+        if below and eligible:
+            # Lowest strike at/above cost: the "get out at breakeven" call
+            p = min(eligible, key=lambda r: r["strike"])
+            if p["strike"] not in used:
+                ideas.insert(0, idea("Exit at cost", p))
+        if below and not ideas:
+            # Nothing worth selling at the cost basis this month: find the nearest expiry (<=120d) where a call at
+            # cost pays at least 0.5% of cost, else the best-paying one
+            found = []
+            for e in sorted((x for x in exps if _live(x) and _dte(exp) < _dte(x) <= 120), key=_dte):
+                c2, _ = _chain(ticker, e)
+                rows2 = [r for r in _otm_rows(c2, "call", S, _years(e)) if r["strike"] >= cost_basis]
+                if rows2:
+                    r = min(rows2, key=lambda r: r["strike"])
+                    found.append((e, r))
+                    if r["mid"] >= cost_basis * 0.005:
+                        break
+            if found:
+                e, r = next(((e, r) for e, r in found if r["mid"] >= cost_basis * 0.005),
+                            max(found, key=lambda f: f[1]["mid"]))
+                ideas.append(idea("Longer-dated at cost", r, e))
+        ideas.sort(key=lambda i: i["strike"])
+
+        gap = (S - cost_basis) / cost_basis * 100
+        if not below:
+            note = (f"Stock is {gap:.1f}% above your cost — every strike shown locks in a gain if called. "
+                    "Lower delta keeps more upside; higher delta pays more but is likelier to be called.")
+        elif gap > -10:
+            note = (f"Stock is {abs(gap):.1f}% below your cost. Calls at or above your cost pay less, but selling "
+                    "below it would lock in a loss if called. Take the smaller premium or go a little further out.")
+        else:
+            note = (f"Stock is {abs(gap):.1f}% below your cost, so calls at your cost pay very little. Options: sell "
+                    "a longer-dated call at your cost, wait for a bounce before selling, or accept a lower strike only "
+                    "if you'd rather exit than hold.")
+        return {
+            "ticker": ticker, "spot": round(S, 2), "cost_basis": round(cost_basis, 2), "shares": shares,
+            "contracts": contracts, "expiry": exp, "dte": _dte(exp), "monthly": _is_monthly(exp),
+            "earnings_date": earnings, "earnings_before_expiry": bool(earnings and earnings <= exp),
+            "unrealized_pct": round(gap, 1), "note": note, "ideas": ideas,
+        }
+
+    return get_or_fetch(f"assigned-cc:{ticker}:{cost_basis:.2f}:{shares}", _fetch, ttl=180)
+
+
 # ── Roll / repair a tested short option position ────────────────────────────
 
 _ROLL_RULES = [

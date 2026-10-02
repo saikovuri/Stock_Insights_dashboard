@@ -1422,6 +1422,21 @@ def stock_income(request: Request, ticker: str,
         raise _upstream_error(e)
 
 
+@app.get("/api/stock/{ticker}/assigned-calls")
+@limiter.limit("20/minute")
+def stock_assigned_calls(request: Request, ticker: str,
+                         cost_basis: float = Query(..., gt=0, le=100000),
+                         shares: int = Query(100, ge=100, le=1000000)):
+    """Covered calls for assigned shares (wheel step 2), never below the cost basis."""
+    ticker = _valid_ticker(ticker)
+    try:
+        return options_analytics.assigned_calls(ticker, cost_basis, shares)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="No listed options for this ticker")
+    except Exception as e:
+        raise _upstream_error(e)
+
+
 @app.get("/api/stock/{ticker}/roll")
 @limiter.limit("20/minute")
 def stock_roll(request: Request, ticker: str,

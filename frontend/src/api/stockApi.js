@@ -324,6 +324,13 @@ export async function fetchIncomeIdeas(ticker, expiry) {
   return res.json();
 }
 
+export async function fetchAssignedCalls(ticker, costBasis, shares) {
+  const params = new URLSearchParams({ cost_basis: String(costBasis), shares: String(shares) });
+  const res = await fetch(`${BASE}/stock/${ticker}/assigned-calls?${params}`);
+  if (!res.ok) throw new Error(await readError(res, 'Failed to load covered calls'));
+  return res.json();
+}
+
 export async function fetchRollIdeas(ticker, { strategy, expiry, shortStrike, longStrike, credit }) {
   const params = new URLSearchParams({ strategy, expiry, short_strike: String(shortStrike) });
   if (strategy === 'pcs' && longStrike) params.set('long_strike', String(longStrike));

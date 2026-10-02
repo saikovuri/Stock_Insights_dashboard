@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
 import { fetchWheelIdeas } from '../api/stockApi';
 import Tip from './Tip';
+import WheelManager from './WheelManager';
 
 const LIQ = { good: ['Liquid', 'positive'], ok: ['OK liquidity', ''], thin: ['Thin', 'negative'] };
 const money = v => `$${Math.round(v).toLocaleString()}`;
 const fmtDate = d => new Date(d + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
-function WheelCard({ c, onSelect }) {
+function WheelCard({ c, onSelect, onManage }) {
   const [liqText, liqCls] = LIQ[c.liquidity] || LIQ.ok;
   return (
     <div className={`structure-card ${c.flags.length ? '' : 'safety-safer'}`}>
@@ -41,6 +42,14 @@ function WheelCard({ c, onSelect }) {
           ? <li className="rvol-warm">⚠ Earnings {fmtDate(c.earnings_date)} before expiry — gap risk</li>
           : c.earnings_date && <li className="positive">✓ Earnings {fmtDate(c.earnings_date)} after expiry</li>}
       </ul>
+      <div className="wheel-actions">
+        <button className="link-btn" onClick={() => onManage({
+          mode: 'repair', ticker: c.ticker, strike: c.strike, expiry: c.expiry, credit: +(c.premium / 100).toFixed(2),
+        })}>🔧 If it's tested: roll / repair</button>
+        <button className="link-btn" onClick={() => onManage({ mode: 'assigned', ticker: c.ticker, costBasis: c.breakeven })}>
+          📞 If assigned: covered calls
+        </button>
+      </div>
     </div>
   );
 }
@@ -50,6 +59,11 @@ export default function WheelIdeas({ onSelect }) {
   const [error, setError] = useState(null);
   const [cash, setCash] = useState('');
   const [safeOnly, setSafeOnly] = useState(true);
+  const [preset, setPreset] = useState(null);
+  const manage = p => {
+    setPreset(p);
+    setTimeout(() => document.getElementById('wheel-manager')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+  };
 
   useEffect(() => {
     let timer;
@@ -71,6 +85,7 @@ export default function WheelIdeas({ onSelect }) {
     .filter(c => !safeOnly || !c.earnings_before_expiry);
 
   return (
+    <>
     <div className="card">
       <div className="ivrank-header">
         <h3 style={{ margin: 0 }}>🎡 Wheel candidates</h3>
@@ -95,18 +110,20 @@ export default function WheelIdeas({ onSelect }) {
       </div>
       {rows.length ? (
         <div className="structures-grid income-grid">
-          {rows.slice(0, 12).map(c => <WheelCard key={c.ticker} c={c} onSelect={onSelect} />)}
+          {rows.slice(0, 12).map(c => <WheelCard key={c.ticker} c={c} onSelect={onSelect} onManage={manage} />)}
         </div>
       ) : (
         <p className="empty-state">No candidates match{cash ? ` ${money(Number(cash))} of cash` : ''} right now.</p>
       )}
       <ul className="ivrank-help">
         <li>Take profit at ~50% of the premium and sell the next put — don't wait for the last few cents.</li>
-        <li>If the stock drops through the strike, roll down and out for a credit (Analysis → Options → Income → Roll / repair) or accept the shares.</li>
+        <li>If the stock drops through the strike, roll down and out for a credit, or accept the shares — use <b>Manage a wheel position</b> below.</li>
         <li>Once assigned, sell covered calls at or above your cost-if-assigned price so a call-away is never a loss.</li>
         <li>Keep any one name to a small slice of your account — assignment ties up the full cash amount.</li>
       </ul>
       <p className="ivrank-note">Quotes refresh every few hours during market hours. Probabilities are model estimates, not guarantees. Not financial advice.</p>
     </div>
+    <WheelManager preset={preset} />
+    </>
   );
 }
