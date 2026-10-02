@@ -407,6 +407,8 @@ export const fetchWheelPlan = (capital, maxPct, maxPerSector) =>
   getJson(`${BASE}/ideas/wheel/plan?capital=${capital}&max_pct=${maxPct}&max_per_sector=${maxPerSector}`, 'Failed to build plan');
 export const fetchEarningsMoves = (t) => getJson(`${BASE}/stock/${t}/earnings-moves`, 'Failed to load earnings moves');
 export const assignOption = (id) => sendJson(`${BASE}/portfolio/options/${id}/assign`, 'POST', null, 'Could not record assignment');
+export const deleteClosedTrade = (id) => sendJson(`${BASE}/portfolio/closed/${id}`, 'DELETE', null, 'Failed to delete trade');
+export const deleteClosedOption = (id) => sendJson(`${BASE}/portfolio/options/closed/${id}`, 'DELETE', null, 'Failed to delete trade');
 export const fetchPremiumIncome = () => getJson(`${BASE}/portfolio/premium-income`, 'Failed to load premium income', true);
 export const saveIncomeGoal = (goal) => sendJson(`${BASE}/portfolio/income-goal`, 'PUT', { goal }, 'Failed to save goal');
 export const importPortfolioCsv = (csv, commit) =>

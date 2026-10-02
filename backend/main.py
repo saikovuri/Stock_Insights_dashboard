@@ -51,7 +51,7 @@ from database import (
     get_user_options, add_user_option, close_user_option, update_user_option, delete_user_option,
     assign_user_option, kv_set,
     get_user_transactions, get_user_watchlist, add_to_watchlist, remove_from_watchlist,
-    get_closed_trades, get_closed_options,
+    get_closed_trades, get_closed_options, delete_closed_trade, delete_closed_option,
     store_refresh_token, get_refresh_token, delete_refresh_token, delete_user_refresh_tokens,
     list_notifications, mark_notifications_read, get_ntfy_topic, set_ntfy_topic,
     get_trader_profile, set_trader_profile, list_user_alerts, add_user_alert, delete_user_alert,
@@ -619,6 +619,20 @@ def closed_options_endpoint(user: dict = Depends(get_current_user)):
     trades = get_closed_options(user["user_id"])
     total_pnl = sum(t["pnl"] for t in trades)
     return {"total_realized_pnl": round(total_pnl, 2), "trades": trades}
+
+
+@app.delete("/api/portfolio/closed/{trade_id}")
+def closed_trade_delete(trade_id: int, user: dict = Depends(get_current_user)):
+    if not delete_closed_trade(int(user["user_id"]), trade_id):
+        raise HTTPException(status_code=404, detail="Closed trade not found")
+    return {"ok": True}
+
+
+@app.delete("/api/portfolio/options/closed/{trade_id}")
+def closed_option_delete(trade_id: int, user: dict = Depends(get_current_user)):
+    if not delete_closed_option(int(user["user_id"]), trade_id):
+        raise HTTPException(status_code=404, detail="Closed option not found")
+    return {"ok": True}
 
 
 # ── Options (auth required) ────────────────────────────────────────────────

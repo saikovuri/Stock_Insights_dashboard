@@ -841,6 +841,14 @@ def get_closed_options(user_id: int) -> list[dict]:
     return rows
 
 
+def delete_closed_trade(user_id: int, trade_id: int) -> bool:
+    return _run(f"DELETE FROM closed_trades WHERE id={PH} AND user_id={PH}", (trade_id, user_id)) > 0
+
+
+def delete_closed_option(user_id: int, trade_id: int) -> bool:
+    return _run(f"DELETE FROM closed_options WHERE id={PH} AND user_id={PH}", (trade_id, user_id)) > 0
+
+
 # ── Refresh token operations ─────────────────────────────────────────────
 
 def store_refresh_token(user_id: int, token: str, expires_at: str) -> None:

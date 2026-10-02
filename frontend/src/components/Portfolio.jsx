@@ -5,7 +5,7 @@ import {
   fetchPortfolioSummary, buyStock, sellStock, sellStockLot,
   fetchOptionsSummary, buyOption, closeOption,
   editHolding, deleteHolding, editOption, deleteOption,
-  fetchClosedTrades, fetchClosedOptions, assignOption,
+  fetchClosedTrades, fetchClosedOptions, assignOption, deleteClosedTrade, deleteClosedOption,
 } from '../api/stockApi';
 import PortfolioChart from './PortfolioChart';
 import SectorAllocation from './SectorAllocation';
@@ -278,6 +278,22 @@ export default function Portfolio() {
       setMsg('Option deleted');
       setConfirmDelete(null);
       loadOptions();
+    } catch (e) { setMsg(e.message); }
+  };
+
+  const handleDeleteClosed = async (type, id) => {
+    try {
+      if (type === 'closed-stock' && isGuest) {
+        const sold = JSON.parse(localStorage.getItem('guest_sold_stocks') || '[]').filter(t => t.id !== id);
+        localStorage.setItem('guest_sold_stocks', JSON.stringify(sold));
+      } else if (type === 'closed-stock') {
+        await deleteClosedTrade(id);
+      } else {
+        await deleteClosedOption(id);
+      }
+      setMsg('Trade removed from history');
+      setConfirmDelete(null);
+      loadClosed();
     } catch (e) { setMsg(e.message); }
   };
 
@@ -583,6 +599,7 @@ export default function Portfolio() {
                     <th>P/L ($)</th>
                     <th>P/L %</th>
                     <th>Date</th>
+                    <th></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -595,6 +612,16 @@ export default function Portfolio() {
                       <td className={t.pnl >= 0 ? 'positive' : 'negative'}>${t.pnl.toFixed(2)}</td>
                       <td className={t.pnl_pct >= 0 ? 'positive' : 'negative'}>{t.pnl_pct.toFixed(2)}%</td>
                       <td>{new Date(t.closed_at).toLocaleDateString()}</td>
+                      <td className="action-cell">
+                        {confirmDelete?.type === 'closed-stock' && confirmDelete?.id === t.id ? (
+                          <>
+                            <button className="btn-icon btn-confirm-del" title="Confirm delete" onClick={() => handleDeleteClosed('closed-stock', t.id)}>✔</button>
+                            <button className="btn-icon" title="Cancel" onClick={() => setConfirmDelete(null)}>✕</button>
+                          </>
+                        ) : (
+                          <button className="btn-icon" title="Remove from history" onClick={() => setConfirmDelete({ type: 'closed-stock', id: t.id })}>🗑️</button>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -836,6 +863,7 @@ export default function Portfolio() {
                     <th>P/L ($)</th>
                     <th>P/L %</th>
                     <th>Date</th>
+                    <th></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -852,6 +880,16 @@ export default function Portfolio() {
                       <td className={t.pnl >= 0 ? 'positive' : 'negative'}>${t.pnl.toFixed(2)}</td>
                       <td className={t.pnl_pct >= 0 ? 'positive' : 'negative'}>{t.pnl_pct.toFixed(2)}%</td>
                       <td>{new Date(t.closed_at).toLocaleDateString()}</td>
+                      <td className="action-cell">
+                        {confirmDelete?.type === 'closed-option' && confirmDelete?.id === t.id ? (
+                          <>
+                            <button className="btn-icon btn-confirm-del" title="Confirm delete" onClick={() => handleDeleteClosed('closed-option', t.id)}>✔</button>
+                            <button className="btn-icon" title="Cancel" onClick={() => setConfirmDelete(null)}>✕</button>
+                          </>
+                        ) : (
+                          <button className="btn-icon" title="Remove from history" onClick={() => setConfirmDelete({ type: 'closed-option', id: t.id })}>🗑️</button>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
