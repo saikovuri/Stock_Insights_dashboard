@@ -37,7 +37,7 @@ import intraday
 import backtester
 import wheel
 from providers import finnhub_enabled, finnhub_quote, finnhub_peers, finnhub_recommendations, \
-    finnhub_basic_financials, finnhub_earnings_calendar, finnhub_insider_transactions, finnhub_profile, \
+    finnhub_basic_financials, finnhub_insider_transactions, finnhub_profile, \
     finra_short_interest
 from alerts import check_alerts, technical_events
 from cache import get_or_fetch, stats as cache_stats, clear as cache_clear
@@ -1020,23 +1020,8 @@ def stock_events(ticker: str):
     def _fetch():
         import yfinance as yf
         stock = yf.Ticker(ticker)
-        earnings_date = None
-        try:
-            cal = stock.calendar
-            if isinstance(cal, dict):
-                ed = cal.get("Earnings Date")
-                if ed:
-                    val = ed[0] if isinstance(ed, list) else ed
-                    earnings_date = str(val)[:10]
-            elif cal is not None and hasattr(cal, 'empty') and not cal.empty:
-                ed = cal.get("Earnings Date")
-                if ed is not None and len(ed) > 0:
-                    earnings_date = str(ed.iloc[0].date()) if hasattr(ed.iloc[0], "date") else str(ed.iloc[0])[:10]
-        except Exception:
-            pass
-        if not earnings_date:
-            cal = finnhub_earnings_calendar(90, ticker)
-            earnings_date = next((e.get("date") for e in cal if e.get("symbol") == ticker and e.get("date")), None)
+        info = options_analytics.earnings_info(ticker)
+        earnings_date = info.get("next")
 
         # ── Past earnings with surprise ──────────────────────
         past_earnings = []
@@ -1072,6 +1057,9 @@ def stock_events(ticker: str):
 
         return {
             "earnings_date": earnings_date,
+            "earnings_confirmed": info.get("next_confirmed"),
+            "last_earnings": info.get("last"),
+            "days_since_earnings": info.get("days_since_last"),
             "past_earnings": past_earnings,
             "dividends": dividends,
         }

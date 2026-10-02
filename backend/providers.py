@@ -157,15 +157,15 @@ def finnhub_peers(ticker: str) -> list[str]:
     return _cached(f"fh:peers:{ticker}", 86400, fetch, [])
 
 
-def finnhub_earnings_calendar(days_ahead: int = 14, ticker: str | None = None) -> list[dict]:
-    """Upcoming earnings. Without a ticker this returns the whole market in one call."""
+def finnhub_earnings_calendar(days_ahead: int = 14, ticker: str | None = None, days_back: int = 0) -> list[dict]:
+    """Earnings in [today - days_back, today + days_ahead]. Without a ticker this returns the whole market in one call."""
     today = date.today()
-    params = {"from": today.isoformat(), "to": (today + timedelta(days=days_ahead)).isoformat()}
+    params = {"from": (today - timedelta(days=days_back)).isoformat(), "to": (today + timedelta(days=days_ahead)).isoformat()}
     if ticker:
         params["symbol"] = ticker
     fetch = _list_fetch("/calendar/earnings", params,
                         lambda d: (d or {}).get("earningsCalendar") or [] if isinstance(d, dict) else [])
-    return _cached(f"fh:earnings:{ticker or '*'}:{days_ahead}", 21600, fetch, [])
+    return _cached(f"fh:earnings:{ticker or '*'}:{days_ahead}:{days_back}", 21600, fetch, [])
 
 
 # ── Twelve Data (history fallback) ───────────────────────────────────────

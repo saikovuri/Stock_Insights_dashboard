@@ -2,12 +2,12 @@
 (or on demand) the AI checks the thesis against the latest results, news and fundamentals."""
 
 import logging
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 
 import llm
 from database import get_thesis, save_thesis, save_thesis_check
 from news_sentiment import fetch_news
-from providers import finnhub_earnings_calendar, finnhub_recommendations
+from providers import finnhub_recommendations
 from stock_data import get_key_metrics, get_technical_snapshot
 
 log = logging.getLogger(__name__)
@@ -16,9 +16,8 @@ STATUSES = ("intact", "weakening", "broken")
 
 
 def next_earnings(ticker: str) -> str | None:
-    today = date.today().isoformat()
-    return next((e["date"] for e in finnhub_earnings_calendar(120, ticker)
-                 if e.get("symbol") == ticker and (e.get("date") or "") >= today), None)
+    from options_analytics import _earnings_date
+    return _earnings_date(ticker)
 
 
 def upsert(user_id: int, ticker: str, text: str) -> dict:

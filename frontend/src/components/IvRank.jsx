@@ -86,10 +86,21 @@ export default function IvRank({ ticker }) {
         ))}
         <div className={`ivrank-stat ${data.earnings_in_window ? 'ivrank-warn' : ''}`}>
           <div className="ivrank-stat-label">Next earnings</div>
-          <div className="ivrank-stat-value">{data.earnings_date ? fmtDate(data.earnings_date) : 'Not scheduled'}</div>
+          <div className="ivrank-stat-value">
+            {data.earnings_date ? fmtDate(data.earnings_date) : 'Not scheduled'}
+            {data.earnings_date && !data.earnings_confirmed && <span className="ivrank-stat-sub"> (est.)</span>}
+          </div>
           {data.earnings_in_days != null && (
             <div className="ivrank-stat-sub">
-              in {data.earnings_in_days} days{data.earnings_in_window ? ' — inside the monthly window' : ''}
+              in {data.earnings_in_days} days{data.earnings_timing ? `, ${data.earnings_timing}` : ''}
+              {data.earnings_in_window ? ' — inside the monthly window' : ''}
+              {data.earnings_alt ? ` · other source says ${fmtDate(data.earnings_alt)}` : ''}
+            </div>
+          )}
+          {data.last_earnings && data.days_since_earnings <= 14 && (
+            <div className="ivrank-stat-sub positive">
+              ✓ Reported {fmtDate(data.last_earnings)}{data.last_earnings_timing ? ` ${data.last_earnings_timing}` : ''}
+              {' '}({data.days_since_earnings === 0 ? 'today' : `${data.days_since_earnings}d ago`}) — earnings IV crush already happened
             </div>
           )}
         </div>

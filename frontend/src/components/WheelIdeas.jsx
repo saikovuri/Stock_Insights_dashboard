@@ -40,8 +40,11 @@ function WheelCard({ c, onSelect, onManage }) {
           : c.expected_move_pct != null && <li className="rvol-warm">⚠ Strike inside the ±{c.expected_move_pct}% expected move</li>}
         {c.iv_rich && <li className="positive">✓ Options pricing more movement ({c.iv_pct}%) than the stock shows (~{c.rv_pct}%)</li>}
         {c.earnings_before_expiry
-          ? <li className="rvol-warm">⚠ Earnings {fmtDate(c.earnings_date)} before expiry — gap risk</li>
-          : c.earnings_date && <li className="positive">✓ Earnings {fmtDate(c.earnings_date)} after expiry</li>}
+          ? <li className="rvol-warm">⚠ Earnings {fmtDate(c.earnings_date)}{c.earnings_confirmed ? '' : ' (est.)'} before expiry — gap risk</li>
+          : c.earnings_date && <li className="positive">✓ Earnings {fmtDate(c.earnings_date)}{c.earnings_confirmed ? '' : ' (est.)'} after expiry</li>}
+        {c.last_earnings && c.days_since_earnings <= 14 && (
+          <li className="positive">✓ Just reported {fmtDate(c.last_earnings)} — earnings risk is behind it</li>
+        )}
       </ul>
       <div className="wheel-actions">
         <button className="link-btn" onClick={() => onManage({

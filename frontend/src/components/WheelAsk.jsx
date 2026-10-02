@@ -99,8 +99,11 @@ export default function WheelAsk({ onManage, onSelect }) {
               </li>
             )}
             <li className={data.earnings_before_expiry ? 'rvol-warm' : 'positive'}>
-              {data.earnings_before_expiry ? '⚠' : '✓'} {data.earnings_date ? `Earnings ${fmtDate(data.earnings_date)} ${data.earnings_before_expiry ? 'before' : 'after'} the ${fmtDate(data.expiry)} expiry` : 'No earnings date in the next 90 days'}
+              {data.earnings_before_expiry ? '⚠' : '✓'} {data.earnings_date ? `Earnings ${fmtDate(data.earnings_date)}${data.earnings_confirmed ? '' : ' (est.)'} ${data.earnings_before_expiry ? 'before' : 'after'} the ${fmtDate(data.expiry)} expiry` : 'No earnings date in the next 90 days'}
             </li>
+            {data.last_earnings && data.days_since_earnings <= 14 && (
+              <li className="positive">✓ Just reported {fmtDate(data.last_earnings)} ({data.days_since_earnings}d ago) — earnings risk is behind it</li>
+            )}
             <li className={data.passes_screen ? 'positive' : ''}>{data.passes_screen ? '✓ Would make the wheel candidate list' : 'Does not pass the wheel candidate screen'}</li>
           </ul>
 

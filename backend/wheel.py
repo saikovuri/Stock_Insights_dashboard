@@ -13,7 +13,6 @@ import options_analytics as oa
 import yfinance as yf
 from cache import get_or_fetch
 from database import kv_get, kv_set
-from providers import finnhub_earnings_calendar
 from scanner import SCAN_KEY, _parse_ts
 
 log = logging.getLogger(__name__)
@@ -64,16 +63,6 @@ def _spots(symbols: list[str]) -> dict[str, float]:
         return {}
 
 
-def _earnings_map() -> dict[str, str]:
-    """Next earnings date per symbol from one market-wide calendar call."""
-    out = {}
-    for e in finnhub_earnings_calendar(60):
-        s, d = e.get("symbol"), e.get("date")
-        if s and d and (s not in out or d < out[s]):
-            out[s] = d
-    return out
-
-
 def _candidate(r: dict, S: float, earnings: str | None) -> dict | None:
     t = r["symbol"]
     exps = oa._expirations(t)
@@ -121,7 +110,7 @@ def _candidate(r: dict, S: float, earnings: str | None) -> dict | None:
         "open_interest": p["oi"], "liquidity": liq,
         "iv_pct": None if not atm else round(atm * 100, 1), "rv_pct": round(rv * 100, 1), "iv_rich": iv_rich,
         "expected_move_pct": None if not em else round(em / S * 100, 1), "outside_expected_move": outside_em,
-        "earnings_date": earnings, "earnings_before_expiry": earnings_before,
+        "earnings_date": earnings, "earnings_before_expiry": earnings_before, **oa._earnings_extra(t),
         "flags": flags, "score": round(score, 1),
     }
 
@@ -139,13 +128,10 @@ def run_wheel_scan() -> dict:
             raise RuntimeError("Setup scan not available yet")
         pool = _quality_pool(scan["data"]["rows"])
         spots = _spots([r["symbol"] for r in pool])
-        earnings = _earnings_map()
 
         def safe(r):
             try:
-                # The market-wide calendar is capped (~1,500 rows), so fall back to a per-ticker lookup
-                er = earnings.get(r["symbol"]) or oa._earnings_date(r["symbol"])
-                return _candidate(r, spots.get(r["symbol"]) or r["price"], er)
+                return _candidate(r, spots.get(r["symbol"]) or r["price"], oa._earnings_date(r["symbol"]))
             except Exception as e:
                 log.info("Wheel candidate %s failed: %s", r["symbol"], e)
                 return None
@@ -260,6 +246,7 @@ def wheel_analysis(ticker: str) -> dict:
         "iv_pct": None if not atm else round(atm * 100, 1), "rv_pct": round(rv * 100, 1),
         "expected_move_pct": None if not em else round(em / S * 100, 1),
         "earnings_date": earnings, "earnings_before_expiry": bool(earnings and earnings <= exp),
+        **oa._earnings_extra(ticker),
         "passes_screen": screened is not None and all(c["ok"] for c in checks),
     }
 

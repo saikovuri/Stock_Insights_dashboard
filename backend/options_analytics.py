@@ -160,17 +160,63 @@ def _atm_iv(ticker: str, expiry: str, S: float) -> float | None:
     return sum(fallback) / len(fallback) if fallback else None
 
 
-def _earnings_date(ticker: str) -> str | None:
-    cal = finnhub_earnings_calendar(90, ticker)
-    hit = next((e.get("date") for e in cal if e.get("symbol") == ticker and e.get("date")), None)
-    if hit:
-        return hit
+def earnings_info(ticker: str) -> dict:
+    """Last and next earnings from Finnhub and Yahoo combined. When they disagree on the next date the earlier one
+    is used (safer for risk checks) and it's marked unconfirmed."""
+    def _fetch():
+        today = datetime.now(_ET).date().isoformat()
+        past, future = {}, {}  # date -> {"timing", "eps", "src"}
+        for e in finnhub_earnings_calendar(150, ticker, days_back=100):
+            d = e.get("date")
+            if not d or e.get("symbol") != ticker:
+                continue
+            timing = {"bmo": "before open", "amc": "after close"}.get(e.get("hour"))
+            bucket = past if (e.get("epsActual") is not None or d < today) else future
+            bucket.setdefault(d, {"timing": timing, "eps": e.get("epsActual"), "src": set()})["src"].add("finnhub")
+        try:
+            ed = yf.Ticker(ticker).get_earnings_dates(limit=8)
+            for when, row in (ed.iterrows() if ed is not None else []):
+                d = when.date().isoformat()
+                rep = row.get("Reported EPS")
+                reported = rep is not None and not (isinstance(rep, float) and math.isnan(rep))
+                bucket = past if (reported or d < today) else future
+                item = bucket.setdefault(d, {"timing": "before open" if when.hour < 12 else "after close",
+                                             "eps": float(rep) if reported else None, "src": set()})
+                item["src"].add("yahoo")
+        except Exception as e:
+            log.info("Yahoo earnings dates unavailable for %s: %s", ticker, e)
+        # A report already in `past` can't also be upcoming
+        future = {d: v for d, v in future.items() if d not in past}
+
+        nxt = min(future) if future else None
+        others = [d for d in future if d != nxt and (datetime.strptime(d, "%Y-%m-%d") -
+                  datetime.strptime(nxt, "%Y-%m-%d")).days <= 20] if nxt else []
+        confirmed = bool(nxt) and (len(future[nxt]["src"]) > 1 or any(
+            abs((datetime.strptime(d, "%Y-%m-%d") - datetime.strptime(nxt, "%Y-%m-%d")).days) <= 1 for d in others))
+        last = max(past) if past else None
+        days_since = (datetime.now(_ET).date() - datetime.strptime(last, "%Y-%m-%d").date()).days if last else None
+        return {
+            "next": nxt, "next_timing": future[nxt]["timing"] if nxt else None, "next_confirmed": confirmed,
+            "next_alt": None if confirmed or not others else others[0],
+            "last": last, "last_timing": past[last]["timing"] if last else None,
+            "last_eps": past[last]["eps"] if last else None, "days_since_last": days_since,
+        }
     try:
-        ed = (yf.Ticker(ticker).calendar or {}).get("Earnings Date")
-        ed = ed[0] if isinstance(ed, list) and ed else ed
-        return ed.strftime("%Y-%m-%d") if hasattr(ed, "strftime") else (str(ed)[:10] if ed else None)
-    except Exception:
-        return None
+        return get_or_fetch(f"earnings-info:{ticker}", _fetch, ttl=6 * 3600)
+    except Exception as e:
+        log.info("Earnings info failed for %s: %s", ticker, e)
+        return {"next": None, "next_confirmed": False, "last": None, "days_since_last": None}
+
+
+def _earnings_date(ticker: str) -> str | None:
+    return earnings_info(ticker).get("next")
+
+
+def _earnings_extra(ticker: str) -> dict:
+    i = earnings_info(ticker)
+    return {"earnings_confirmed": i.get("next_confirmed", False), "earnings_alt": i.get("next_alt"),
+            "earnings_timing": i.get("next_timing"), "last_earnings": i.get("last"),
+            "last_earnings_timing": i.get("last_timing"), "days_since_earnings": i.get("days_since_last")}
 
 
 def _spot(ticker: str) -> float:
@@ -257,6 +303,7 @@ def volatility_overview(ticker: str) -> dict:
             "level": level,
             "moves": moves,
             "earnings_date": earnings,
+            **_earnings_extra(ticker),
             "earnings_in_days": e_days,
             "earnings_in_window": earnings_in_window,
             "summary": _vol_summary(level, iv30, rv20, iv_rank, earnings_in_window, e_days),
@@ -397,7 +444,7 @@ def income_ideas(ticker: str, expiry: str | None = None) -> dict:
         return {
             "ticker": ticker, "spot": round(S, 2), "expiry": exp, "dte": _dte(exp),
             "expirations": [{"date": e, "dte": _dte(e), "monthly": _is_monthly(e)} for e in choices],
-            "earnings_date": earnings, "earnings_before_expiry": earnings_before,
+            "earnings_date": earnings, "earnings_before_expiry": earnings_before, **_earnings_extra(ticker),
             "expected_move": None if not em else {"move": round(em, 2), "low": round(em_range[0], 2),
                                                   "high": round(em_range[1], 2)},
             **ideas,
@@ -890,6 +937,7 @@ def directional_ideas(ticker: str, direction: str, budget: float, risk: str) -> 
             "expected_move": None if not em else {"move": round(em, 2), "pct": round(em / S * 100, 1),
                                                   "low": round(S - em, 2), "high": round(S + em, 2)},
             "earnings_date": earnings, "earnings_before_expiry": e_days is not None and 0 <= e_days <= d,
+            **_earnings_extra(ticker),
             "ideas": ordered, "best_why": why,
             "min_budget_needed": round(min(needed), 2) if not ordered and needed else None,
         }
