@@ -107,7 +107,7 @@ def list_events(user_id, after_id=0, limit=200):
     if after_id < 0 or not 1 <= limit <= 1000:
         raise ValueError("Invalid ledger page")
     rows = database._run(
-        "SELECT * FROM accounting_events WHERE user_id=? AND id>? ORDER BY id LIMIT ?",
+        f"SELECT * FROM accounting_events WHERE user_id={database.PH} AND id>{database.PH} ORDER BY id LIMIT {database.PH}",
         (user_id, after_id, limit), fetch="all",
     )
     for row in rows:
@@ -228,7 +228,7 @@ def time_weighted_return(entries):
 
 def report(user_id):
     import database
-    rows = database._run("SELECT * FROM accounting_events WHERE user_id=? ORDER BY id", (user_id,), fetch="all")
+    rows = database._run(f"SELECT * FROM accounting_events WHERE user_id={database.PH} ORDER BY id", (user_id,), fetch="all")
     events = {row["id"]: row for row in rows}
     manual = [{**json.loads(row["after_json"]), "id": row["id"]} for row in _active_manual(rows)]
     fees = {}

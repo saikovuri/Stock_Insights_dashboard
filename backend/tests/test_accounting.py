@@ -21,6 +21,24 @@ class AccountingTests(unittest.TestCase):
         conn.commit()
         conn.close()
 
+    def test_accounting_queries_use_database_placeholders(self):
+        import accounting
+        for placeholder in ("?", "%s"):
+            with self.subTest(placeholder=placeholder), \
+                 patch.object(database, "PH", placeholder), \
+                 patch.object(database, "_run", return_value=[]) as run:
+                self.assertEqual(accounting.list_events(7, after_id=123, limit=50), [])
+                run.assert_called_once_with(
+                    f"SELECT * FROM accounting_events WHERE user_id={placeholder} AND id>{placeholder} ORDER BY id LIMIT {placeholder}",
+                    (7, 123, 50), fetch="all",
+                )
+                run.reset_mock()
+                accounting.report(7)
+                run.assert_called_once_with(
+                    f"SELECT * FROM accounting_events WHERE user_id={placeholder} ORDER BY id",
+                    (7,), fetch="all",
+                )
+
     def option(self, contracts=1, option_type="put", position="short"):
         return database.add_user_option(1, "AAPL", option_type, 100, "2027-01-15", 2, contracts, position)
 
