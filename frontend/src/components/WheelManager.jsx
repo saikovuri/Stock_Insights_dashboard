@@ -11,6 +11,8 @@ function CoveredCalls({ preset }) {
   const [ticker, setTicker] = useState(preset?.ticker || '');
   const [basis, setBasis] = useState(preset?.costBasis ?? '');
   const [shares, setShares] = useState(100);
+  const [cadence, setCadence] = useState('all');
+  const [selectedDate, setSelectedDate] = useState('');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -18,7 +20,9 @@ function CoveredCalls({ preset }) {
   const run = async (t = ticker, b = basis, s = shares) => {
     setLoading(true); setError(null); setData(null);
     try {
-      setData(await fetchAssignedCalls(t.trim().toUpperCase(), Number(b), s));
+      const result = await fetchAssignedCalls(t.trim().toUpperCase(), Number(b), s, cadence);
+      setData(result);
+      setSelectedDate(result.expiry || '');
     } catch (e) {
       setError(e.message);
     } finally {
@@ -27,46 +31,75 @@ function CoveredCalls({ preset }) {
   };
   useEffect(() => { if (preset?.ticker && preset?.costBasis) run(preset.ticker, preset.costBasis, 100); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const selected = data?.expirations?.find(option => option.date === selectedDate) ?? data?.expirations?.[0];
+  const ideas = selected?.ideas ?? data?.ideas ?? [];
+  const expiry = selected?.date ?? data?.expiry;
+  const days = selected?.dte ?? data?.dte;
+  const earningsOverlap = selected?.earnings_before_expiry ?? data?.earnings_before_expiry;
+
   return (
     <>
       <p className="structures-intro">
-        Assigned on a put? Now you own the shares. Sell a call <b>at or above your cost</b> each month: you keep the
-        premium, and if the shares get called away you still exit at a profit. Repeat until called, then go back to
-        selling puts.
+        Calls at or above your entered cost cap the shares' upside. Premium offsets some downside, but does not
+        protect against a large stock loss. Fees and any buy-back cost reduce the outcome.
       </p>
       <div className="income-controls">
         <label>Ticker
-          <input className="tool-input" value={ticker} placeholder="e.g. AAPL" onChange={e => setTicker(e.target.value)} />
+          <input className="tool-input" value={ticker} disabled={loading} placeholder="e.g. AAPL" onChange={e => { setTicker(e.target.value); setData(null); }} />
         </label>
         <label>Cost per share ($)
-          <input type="number" className="tool-input" min={0} step={0.01} value={basis}
-            placeholder="strike − premium" onChange={e => setBasis(e.target.value)} />
+          <input type="number" className="tool-input" min={0} step={0.01} value={basis} disabled={loading}
+            placeholder="strike − premium" onChange={e => { setBasis(e.target.value); setData(null); }} />
         </label>
         <label>Shares
-          <input type="number" className="tool-input" min={100} step={100} value={shares}
-            onChange={e => setShares(Math.max(100, Number(e.target.value) || 100))} />
+          <input type="number" className="tool-input" min={100} step={100} value={shares} disabled={loading}
+            onChange={e => { setShares(Math.max(100, Number(e.target.value) || 100)); setData(null); }} />
+        </label>
+        <label>Expiry horizon
+          <select className="tool-input covered-call-horizon" value={cadence} disabled={loading} onChange={e => { setCadence(e.target.value); setData(null); }}>
+            <option value="all">All dates (0-120 days)</option>
+            <option value="weekly">Weekly (1-7 days)</option>
+          </select>
         </label>
         <button className="btn-primary btn-sm" disabled={!ticker.trim() || !(Number(basis) > 0) || loading} onClick={() => run()}>
           {loading ? 'Loading…' : 'Suggest covered calls'}
         </button>
       </div>
-      {error && <p className="empty-state">{error}</p>}
+      {cadence === 'weekly' && <p className="ivrank-note">Weekly calls have higher near-expiry gamma risk and less time to adjust.</p>}
+      {error && <p className="empty-state" role="alert">{error}</p>}
       {data && (
         <>
           <div className={`income-warning ${data.unrealized_pct < 0 ? 'income-er' : ''}`}>
             <strong>
               {data.ticker} ${data.spot} vs your cost ${data.cost_basis} ({data.unrealized_pct > 0 ? '+' : ''}{data.unrealized_pct}%)
-              · {data.contracts} contract{data.contracts === 1 ? '' : 's'} · expiry {fmtDate(data.expiry)}{data.monthly ? ' (monthly)' : ''} ({data.dte}d)
+              · {data.contracts} contract{data.contracts === 1 ? '' : 's'}
+              {expiry && <> · expiry {fmtDate(expiry)}{(selected?.monthly ?? data.monthly) ? ' (monthly)' : ''} ({days}d)</>}
             </strong>
             <div>{data.note}</div>
-            {data.earnings_before_expiry && <div>⚠️ Earnings {fmtDate(data.earnings_date)} before expiry — a gap up can call the shares away.</div>}
+            {earningsOverlap && <div>⚠️ Earnings {fmtDate(data.earnings_date)} before expiry — a gap up can call the shares away.</div>}
+            {days === 0 && <div className="negative">Expires today: elevated gamma risk and limited time to adjust. Annualized returns are not forecasts.</div>}
           </div>
-          {data.ideas.length ? (
+          {!!data.expirations?.length && <div className="income-controls">
+            <label>Eligible expiry
+              <select className="tool-input covered-call-dates" value={selected?.date || ''} onChange={event => setSelectedDate(event.target.value)}>
+                {data.expirations.map(option => <option key={option.date} value={option.date}>
+                  {option.date} ({option.dte}d) - {option.ideas.length} strikes
+                </option>)}
+              </select>
+            </label>
+          </div>}
+          {data.checked_expirations != null && <p className="ivrank-note">
+            {data.expirations.length} qualifying dates; {data.skipped_expirations} dates skipped with no qualifying strikes.
+          </p>}
+          {!!data.unavailable_expirations?.length && <p className="ivrank-note negative" role="status">
+            Quotes unavailable for {data.unavailable_expirations.length} dates ({data.unavailable_expirations.join(', ')}). Results are incomplete.
+          </p>}
+          {ideas.length ? (
             <div className="structures-grid income-grid">
-              {data.ideas.map(i => {
+              {ideas.map(i => {
                 const [liqText, liqCls] = LIQ[i.liquidity] || LIQ.ok;
                 return (
-                  <div key={i.strike + i.expiry} className="structure-card">
+                  <div key={i.strike + i.expiry} className="structure-card covered-call-card">
                     <div className="structure-title">{i.label} <span className="income-delta">Δ {i.delta}</span> <Tip term="delta" /></div>
                     <div className="structure-legs">
                       <div className="structure-leg leg-sell">
@@ -76,19 +109,29 @@ function CoveredCalls({ preset }) {
                     </div>
                     <div className="structure-stats">
                       <div><span>Premium</span><strong className="positive">{money(i.total_premium)}</strong></div>
+                      <div><span>Bid / ask</span><strong>{i.bid == null || i.ask == null ? 'Unavailable' : `$${i.bid.toFixed(2)} / $${i.ask.toFixed(2)}`}</strong></div>
+                      <div className="covered-call-cost"><span>Projected cost/share</span><strong>
+                        {i.premium_adjusted_cost == null ? 'Unavailable' : i.premium_adjusted_cost.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+                      </strong></div>
                       <div><span>Return on cost</span><strong>{i.return_pct}% <small>({i.annualized_pct}%/yr)</small></strong></div>
                       <div><span>Strike above price</span><strong>+{i.otm_pct}%</strong></div>
                       <div><span>Total gain if called</span><strong className="positive">{i.if_called_pct}%</strong></div>
                       <div><span>Chance of being called</span><strong>~{i.prob_called_pct}%</strong></div>
                       <div><span>Liquidity</span><strong className={liqCls}>{liqText}</strong></div>
+                      {i.spread_pct != null && <div><span>Bid/ask spread</span><strong>{i.spread_pct}%</strong></div>}
                     </div>
                   </div>
                 );
               })}
             </div>
           ) : (
-            <p className="empty-state">No call at or above your cost pays anything within 4 months — hold the shares and check again after a bounce.</p>
+            <p className="empty-state">{data.cadence === 'weekly'
+              ? 'No eligible covered calls at or above your cost in the 1-7 day window. No longer-dated fallback was used.'
+              : 'No eligible covered-call suggestions at or above your cost were found.'}</p>
           )}
+          {!!ideas.length && <p className="ivrank-note">Projected cost/share = entered cost minus quoted total call premium divided by {data.shares} shares.
+            Assumes a fill at the quoted midpoint and excludes fees and buy-back costs. Premium received is not realized option profit while the call is open.
+            This scenario does not change recorded holdings or tax basis.</p>}
         </>
       )}
     </>

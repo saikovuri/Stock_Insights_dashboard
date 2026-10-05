@@ -85,6 +85,89 @@ test('external context stays distinct and usable on desktop and mobile', async (
   await expect(page.getByRole('heading', { name: /Stocks in play/ })).toBeVisible();
 });
 
+test('weekly covered calls show projected ownership cost', async ({ page }, testInfo) => {
+  let cadence;
+  await page.route('**/api/stock/NVDA/assigned-calls?*', route => {
+    cadence = new URL(route.request().url()).searchParams.get('cadence');
+    const expiry = '2026-10-09';
+    const dte = 4;
+    const ideas = [
+        { label: 'Max premium', strike: 250, mid: 4.05, total_premium: 405, premium_adjusted_cost: 222.29, delta: 0.35 },
+        { label: 'Balanced', strike: 255, mid: 2.72, total_premium: 272, premium_adjusted_cost: 223.62, delta: 0.25 },
+        { label: 'Keep the shares', strike: 260, mid: 1.76, total_premium: 176, premium_adjusted_cost: 224.58, delta: 0.15 },
+      ].map(idea => ({ ...idea, expiry, dte, bid: idea.mid - 0.02, ask: idea.mid + 0.02, spread_pct: 2,
+        open_interest: 500, liquidity: 'good', return_pct: 1.79, annualized_pct: 163.2,
+        otm_pct: 4.6, if_called_pct: 12.24, prob_called_pct: 22 }));
+    const expirations = [{ date: expiry, dte, ideas }];
+    if (cadence === 'all') expirations.push({ date: '2026-11-06', dte: 32,
+      ideas: [{ ...ideas[0], expiry: '2026-11-06', dte: 32, premium_adjusted_cost: 220.29 }] });
+    return route.fulfill({ json: { ticker: 'NVDA', spot: 238.9, cost_basis: 226.34, shares: 100, contracts: 1,
+      cadence, expiry, dte, unrealized_pct: 5.5, note: 'Synthetic test quotes.', ideas, expirations,
+      checked_expirations: expirations.length + 1, skipped_expirations: 1, unavailable_expirations: [] } });
+  });
+  await page.goto('/#ideas');
+  await page.getByRole('button', { name: /Wheel/, exact: false }).click();
+  const manager = page.locator('#wheel-manager');
+  await manager.getByRole('button', { name: /Assigned/ }).click();
+  await manager.getByLabel('Ticker', { exact: true }).fill('NVDA');
+  await manager.getByLabel('Cost per share ($)', { exact: true }).fill('226.34');
+  await manager.getByRole('button', { name: 'Suggest covered calls' }).click();
+  await expect(manager.getByText('$222.29', { exact: true })).toBeVisible();
+  expect(cadence).toBe('all');
+  await expect(manager.getByLabel('Eligible expiry').locator('option')).toHaveCount(2);
+  await manager.getByLabel('Eligible expiry').selectOption('2026-11-06');
+  await expect(manager.getByText('$220.29', { exact: true })).toBeVisible();
+  await expect(manager.getByText('$222.29', { exact: true })).toHaveCount(0);
+  await manager.screenshot({ path: testInfo.outputPath('all-dates-covered-calls.png') });
+  await manager.getByLabel('Expiry horizon').selectOption('weekly');
+  await expect(manager.getByText('$222.29', { exact: true })).toHaveCount(0);
+  await manager.getByRole('button', { name: 'Suggest covered calls' }).click();
+  await expect(manager.getByText('$222.29', { exact: true })).toBeVisible();
+  expect(cadence).toBe('weekly');
+  await expect(manager.getByLabel('Cost per share ($)', { exact: true })).toHaveValue('226.34');
+  await expect(manager.getByText(/does not change recorded holdings or tax basis/)).toBeVisible();
+  expect(await manager.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+  expect(await manager.locator('.structure-stats > div').evaluateAll(rows => rows.every(row => {
+    const label = row.querySelector('span').getBoundingClientRect();
+    const value = row.querySelector('strong').getBoundingClientRect();
+    return label.right <= value.left + 1;
+  }))).toBe(true);
+  await manager.screenshot({ path: testInfo.outputPath('weekly-covered-calls.png') });
+  await page.route('**/api/stock/NVDA/assigned-calls?*', route => route.fulfill({ status: 404,
+    json: { detail: 'No listed expirations within 1-7 days' } }));
+  await manager.getByRole('button', { name: 'Suggest covered calls' }).click();
+  await expect(manager.getByRole('alert')).toHaveText('No listed expirations within 1-7 days');
+  await expect(manager.getByText('$222.29', { exact: true })).toHaveCount(0);
+});
+
+test('put tested uses listed expiries instead of fabricated dates', async ({ page }, testInfo) => {
+  let submittedExpiry;
+  await page.route('**/api/stock/NVDA/option-expirations', route => route.fulfill({ json: {
+    expirations: [{ date: '2026-10-09', dte: 4 }, { date: '2026-10-16', dte: 11 }],
+  } }));
+  await page.route('**/api/stock/NVDA/roll?*', route => {
+    submittedExpiry = new URL(route.request().url()).searchParams.get('expiry');
+    return route.fulfill({ json: { rules: ['Synthetic roll result.'], rolls: [], alternatives: [] } });
+  });
+  await page.goto('/#ideas');
+  await page.getByRole('button', { name: /Wheel/ }).click();
+  const manager = page.locator('#wheel-manager');
+  await manager.getByLabel('Ticker', { exact: true }).fill('NVDA');
+  const expiry = manager.getByRole('combobox', { name: 'Expiry', exact: true });
+  await expect(expiry.locator('option')).toHaveCount(3);
+  await expect(expiry.getByRole('option', { name: /Oct 7/ })).toHaveCount(0);
+  await manager.getByLabel('Short put strike').fill('240');
+  await manager.getByLabel('Credit received / share').fill('2');
+  await expect(manager.getByRole('button', { name: 'Find rolls' })).toBeDisabled();
+  await expiry.selectOption('2026-10-09');
+  await manager.getByRole('button', { name: 'Find rolls' }).click();
+  await expect(manager.getByText('Synthetic roll result.')).toBeVisible();
+  expect(submittedExpiry).toBe('2026-10-09');
+  await expect(manager.getByRole('alert')).toHaveCount(0);
+  expect(await manager.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+  await manager.screenshot({ path: testInfo.outputPath('put-tested-expiries.png') });
+});
+
 test('holdings stay usable when quotes are missing', async ({ page }, testInfo) => {
   await page.goto('/#portfolio');
   await expect(page.getByText('AAPL', { exact: true })).toBeVisible();

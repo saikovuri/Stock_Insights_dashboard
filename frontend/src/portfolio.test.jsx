@@ -17,9 +17,86 @@ import WheelIdeas from './components/WheelIdeas';
 import MarketContext from './components/MarketContext';
 import PreTradeChecklist from './components/PreTradeChecklist';
 import Journal from './components/Journal';
+import WheelManager from './components/WheelManager';
+import RollRepair from './components/RollRepair';
 
 beforeEach(() => { localStorage.clear(); sessionStorage.clear(); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+test('put repair only submits a live listed expiry', async () => {
+  vi.spyOn(stockApi, 'fetchOptionExpirations').mockResolvedValue({ expirations: [{ date: '2026-10-09', dte: 4 }] });
+  const roll = vi.spyOn(stockApi, 'fetchRollIdeas').mockResolvedValue({ rules: [] });
+  render(<RollRepair ticker="NVDA" mode="csp" standalone />);
+  await screen.findByRole('option', { name: /Oct 9/ });
+  expect(screen.queryByRole('option', { name: /Oct 7/ })).toBeNull();
+  fireEvent.change(screen.getByLabelText('Short put strike'), { target: { value: '240' } });
+  expect(screen.getByRole('button', { name: 'Find rolls' }).disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText('Expiry'), { target: { value: '2026-10-09' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Find rolls' }));
+  await waitFor(() => expect(roll).toHaveBeenCalledWith('NVDA', expect.objectContaining({ expiry: '2026-10-09' })));
+});
+
+test('put repair can retry unavailable expiry data', async () => {
+  vi.spyOn(stockApi, 'fetchOptionExpirations').mockRejectedValueOnce(new Error('Expiry service unavailable'))
+    .mockResolvedValue({ expirations: [{ date: '2026-10-09', dte: 4 }] });
+  render(<RollRepair ticker="NVDA" mode="csp" standalone />);
+  await screen.findByText('Expiry service unavailable');
+  fireEvent.click(screen.getByRole('button', { name: 'Retry expiries' }));
+  await screen.findByRole('option', { name: /Oct 9/ });
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
+test('put repair preserves but blocks an unavailable saved expiry', async () => {
+  vi.spyOn(stockApi, 'fetchOptionExpirations').mockResolvedValue({ expirations: [{ date: '2026-10-09', dte: 4 }] });
+  const roll = vi.spyOn(stockApi, 'fetchRollIdeas').mockResolvedValue({ rules: [] });
+  render(<RollRepair ticker="NVDA" mode="csp" standalone initial={{ expiry: '2026-10-07', shortStrike: 240 }} />);
+  await screen.findByText(/Its date has not been changed/);
+  expect(screen.getByLabelText('Expiry').value).toBe('2026-10-07');
+  expect(screen.getByRole('button', { name: 'Find rolls' }).disabled).toBe(true);
+  expect(roll).not.toHaveBeenCalled();
+});
+
+test('covered calls switch to weekly and show projected share cost without recording a trade', async () => {
+  const fetch = vi.spyOn(stockApi, 'fetchAssignedCalls').mockResolvedValue({ ticker: 'NVDA', spot: 238.9, cost_basis: 226.34,
+    shares: 100, contracts: 1, expiry: '2026-10-09', dte: 4, cadence: 'weekly', unrealized_pct: 5.5, note: '',
+    ideas: [{ label: 'Balanced', strike: 250, expiry: '2026-10-09', dte: 4, delta: 0.25, mid: 4.05, total_premium: 405,
+      premium_adjusted_cost: 222.29, open_interest: 500, liquidity: 'good', return_pct: 1.79, annualized_pct: 163,
+      otm_pct: 4.6, if_called_pct: 12.24, prob_called_pct: 22 }] });
+  render(<WheelManager />);
+  fireEvent.click(screen.getByRole('button', { name: /Assigned/ }));
+  fireEvent.change(screen.getByLabelText('Ticker'), { target: { value: 'NVDA' } });
+  fireEvent.change(screen.getByLabelText('Cost per share ($)'), { target: { value: '226.34' } });
+  fireEvent.change(screen.getByLabelText('Expiry horizon'), { target: { value: 'weekly' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Suggest covered calls' }));
+  expect(await screen.findByText('$222.29')).toBeTruthy();
+  expect(fetch).toHaveBeenLastCalledWith('NVDA', 226.34, 100, 'weekly');
+  expect(screen.getByText(/does not change recorded holdings or tax basis/)).toBeTruthy();
+  expect(screen.getByLabelText('Cost per share ($)').value).toBe('226.34');
+  fireEvent.change(screen.getByLabelText('Expiry horizon'), { target: { value: 'all' } });
+  expect(screen.queryByText('$222.29')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Suggest covered calls' }));
+  await screen.findByText('$222.29');
+  expect(fetch).toHaveBeenLastCalledWith('NVDA', 226.34, 100, 'all');
+});
+
+test('covered calls list all qualifying dates and every strike on the selected date', async () => {
+  const ideas = Array.from({ length: 5 }, (_, index) => ({ label: 'Balanced', strike: 250 + index, expiry: '2026-10-09',
+    dte: 4, delta: 0.25, mid: 4, total_premium: 400, premium_adjusted_cost: 222.34, open_interest: 500, liquidity: 'good' }));
+  vi.spyOn(stockApi, 'fetchAssignedCalls').mockResolvedValue({ ticker: 'NVDA', spot: 238.9, cost_basis: 226.34, shares: 100,
+    contracts: 1, expiry: '2026-10-09', ideas, expirations: [
+      { date: '2026-10-09', dte: 4, ideas },
+      { date: '2026-11-06', dte: 32, earnings_before_expiry: true, ideas: [{ ...ideas[0], expiry: '2026-11-06', premium_adjusted_cost: 220.34 }] },
+    ], earnings_date: '2026-10-15', checked_expirations: 4, skipped_expirations: 1, unavailable_expirations: ['2026-10-23'] });
+  render(<WheelManager preset={{ mode: 'assigned', ticker: 'NVDA', costBasis: 226.34 }} />);
+  await screen.findByLabelText('Eligible expiry');
+  expect(screen.getAllByText('$222.34')).toHaveLength(5);
+  expect(screen.getByLabelText('Eligible expiry').options).toHaveLength(2);
+  expect(screen.getByText(/Results are incomplete/)).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('Eligible expiry'), { target: { value: '2026-11-06' } });
+  expect(screen.getByText('$220.34')).toBeTruthy();
+  expect(screen.queryByText('$222.34')).toBeNull();
+  expect(screen.getByText(/Earnings.*before expiry/)).toBeTruthy();
+});
 
 test.each([
   ['stock', 85, '$85', 'positive'], ['stock', -35, '-$35', 'negative'], ['stock', 0, '$0', ''],

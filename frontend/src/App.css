@@ -4528,6 +4528,11 @@ tr.alert-triggered {
 .income-er-clear { font-size: 0.8rem; color: var(--positive, #22c55e); margin: 0 0 0.6rem; }
 .structure-stats small { color: var(--text-muted); font-weight: 500; }
 .income-grid { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
+.covered-call-card .structure-stats { grid-template-columns: 1fr; }
+.covered-call-card .structure-stats > div { gap: 0.75rem; }
+.covered-call-card .structure-stats strong { flex-shrink: 0; }
+.tool-input.covered-call-horizon { width: 220px; max-width: 100%; }
+.tool-input.covered-call-dates { width: 280px; max-width: 100%; }
 .income-ideas .ivrank-header { flex-wrap: wrap; gap: 0.5rem; }
 .income-ideas .chart-toggle { flex-wrap: wrap; }
 

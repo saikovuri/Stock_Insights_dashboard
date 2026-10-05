@@ -369,8 +369,14 @@ export async function fetchIncomeIdeas(ticker, expiry) {
   return res.json();
 }
 
-export async function fetchAssignedCalls(ticker, costBasis, shares) {
-  const params = new URLSearchParams({ cost_basis: String(costBasis), shares: String(shares) });
+export async function fetchOptionExpirations(ticker) {
+  const res = await fetch(`${BASE}/stock/${ticker}/option-expirations`);
+  if (!res.ok) throw new Error(await readError(res, 'Failed to load listed expiries'));
+  return res.json();
+}
+
+export async function fetchAssignedCalls(ticker, costBasis, shares, cadence = 'all') {
+  const params = new URLSearchParams({ cost_basis: String(costBasis), shares: String(shares), cadence });
   const res = await fetch(`${BASE}/stock/${ticker}/assigned-calls?${params}`);
   if (!res.ok) throw new Error(await readError(res, 'Failed to load covered calls'));
   return res.json();

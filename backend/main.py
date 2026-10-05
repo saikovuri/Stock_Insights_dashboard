@@ -1497,17 +1497,29 @@ def stock_income(request: Request, ticker: str,
         raise _upstream_error(e)
 
 
+@app.get("/api/stock/{ticker}/option-expirations")
+@limiter.limit("30/minute")
+def stock_option_expirations(request: Request, ticker: str):
+    ticker = _valid_ticker(ticker)
+    return {"expirations": [
+        {"date": expiry, "dte": options_analytics._dte(expiry)}
+        for expiry in sorted(options_analytics._expirations(ticker))
+        if options_analytics._live(expiry)
+    ]}
+
+
 @app.get("/api/stock/{ticker}/assigned-calls")
 @limiter.limit("20/minute")
 def stock_assigned_calls(request: Request, ticker: str,
                          cost_basis: float = Query(..., gt=0, le=100000),
-                         shares: int = Query(100, ge=100, le=1000000)):
+                         shares: int = Query(100, ge=100, le=1000000),
+                         cadence: str = Query("all", pattern="^(all|standard|weekly)$")):
     """Covered calls for assigned shares (wheel step 2), never below the cost basis."""
     ticker = _valid_ticker(ticker)
     try:
-        return options_analytics.assigned_calls(ticker, cost_basis, shares)
-    except LookupError:
-        raise HTTPException(status_code=404, detail="No listed options for this ticker")
+        return options_analytics.assigned_calls(ticker, cost_basis, shares, cadence)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error))
     except Exception as e:
         raise _upstream_error(e)
 

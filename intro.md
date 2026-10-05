@@ -141,6 +141,8 @@ Source: [backend/scanner.py](backend/scanner.py), [frontend/src/components/Ideas
 
 The Wheel scanner searches the stored setup-scan universe. It does not evaluate every listed stock or every listed option. The scanned stock universe and its data coverage therefore constrain the result before any Wheel-specific rule runs.
 
+The S&P 500 + Nasdaq-100 expansion uses new setup and Wheel cache keys so previous S&P-only results are not reused as expanded results. If the expanded setup scan is missing, opening Wheel starts it in the background; the page remains in its building state until the setup scan and subsequent Wheel scan complete. Inclusion in either index makes a ticker available for screening, not an automatic Wheel recommendation. Missing constituent or price data can still prevent a ticker from being evaluated; use **Ask about a stock** for an individual lookup outside the automatic list.
+
 ### Stock Quality Pool
 
 All of the following are required:
@@ -374,13 +376,19 @@ An optional AI verdict is Good/Caution/Avoid with reasons. Its suggested strike 
 
 ### Covered Calls After Assignment
 
-Uses entered cost basis and shares. Only OTM calls with strike at/above cost basis are considered; contracts are `floor(shares / 100)`. Target deltas are 0.15, 0.25 and 0.35, but labels follow actual selected delta: below 0.20 "Keep the shares", through 0.32 "Balanced", above that "Max premium".
+Uses entered cost basis and shares; contracts are `floor(shares / 100)`. Shows every qualifying strike on the selected date, not just three target-delta picks. Eligibility requires an OTM call at/above entered cost, open interest of at least 500, positive non-crossed bid/ask quotes, a bid/ask spread no wider than 8% of midpoint, model delta 0.10-0.40 inclusive, and midpoint premium of at least 0.1% of entered per-share cost. Labels follow actual selected delta: below 0.20 "Keep the shares", through 0.32 "Balanced", above that "Max premium". These are fixed screening heuristics, not a claim of optimality or guaranteed profit; low-return or thin candidates are not substituted.
 
-When shares trade below cost, the tool can add the lowest strike at/above cost as "Exit at cost". If nothing suitable is found, it examines longer dates through 120 DTE, seeking the first at-cost call paying at least 0.5% of cost, otherwise the highest premium found. Earnings and liquidity remain visible warnings; this descriptive tool does not apply every planner exclusion. Strike-at-cost is a gross-price safeguard, not a guarantee against net loss after fees, taxes, financing or an inaccurate entered basis.
+The default **All dates (0-120 days)** checks all live listed expiries within 120 calendar days, starting today. **Weekly (1-7 days)** restricts that search to the stated window, including standard monthly expiries if they fall within it. The eligible-expiry selector lists only dates with passing strikes, chronologically, with candidate counts. Dates without candidates are skipped; chain-fetch or analysis failures are reported separately as unavailable, with an incomplete-results warning. No listed dates produces an explicit availability error. No candidates produces an empty result without relaxing thresholds or leaving the chosen horizon. Same-day expiries stop qualifying at 4pm US Eastern, matching roll validation; near-expiry gamma risk is flagged, and annualization is not a forecast. Earnings warnings follow the selected date; earnings overlap does not exclude candidates. Four workers check chains; results cache separately by ticker, entered cost, shares and horizon for three minutes. The legacy API `standard` cadence is an alias for the all-dates search.
+
+Underwater shares use the same filters: there is no below-cost strike or illiquid fallback. This descriptive tool does not apply every planner exclusion. Strike-at-cost is a gross-price safeguard, not a guarantee against net loss after fees, taxes, financing or an inaccurate entered basis.
+
+Each suggestion shows **Projected cost/share**: `entered cost - (call midpoint * 100 * contracts / entered shares)`. For example, $226.34 cost and a $405 total premium on 100 shares produces $222.29/share. With an incomplete 100-share lot, only whole contracts earn premium, but the reduction is averaged across all entered shares. This is a hypothetical economic cost assuming a midpoint fill, not a change to holdings or tax basis. It excludes fees and buy-back costs; an open call's premium is not yet realized option profit. Earlier premiums are not fetched or added automatically, so they are reflected only if already included in the entered cost. Changing inputs clears old suggestions; the new scenario requires another suggestion request.
 
 ### Roll / Repair
 
 Supports cash-secured puts, covered calls and put credit spreads. It validates the existing expiry/strike quote; a put spread requires a lower long strike. "Tested" in the calculation means in the money or delta at least 0.40; the accompanying generic management text mentions approximately 0.50, so the flag is deliberately earlier than that prose guideline.
+
+The standalone Put tested form loads listed expiries from the backend rather than converting a manually entered date into its own dropdown option. Dates and calendar DTE use the same US Eastern clock and 4pm expiry cutoff as roll validation. The current position's expiry must be listed before a request is enabled. An unavailable prefilled expiry stays visibly marked and blocked; it is not silently moved to another contract. Expiry-loading failures support retry. Liquidity filtering is for proposed new trades, not for hiding the actual existing position's expiry.
 
 - Search up to ten later listed expiries, beyond current DTE but no more than 63 additional days, with new expiry at least seven days away.
 - Consider unchanged strikes or improvements away from spot, no more than 20% of spot in strike distance. A put spread preserves wing width.
@@ -758,6 +766,8 @@ The Journal workspace has **Trade history**, **Manual journal**, and **Options r
 
 Combines recorded closed stock and option records, sorted by closing timestamp descending. It reports gross realized P&L, with recorded fees and net P&L shown separately for options. Historical option entries share these same records, including their actual dates and notes. It does not infer manual stock-journal entries or paper-track-record ideas to be actual trades, and it does not merge them into account results.
 
+Gross P&L values and the gross realized total are green for profit, red for loss, and neutral for zero. The same value coloring applies to the recorded closed-options table in Manual journal. These colors do not change calculations or deduct fees from gross P&L.
+
 ### Manual Journal
 
 **Options journal: Log closed option** records a previously unrecorded completed single-leg option directly in the account's closed-options history. Enter ticker, call/put, long/short, strike, expiry, whole contracts, actual opening/closing dates, opening/closing premiums **per share**, total fees for both sides, and notes. Past expiries are accepted. Opening must not follow closing; closing cannot be future-dated or after expiry. Standard 100-share contracts only; this is not an assignment/exercise or adjusted-contract workflow.
@@ -953,7 +963,7 @@ Sources: [backend/news_sentiment.py](backend/news_sentiment.py), [backend/ai_bri
 | Quotes, OHLC, option chains, dividends, many company fields | Yahoo Finance/yfinance, with provider fallbacks where implemented. |
 | News, analyst data, earnings calendars | Finnhub and Yahoo depending on feature/configuration. Options earnings uses the combined canonical helper; not every narrative calendar has identical coverage. |
 | Annual fundamentals, insider transactions, fund disclosures | SEC EDGAR/XBRL/Form 4/13F; reporting delays and amendments matter. |
-| Scanner membership | Current S&P 500 scrape/cache; point-in-time research requires separately configured membership history. |
+| Scanner membership | Current S&P 500 and Nasdaq-100 Wikipedia constituent lists, independently cached and deduplicated; point-in-time research requires separately configured membership history. |
 | US macro releases | Nasdaq calendar and the maintained Federal Reserve date fallback. |
 | Reddit attention | ApeWisdom aggregate observations, read-only. |
 | Prediction markets | Polymarket public market data, read-only. |

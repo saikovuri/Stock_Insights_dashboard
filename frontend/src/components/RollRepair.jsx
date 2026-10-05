@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { fetchRollIdeas } from '../api/stockApi';
+import { fetchRollIdeas, fetchOptionExpirations } from '../api/stockApi';
 import Tip from './Tip';
 
 const STRATS = {
@@ -50,11 +50,30 @@ export default function RollRepair({ ticker, mode, expirations, initial, standal
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [listed, setListed] = useState(null);
+  const [expiryError, setExpiryError] = useState(null);
+  const [expiryRequest, setExpiryRequest] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setListed(null); setExpiryError(null);
+    setExpiry(initial?.expiry || '');
+    if (expirations) return;
+    fetchOptionExpirations(ticker).then(result => {
+      if (!cancelled) setListed(result.expirations);
+    }).catch(error => {
+      if (!cancelled) { setExpiryError(error.message); setListed([]); }
+    });
+    return () => { cancelled = true; };
+  }, [ticker, expirations, initial?.expiry, expiryRequest]);
+
+  const expiryOptions = expirations ?? listed ?? [];
+  const expiryListed = expiryOptions.some(option => option.date === expiry);
 
   useEffect(() => { if (STRATS[mode]) setStrategy(mode); }, [mode]);
   useEffect(() => { if (!initial) { setData(null); setError(null); } }, [ticker, initial]);
 
-  const ready = expiry && Number(shortStrike) > 0 && (strategy !== 'pcs' || Number(longStrike) > 0);
+  const ready = expiryListed && Number(shortStrike) > 0 && (strategy !== 'pcs' || Number(longStrike) > 0);
   const run = async () => {
     setLoading(true); setError(null); setData(null);
     try {
@@ -66,10 +85,7 @@ export default function RollRepair({ ticker, mode, expirations, initial, standal
     }
   };
   // Prefilled from a portfolio position: check it straight away
-  useEffect(() => { if (initial) run(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const expiryOptions = expirations?.length ? expirations
-    : expiry ? [{ date: expiry, dte: Math.max(0, Math.round((new Date(expiry + 'T16:00:00') - new Date()) / 86400000)) }] : [];
+  useEffect(() => { if (initial && expiryListed && expiry === initial.expiry) run(); }, [initial, expiryListed]); // eslint-disable-line react-hooks/exhaustive-deps
   const st = data?.status;
   const kind = STRATS[strategy].kind;
   const Wrap = standalone ? 'div' : 'details';
@@ -87,14 +103,11 @@ export default function RollRepair({ ticker, mode, expirations, initial, standal
           </select>
         </label>
         <label>Expiry
-          {expiryOptions.length ? (
-            <select className="candle-select" value={expiry} onChange={e => setExpiry(e.target.value)}>
-              <option value="">Select…</option>
+            <select className="candle-select" value={expiry} disabled={!expirations && listed === null} onChange={e => { setExpiry(e.target.value); setData(null); setError(null); }}>
+              <option value="">{!expirations && listed === null ? 'Loading expiries...' : 'Select expiry...'}</option>
+              {expiry && !expiryListed && <option value={expiry} disabled>{expiry} (unavailable)</option>}
               {expiryOptions.map(e => <option key={e.date} value={e.date}>{fmtDate(e.date)} ({e.dte}d)</option>)}
             </select>
-          ) : (
-            <input type="date" className="tool-input" value={expiry} onChange={e => setExpiry(e.target.value)} />
-          )}
         </label>
         <label>Short {kind} strike
           <input type="number" className="tool-input" value={shortStrike} min={0} step={0.5}
@@ -115,7 +128,12 @@ export default function RollRepair({ ticker, mode, expirations, initial, standal
         </button>
       </div>
 
-      {error && <p className="empty-state">{error}</p>}
+      {expiryError && <p className="empty-state" role="alert">{expiryError}{' '}
+        <button className="link-btn" onClick={() => setExpiryRequest(request => request + 1)}>Retry expiries</button>
+      </p>}
+      {!expiryError && (expirations || listed) && !expiryOptions.length && <p className="empty-state">No live listed expiries are available.</p>}
+      {expiry && !expiryListed && (expirations || listed) && <p className="empty-state" role="alert">The position's expiry is no longer listed or has expired. Its date has not been changed.</p>}
+      {error && <p className="empty-state" role="alert">{error}</p>}
 
       {st && (
         <div className={`income-warning ${st.tested ? 'income-er' : ''}`}>

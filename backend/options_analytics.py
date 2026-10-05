@@ -1038,89 +1038,74 @@ def directional_ideas(ticker: str, direction: str, budget: float, risk: str) -> 
 
 # ── Covered calls after assignment (wheel step 2) ───────────────────────────
 
-_CC_TARGETS = [("Keep the shares", 0.15), ("Balanced", 0.25), ("Max premium", 0.35)]
-
-
-def assigned_calls(ticker: str, cost_basis: float, shares: int = 100) -> dict:
-    """Covered calls on assigned shares, never below the cost basis, so being called away is never a loss."""
+def assigned_calls(ticker: str, cost_basis: float, shares: int = 100, cadence: str = "standard") -> dict:
+    """All liquid covered-call candidates by qualifying expiry, at or above entered cost."""
+    if cadence not in {"all", "standard", "weekly"}:
+        raise ValueError("Invalid covered-call cadence")
     def _fetch():
+        from concurrent.futures import ThreadPoolExecutor
         S = _spot(ticker)
         exps = _expirations(ticker)
         earnings = _earnings_date(ticker)
-        choices = [e for e in exps if _live(e) and 7 <= _dte(e) <= 75]
-        exp = _default_income_expiry(ticker, exps, earnings, S) or (choices[0] if choices else None)
-        if not exp:
-            raise LookupError("No suitable expirations")
-        d, T = max(_dte(exp), 1), _years(exp)
-        calls, _ = _chain(ticker, exp)
-        eligible = [r for r in _otm_rows(calls, "call", S, T) if r["strike"] >= cost_basis]
+        lower, upper = (1, 7) if cadence == "weekly" else (0, 120)
+        choices = sorted({expiry for expiry in exps if _live(expiry) and lower <= _dte(expiry) <= upper})
+        if not choices:
+            raise LookupError(f"No listed expirations within {lower}-{upper} days")
         contracts = shares // 100
 
-        def idea(label, r, e=exp):
+        def idea(r, e):
             K, mid = r["strike"], r["mid"]
             days = max(_dte(e), 1)
+            label = "Keep the shares" if r["delta"] < 0.2 else "Balanced" if r["delta"] <= 0.32 else "Max premium"
             return {
                 "label": label, "expiry": e, "dte": _dte(e), "strike": K, "delta": round(r["delta"], 2),
                 "mid": round(mid, 2), "bid": round(r["bid"], 2), "ask": round(r["ask"], 2),
                 "premium": round(mid * 100, 2), "total_premium": round(mid * 100 * contracts, 2),
+                "premium_adjusted_cost": round(cost_basis - mid * 100 * contracts / shares, 2),
                 "return_pct": round(mid / cost_basis * 100, 2),
                 "annualized_pct": round(mid / cost_basis * 365 / days * 100, 1),
                 "if_called_pct": round((K - cost_basis + mid) / cost_basis * 100, 2),
                 "prob_called_pct": round(r["p_itm"] * 100), "otm_pct": round((K - S) / S * 100, 1),
-                "open_interest": r["oi"], "liquidity": _liquidity(r["oi"], _spread_pct(r["bid"], r["ask"])),
+                "open_interest": r["oi"], "liquidity": "good",
+                "spread_pct": round((r["ask"] - r["bid"]) / mid * 100, 2),
             }
 
-        ideas, used = [], set()
-        for _, target in _CC_TARGETS:
-            p = _pick(eligible, target, used)
-            if p:
-                used.add(p["strike"])
-                # Label by the delta actually found: the liquid strike may sit away from the target
-                label = "Keep the shares" if p["delta"] < 0.2 else "Balanced" if p["delta"] <= 0.32 else "Max premium"
-                ideas.append(idea(label, p))
-        below = S < cost_basis
-        if below and eligible:
-            # Lowest strike at/above cost: the "get out at breakeven" call
-            p = min(eligible, key=lambda r: r["strike"])
-            if p["strike"] not in used:
-                ideas.insert(0, idea("Exit at cost", p))
-        if below and not ideas:
-            # Nothing worth selling at the cost basis this month: find the nearest expiry (<=120d) where a call at
-            # cost pays at least 0.5% of cost, else the best-paying one
-            found = []
-            for e in sorted((x for x in exps if _live(x) and _dte(exp) < _dte(x) <= 120), key=_dte):
-                c2, _ = _chain(ticker, e)
-                rows2 = [r for r in _otm_rows(c2, "call", S, _years(e)) if r["strike"] >= cost_basis]
-                if rows2:
-                    r = min(rows2, key=lambda r: r["strike"])
-                    found.append((e, r))
-                    if r["mid"] >= cost_basis * 0.005:
-                        break
-            if found:
-                e, r = next(((e, r) for e, r in found if r["mid"] >= cost_basis * 0.005),
-                            max(found, key=lambda f: f[1]["mid"]))
-                ideas.append(idea("Longer-dated at cost", r, e))
-        ideas.sort(key=lambda i: i["strike"])
+        def candidates(expiry):
+            try:
+                calls, _ = _chain(ticker, expiry)
+                rows = _otm_rows(calls, "call", S, _years(expiry))
+                eligible = [row for row in rows if row["strike"] >= cost_basis
+                            and row["oi"] >= 500 and row["ask"] >= row["bid"] > 0
+                            and (row["ask"] - row["bid"]) / ((row["ask"] + row["bid"]) / 2) <= 0.08
+                            and 0.10 <= row["delta"] <= 0.40 and row["mid"] / cost_basis >= 0.001]
+                return {"date": expiry, "dte": _dte(expiry), "monthly": _is_monthly(expiry),
+                        "earnings_before_expiry": bool(earnings and earnings <= expiry),
+                        "ideas": [idea(row, expiry) for row in sorted(eligible, key=lambda row: row["strike"])]}
+            except Exception as error:
+                log.info("Covered-call chain unavailable for %s %s: %s", ticker, expiry, error)
+                return {"date": expiry, "unavailable": True}
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            checked = list(pool.map(candidates, choices))
+        dates = [result for result in checked if result.get("ideas")]
+        first = dates[0] if dates else None
 
         gap = (S - cost_basis) / cost_basis * 100
-        if not below:
-            note = (f"Stock is {gap:.1f}% above your cost — every strike shown locks in a gain if called. "
-                    "Lower delta keeps more upside; higher delta pays more but is likelier to be called.")
-        elif gap > -10:
-            note = (f"Stock is {abs(gap):.1f}% below your cost. Calls at or above your cost pay less, but selling "
-                    "below it would lock in a loss if called. Take the smaller premium or go a little further out.")
-        else:
-            note = (f"Stock is {abs(gap):.1f}% below your cost, so calls at your cost pay very little. Options: sell "
-                    "a longer-dated call at your cost, wait for a bounce before selling, or accept a lower strike only "
-                    "if you'd rather exit than hold.")
+        note = ("OTM strikes at or above cost; open interest >= 500; bid/ask spread <= 8%; "
+                "delta 0.10-0.40; quoted premium >= 0.1% of cost. These are screening rules, not a profit guarantee.")
         return {
             "ticker": ticker, "spot": round(S, 2), "cost_basis": round(cost_basis, 2), "shares": shares,
-            "contracts": contracts, "expiry": exp, "dte": _dte(exp), "monthly": _is_monthly(exp),
-            "earnings_date": earnings, "earnings_before_expiry": bool(earnings and earnings <= exp),
-            "unrealized_pct": round(gap, 1), "note": note, "ideas": ideas,
+            "cadence": cadence,
+            "contracts": contracts, "expiry": first["date"] if first else None,
+            "dte": first["dte"] if first else None, "monthly": first["monthly"] if first else False,
+            "earnings_date": earnings, "earnings_before_expiry": first["earnings_before_expiry"] if first else False,
+            "unrealized_pct": round(gap, 1), "note": note, "ideas": first["ideas"] if first else [],
+            "expirations": dates, "checked_expirations": len(checked),
+            "skipped_expirations": sum(not result.get("ideas") and not result.get("unavailable") for result in checked),
+            "unavailable_expirations": [result["date"] for result in checked if result.get("unavailable")],
         }
 
-    return get_or_fetch(f"assigned-cc:{ticker}:{cost_basis:.2f}:{shares}", _fetch, ttl=180)
+    return get_or_fetch(f"assigned-cc-v3:{ticker}:{cost_basis:.2f}:{shares}:{cadence}", _fetch, ttl=180)
 
 
 # ── Roll / repair a tested short option position ────────────────────────────

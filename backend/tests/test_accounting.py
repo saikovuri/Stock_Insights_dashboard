@@ -21,6 +21,93 @@ class AccountingTests(unittest.TestCase):
         conn.commit()
         conn.close()
 
+    def test_assigned_calls_weekly_expiry_and_adjusted_cost(self):
+        import options_analytics as analytics
+        from contextlib import ExitStack
+        expiries = {"2026-10-09": 4, "2026-10-12": 7, "2026-11-06": 32}
+        quote = dict(strike=250, mid=4.05, bid=4, ask=4.1, delta=0.25, oi=500, p_itm=0.22)
+        for shares in (100, 250):
+            with self.subTest(shares=shares), ExitStack() as stack:
+                cache = stack.enter_context(patch.object(analytics, "get_or_fetch", side_effect=lambda key, fetch, ttl: fetch()))
+                stack.enter_context(patch.object(analytics, "_spot", return_value=238.9))
+                stack.enter_context(patch.object(analytics, "_expirations", return_value=list(expiries)))
+                stack.enter_context(patch.object(analytics, "_earnings_date", return_value="2026-12-01"))
+                stack.enter_context(patch.object(analytics, "_live", return_value=True))
+                stack.enter_context(patch.object(analytics, "_dte", side_effect=expiries.get))
+                stack.enter_context(patch.object(analytics, "_years", return_value=7 / 365))
+                stack.enter_context(patch.object(analytics, "_is_monthly", return_value=False))
+                stack.enter_context(patch.object(analytics, "_chain", return_value=([], [])))
+                stack.enter_context(patch.object(analytics, "_otm_rows", return_value=[quote]))
+                stack.enter_context(patch.object(analytics, "_pick", side_effect=lambda rows, target, used: quote if rows and 250 not in used else None))
+                default = stack.enter_context(patch.object(analytics, "_default_income_expiry", return_value="2026-11-06"))
+                weekly = analytics.assigned_calls("NVDA", 226.34, shares, "weekly")
+                self.assertEqual([item["date"] for item in weekly["expirations"]], ["2026-10-09", "2026-10-12"])
+                self.assertEqual(weekly["ideas"][0]["premium_adjusted_cost"], round(226.34 - 405 * (shares // 100) / shares, 2))
+                self.assertEqual(weekly["cost_basis"], 226.34)
+                self.assertTrue(cache.call_args.args[0].endswith(":weekly"))
+                default.assert_not_called()
+                standard = analytics.assigned_calls("NVDA", 226.34, shares)
+                self.assertEqual(len(standard["expirations"]), 3)
+                self.assertTrue(cache.call_args.args[0].endswith(":standard"))
+                with patch.object(analytics, "_earnings_date", return_value="2026-10-10"):
+                    result = analytics.assigned_calls("NVDA", 226.34, shares, "weekly")
+                    self.assertFalse(result["expirations"][0]["earnings_before_expiry"])
+                    self.assertTrue(result["expirations"][1]["earnings_before_expiry"])
+                valid = [dict(quote, strike=250 + index) for index in range(6)]
+                rejected = [dict(quote, oi=499), dict(quote, ask=5), dict(quote, ask=3.9),
+                            dict(quote, delta=0.05), dict(quote, delta=0.5), dict(quote, strike=220),
+                            dict(quote, mid=0.1, bid=0.1, ask=0.1)]
+                def load_chain(ticker, expiry):
+                    if expiry == "2026-11-06":
+                        raise RuntimeError("Fixture quote failure")
+                    return expiry, []
+                with patch.object(analytics, "_chain", side_effect=load_chain), \
+                     patch.object(analytics, "_otm_rows", side_effect=lambda calls, *args: rejected if calls == "2026-10-09" else valid + rejected):
+                    result = analytics.assigned_calls("NVDA", 226.34, shares, "all")
+                    self.assertEqual([item["date"] for item in result["expirations"]], ["2026-10-12"])
+                    self.assertEqual([item["strike"] for item in result["ideas"]], list(range(250, 256)))
+                    self.assertEqual(result["skipped_expirations"], 1)
+                    self.assertEqual(result["unavailable_expirations"], ["2026-11-06"])
+                with patch.object(analytics, "_otm_rows", return_value=[]), patch.object(analytics, "_chain", return_value=([], [])) as chain:
+                    self.assertEqual(analytics.assigned_calls("NVDA", 300, shares, "weekly")["ideas"], [])
+                    self.assertEqual(chain.call_count, 2)
+                with patch.object(analytics, "_expirations", return_value=["2026-11-06"]):
+                    with self.assertRaisesRegex(LookupError, "1-7 days"):
+                        analytics.assigned_calls("NVDA", 226.34, shares, "weekly")
+
+    def test_option_expirations_match_roll_live_dates(self):
+        import main
+        from fastapi.testclient import TestClient
+        client = TestClient(main.app)
+        dates = {"2026-10-05": 0, "2026-10-09": 4, "2026-10-02": -3}
+        with patch.object(main.options_analytics, "_expirations", return_value=list(dates)), \
+             patch.object(main.options_analytics, "_live", side_effect=lambda expiry: dates[expiry] >= 0), \
+             patch.object(main.options_analytics, "_dte", side_effect=dates.get):
+            response = client.get("/api/stock/NVDA/option-expirations")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["expirations"], [
+                {"date": "2026-10-05", "dte": 0}, {"date": "2026-10-09", "dte": 4}])
+            with patch.object(main.options_analytics, "_live", side_effect=lambda expiry: dates[expiry] > 0):
+                self.assertEqual(client.get("/api/stock/NVDA/option-expirations").json()["expirations"], [
+                    {"date": "2026-10-09", "dte": 4}])
+
+    def test_assigned_calls_api_cadence_validation(self):
+        import main
+        from fastapi.testclient import TestClient
+        client = TestClient(main.app)
+        with patch.object(main.options_analytics, "assigned_calls", return_value={}) as calculate:
+            self.assertEqual(client.get("/api/stock/NVDA/assigned-calls?cost_basis=226.34&cadence=weekly").status_code, 200)
+            calculate.assert_called_once_with("NVDA", 226.34, 100, "weekly")
+            self.assertEqual(client.get("/api/stock/NVDA/assigned-calls?cost_basis=226.34").status_code, 200)
+            calculate.assert_called_with("NVDA", 226.34, 100, "all")
+            calculate.reset_mock()
+            self.assertEqual(client.get("/api/stock/NVDA/assigned-calls?cost_basis=226.34&cadence=invalid").status_code, 422)
+            calculate.assert_not_called()
+            calculate.side_effect = LookupError("No listed expirations within 1-7 days")
+            missing = client.get("/api/stock/NVDA/assigned-calls?cost_basis=226.34&cadence=weekly")
+            self.assertEqual(missing.status_code, 404)
+            self.assertIn("1-7 days", missing.json()["detail"])
+
     def test_wheel_starts_missing_expanded_scan(self):
         import wheel
         with patch.object(wheel, "kv_get", return_value=None), \
