@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine } from 'recharts';
 import { fetchBacktestStrategies, runBacktest, compareBacktests } from '../api/stockApi';
+import Tip from './Tip';
 
 const TF_LABELS = { '1m': '1 min (7 days)', '3m': '3 min (7 days)', '5m': '5 min (60 days)', '15m': '15 min (60 days)', '1h': '1 hour (1 year)', '1d': 'Daily (5 years)' };
 const PARAM_LABELS = {
@@ -12,7 +13,7 @@ const cls = v => v == null ? '' : v >= 0 ? 'positive' : 'negative';
 
 function Verdict({ s }) {
   if (!s?.trades) return <p className="empty-state">No trades — the signal never fired in this window.</p>;
-  const pf = s.profit_factor ?? 0;
+  const pf = s.profit_factor ?? (s.avg_net_pct > 0 ? Infinity : 0);
   const [icon, text, c] = s.trades < 30
     ? ['⚠️', `Only ${s.trades} trades — too few to trust either way.`, '']
     : pf >= 1.3 && s.avg_net_pct > 0
@@ -146,6 +147,24 @@ export default function StrategyTester({ initialTicker }) {
             <span className="market-sub">{result.from} → {result.to} · {result.sessions} sessions</span>
           </div>
           <Verdict s={s} />
+          {result.walk_forward && <section className="portfolio-section">
+            <h4>Walk-forward parameter selection</h4>
+            <div className="table-scroll"><table className="market-table"><thead><tr><th>Forward window</th><th>Selected parameters</th><th>Trades</th><th>Net / trade</th><th>Double costs</th></tr></thead><tbody>
+              {result.walk_forward.windows.map(window => <tr key={window.from}><td>{window.from.slice(0, 10)} to {window.to.slice(0, 10)}</td><td>{window.params ? Object.entries(window.params).map(([name, value]) => `${name}=${value}`).join(', ') : 'No qualifying training candidate'}</td><td>{window.stats.trades}</td><td>{pct(window.stats.avg_net_pct, 3)}</td><td>{pct(window.double_cost_stats.avg_net_pct, 3)}</td></tr>)}
+            </tbody></table></div><p className="market-sub">{result.walk_forward.note}</p>
+          </section>}
+          {result.validation && <section className="portfolio-section">
+            <h4>Chronological validation</h4>
+            <div className="table-scroll"><table className="market-table">
+              <thead><tr><th>Window</th><th>Trades</th><th>Net / trade</th><th>Double costs</th><th>Max drawdown</th></tr></thead>
+              <tbody>{[['Development', result.validation.train], ['Holdout', result.validation.holdout],
+                ...result.validation.windows.map((window, index) => [`Forward ${index + 1}`, window])].map(([label, window]) =>
+                <tr key={label}><td>{label}<div className="market-sub">{window.from?.slice(0, 10)} to {window.to?.slice(0, 10)}</div></td>
+                  <td>{window.stats.trades}</td><td>{pct(window.stats.avg_net_pct, 3)}</td>
+                  <td>{pct(window.double_cost_stats?.avg_net_pct, 3)}</td><td>{pct(window.stats.max_drawdown_pct)}</td></tr>)}</tbody>
+            </table></div>
+            <p className="market-sub">{result.validation.note}</p>
+          </section>}
           {s?.trades > 0 && (
             <>
               <div className="doctor-stats">

@@ -25,7 +25,7 @@ MAX_CANDIDATES = 60
 MIN_ANNUALIZED = 7.0
 STALE_SECONDS = 3 * 3600
 _lock = threading.Lock()
-_running = False
+_running = set()
 
 
 def _quality_pool(rows: list[dict]) -> list[dict]:
@@ -39,14 +39,15 @@ def _quality_pool(rows: list[dict]) -> list[dict]:
     return pool[:MAX_CANDIDATES]
 
 
-def _pick_expiry(exps: list[str], earnings: str | None) -> str | None:
-    """Liquid monthly 21-50 DTE that ends before earnings when possible; nearest to ~35 DTE otherwise."""
-    live = [e for e in exps if oa._live(e) and 21 <= oa._dte(e) <= 50]
+def _pick_expiry(exps: list[str], earnings: str | None, short_dated: bool = False) -> str | None:
+    """Prefer a pre-earnings monthly within the selected window, near its target DTE."""
+    minimum, maximum, target = (7, 20, 14) if short_dated else (21, 50, 35)
+    live = [e for e in exps if oa._live(e) and minimum <= oa._dte(e) <= maximum]
     if not live:
         return None
     safe = [e for e in live if not earnings or e < earnings] or live
     monthly = [e for e in safe if oa._is_monthly(e)]
-    return min(monthly or safe, key=lambda e: abs(oa._dte(e) - 35))
+    return min(monthly or safe, key=lambda e: abs(oa._dte(e) - target))
 
 
 def _spots(symbols: list[str]) -> dict[str, float]:
@@ -65,12 +66,12 @@ def _spots(symbols: list[str]) -> dict[str, float]:
         return {}
 
 
-def _candidate(r: dict, S: float, earnings: str | None) -> dict | None:
+def _candidate(r: dict, S: float, earnings: str | None, short_dated: bool = False) -> dict | None:
     t = r["symbol"]
     exps = oa._expirations(t)
     if not exps:
         return None
-    exp = _pick_expiry(exps, earnings)
+    exp = _pick_expiry(exps, earnings, short_dated)
     if not exp:
         return None
     T, d = oa._years(exp), max(oa._dte(exp), 1)
@@ -96,6 +97,8 @@ def _candidate(r: dict, S: float, earnings: str | None) -> dict | None:
              + {"good": 10, "ok": 5}.get(liq, 0) + (5 if iv_rich else 0) + (1 - p["p_itm"]) * 5
              - (30 if earnings_before else 0))
     flags = []
+    if short_dated:
+        flags.append("Short-dated: higher near-expiry gamma risk")
     if earnings_before:
         flags.append(f"Earnings {earnings} before expiry")
     if not outside_em:
@@ -117,12 +120,11 @@ def _candidate(r: dict, S: float, earnings: str | None) -> dict | None:
     }
 
 
-def run_wheel_scan() -> dict:
-    global _running
+def run_wheel_scan(short_dated: bool = False) -> dict:
     with _lock:
-        if _running:
+        if short_dated in _running:
             return {"status": "running"}
-        _running = True
+        _running.add(short_dated)
     started = time.time()
     try:
         scan = kv_get(SCAN_KEY)
@@ -133,7 +135,7 @@ def run_wheel_scan() -> dict:
 
         def safe(r):
             try:
-                return _candidate(r, spots.get(r["symbol"]) or r["price"], oa._earnings_date(r["symbol"]))
+                return _candidate(r, spots.get(r["symbol"]) or r["price"], oa._earnings_date(r["symbol"]), short_dated)
             except Exception as e:
                 log.info("Wheel candidate %s failed: %s", r["symbol"], e)
                 return None
@@ -143,67 +145,150 @@ def run_wheel_scan() -> dict:
         rows.sort(key=lambda c: c["score"], reverse=True)
         result = {"rows": rows, "screened": len(scan["data"]["rows"]), "quality_pool": len(pool),
                   "target_delta": TARGET_DELTA, "updated_at": datetime.now(timezone.utc).isoformat(),
-                  "seconds": round(time.time() - started)}
-        kv_set(WHEEL_KEY, result)
+                  "seconds": round(time.time() - started), "short_dated": short_dated}
+        kv_set(WHEEL_KEY + (":short" if short_dated else ""), result)
         track_record.record_wheel(rows[:20])
         log.info("Wheel scan: %d candidates from %d in %ds", len(rows), len(pool), result["seconds"])
         return result
     finally:
         with _lock:
-            _running = False
+            _running.discard(short_dated)
 
 
-def _safe_run():
+def _safe_run(short_dated: bool = False):
     try:
-        run_wheel_scan()
+        run_wheel_scan(short_dated)
     except Exception as e:
         log.warning("Wheel scan failed: %s", e)
 
 
-def get_wheel(start_if_stale: bool = True) -> dict:
-    cached = kv_get(WHEEL_KEY)
+def get_wheel(start_if_stale: bool = True, short_dated: bool = False) -> dict:
+    cached = kv_get(WHEEL_KEY + (":short" if short_dated else ""))
     stale = not cached or (datetime.now(timezone.utc) - _parse_ts(cached["data"]["updated_at"])).total_seconds() > STALE_SECONDS
-    if stale and start_if_stale and not _running:
-        threading.Thread(target=_safe_run, daemon=True).start()
+    if stale and start_if_stale and short_dated not in _running:
+        threading.Thread(target=_safe_run, args=(short_dated,), daemon=True).start()
     if not cached:
         return {"status": "building", "rows": []}
-    return {**cached["data"], "status": "running" if _running else "ready"}
+    return {**cached["data"], "status": "running" if short_dated in _running else "ready"}
 
 
 # ── Ask about any ticker: deterministic wheel checks + an AI verdict ────────
 
 
-def plan(capital: float, max_pct: float = 25, max_per_sector: int = 2) -> dict:
-    """Spread `capital` across the best-scored puts: capped per stock and per sector, skipping earnings risk."""
-    rows = [c for c in get_wheel(start_if_stale=False).get("rows", []) if not c.get("earnings_before_expiry")]
-    cap = capital * max_pct / 100
-    left, picks, sectors, skipped = capital, [], defaultdict(int), []
+def plan(capital: float, max_pct: float = 25, max_per_sector: int = 2, user_id: int | None = None,
+         short_dated: bool = False) -> dict:
+    """Allocate total account cash after recorded collateral and existing portfolio exposures."""
+    from database import get_user_holdings, get_user_options
+    from options_desk import capital_requirements, _contract
+    from stock_data import get_stock_data
+    snapshot = get_wheel(start_if_stale=False, short_dated=short_dated)
+    holdings = get_user_holdings(user_id) if user_id is not None else []
+    options = get_user_options(user_id) if user_id is not None else []
+    requirements = capital_requirements(options, holdings)
+    reserved = requirements["reserved_cash"]
+    exposure = defaultdict(float, requirements["by_ticker"])
+    sectors, sector_exposure, sector_names = defaultdict(int), defaultdict(float), {}
+    prices, blocked = {}, []
+    for holding in holdings:
+        exposure[holding["ticker"]] += holding["shares"] * holding["buy_price"]
+    for ticker in exposure:
+        try:
+            sector_names[ticker] = _profile(ticker).get("sector") or "Unknown"
+        except Exception:
+            sector_names[ticker] = "Unknown"
+        sectors[sector_names[ticker]] += 1
+        sector_exposure[sector_names[ticker]] += exposure[ticker]
+    account = capital + sum(holding["shares"] * holding["buy_price"] for holding in holdings)
+    cap = account * max_pct / 100
+    left, picks, skipped = max(capital - reserved, 0), [], []
+    rows = snapshot.get("rows", [])
+    updated = snapshot.get("updated_at")
+    if not updated or (datetime.now(timezone.utc) - _parse_ts(updated)).total_seconds() > STALE_SECONDS:
+        rows = []
+        blocked.append("Candidate data is stale. Refresh the wheel scan before planning.")
+    if requirements["uncovered_calls"]:
+        rows = []
+        blocked.append("Uncovered calls have unbounded risk. Resolve them before allocating more cash.")
+    if "Unknown" in sector_names.values():
+        rows = []
+        blocked.append("An existing position has unknown sector exposure.")
+
+    def returns(ticker):
+        if ticker not in prices:
+            prices[ticker] = get_stock_data(ticker, period="6mo", interval="1d")["Close"].pct_change().dropna()
+        return prices[ticker]
+
     for c in rows:
+        if not c.get("earnings_date") or c.get("earnings_before_expiry") or not oa._live(c["expiry"]) or c.get("liquidity") == "thin":
+            continue
+        try:
+            earnings = oa.earnings_info(c["ticker"]).get("next")
+            if not earnings or earnings <= c["expiry"]:
+                continue
+            spot = oa._spot(c["ticker"])
+            quote = _contract(c["ticker"], "put", c["strike"], c["expiry"], spot)
+            if not quote or quote.get("delta") is None or abs(quote["delta"]) > 0.22:
+                continue
+            if (quote["ask"] - quote["bid"]) / quote["mid"] > 0.25:
+                continue
+            correlated = False
+            for ticker in exposure:
+                if ticker == c["ticker"]:
+                    continue
+                candidate, existing = returns(c["ticker"]), returns(ticker)
+                overlap = candidate.index.intersection(existing.index)
+                correlation = candidate.loc[overlap].corr(existing.loc[overlap]) if len(overlap) >= 40 else None
+                if correlation is None or not math.isfinite(correlation) or correlation >= 0.8:
+                    correlated = True
+                    break
+            if correlated:
+                continue
+            premium = max(quote["bid"] * 100 - 1, 0)
+            days = oa._dte(c["expiry"])
+            minimum, maximum = (7, 20) if short_dated else (21, 50)
+            if premium <= 0 or not minimum <= days <= maximum:
+                continue
+            c = {**c, "premium": premium, "dte": days, "price": spot, "delta": round(abs(quote["delta"]), 3),
+                 "cushion_pct": round((1 - c["strike"] / spot) * 100, 1),
+                 "annualized_pct": round(premium / (c["strike"] * 100) * 365 / days * 100, 1)}
+        except Exception:
+            continue
         cost = c["strike"] * 100
-        if cost > cap:
+        available_name = max(cap - exposure.get(c["ticker"], 0), 0)
+        if cost > available_name:
             skipped.append({"ticker": c["ticker"], "reason": f"${cost:,.0f} per contract is over the ${cap:,.0f} per-stock cap"})
             continue
         sector = c.get("sector") or "Other"
-        if sectors[sector] >= max_per_sector or cost > left:
+        if sector in {"Other", "Unknown"} or (sectors[sector] >= max_per_sector and c["ticker"] not in sector_names) or cost > left:
             continue
-        n = int(min(cap, left) // cost)
+        available_sector = max(account * 0.4 - sector_exposure[sector], 0)
+        n = int(min(available_name, available_sector, left) // cost)
         if n < 1:
             continue
-        sectors[sector] += 1
+        if c["ticker"] not in sector_names:
+            sectors[sector] += 1
+        sector_names[c["ticker"]] = sector
+        sector_exposure[sector] += n * cost
+        exposure[c["ticker"]] += n * cost
         left -= n * cost
         picks.append({**{k: c[k] for k in ("ticker", "name", "sector", "price", "strike", "expiry", "dte", "delta",
                                           "premium", "annualized_pct", "cushion_pct", "liquidity", "score")},
                       "contracts": n, "capital": round(n * cost, 2), "income": round(n * c["premium"], 2)})
-    used = capital - left
+    used = max(capital - reserved, 0) - left
     income = sum(p["income"] for p in picks)
     monthly = sum(p["income"] * 30 / max(p["dte"], 1) for p in picks)
+    if not picks and not blocked:
+        blocked.append("No candidate passes the cash, concentration, correlation, earnings and quote checks.")
     return {
         "capital": capital, "used": round(used, 2), "cash_left": round(left, 2), "picks": picks,
+        "reserved_cash": reserved, "blocked": blocked, "as_of": datetime.now(timezone.utc).isoformat(),
         "income": round(income, 2), "monthly_income": round(monthly, 2),
         "annualized_pct": round(monthly * 12 / used * 100, 1) if used else None,
         "sectors": dict(sectors), "skipped_expensive": skipped[:5],
-        "note": f"At most {max_pct:g}% of the money in one stock and {max_per_sector} stocks per sector. Stocks with "
-                "earnings before expiry are left out. Keep the full strike × 100 in cash for every put.",
+        "note": f"Cash includes existing reserves; ${reserved:,.0f} is reserved first. Position limits include current "
+            f"stock cost and recorded option collateral: {max_pct:g}% per name, 40% per sector, {max_per_sector} names per sector. "
+            "Candidates with unknown earnings, unavailable correlations or correlation >= 0.8 are excluded. "
+            "Premium uses the bid less $1 per contract; fills are not guaranteed. Annualized income is a projection, not a forecast.",
     }
 
 

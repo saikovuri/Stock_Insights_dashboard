@@ -60,10 +60,9 @@ def implied_vol(price, S, K, T, kind, r=RISK_FREE) -> float | None:
 
 def _mid(row) -> float | None:
     bid, ask = float(row.get("bid") or 0), float(row.get("ask") or 0)
-    if bid > 0 and ask > 0:
+    if math.isfinite(bid) and math.isfinite(ask) and bid > 0 and ask >= bid:
         return (bid + ask) / 2
-    last = float(row.get("lastPrice") or 0)
-    return last if last > 0 else None
+    return None
 
 
 def _row_iv(row, S, T, kind) -> float | None:
@@ -167,7 +166,12 @@ def earnings_info(ticker: str) -> dict:
     def _fetch():
         today = datetime.now(_ET).date().isoformat()
         past, future = {}, {}  # date -> {"timing", "eps", "src"}
-        for e in finnhub_earnings_calendar(150, ticker, days_back=100):
+        try:
+            calendar = finnhub_earnings_calendar(150, ticker, days_back=100)
+        except Exception as error:
+            log.info("Finnhub earnings dates unavailable for %s: %s", ticker, error)
+            calendar = []
+        for e in calendar:
             d = e.get("date")
             if not d or e.get("symbol") != ticker:
                 continue
@@ -254,7 +258,7 @@ def earnings_moves(ticker: str) -> dict:
         info = earnings_info(ticker)
         for m in moves:
             saved = kv_get(f"em-implied:{ticker}:{m['date']}")
-            m["implied_pct"] = saved["data"] if saved else None
+            m["implied_pct"] = saved["data"].get("move_pct") if saved and isinstance(saved["data"], dict) else None
         absm = sorted(abs(m["move_pct"]) for m in moves)
         avg = round(sum(absm) / len(absm), 2) if absm else None
         implied = expiry = None
@@ -273,13 +277,10 @@ def earnings_moves(ticker: str) -> dict:
                 pm = _mid(p.iloc[0]) if p is not None else None
                 if cm and pm:
                     straddle = (cm + pm) / S * 100
-                    # Strip the normal day-to-day movement priced into the other days before expiry
-                    rets = get_stock_data(ticker, period="3mo", interval="1d")["Close"].pct_change().dropna().tail(30)
-                    rets = rets[rets.abs() < rets.abs().max()]  # drop the biggest day (often the last report)
-                    days = max(int(np.busday_count(datetime.now(_ET).date(), date.fromisoformat(expiry))) - 1, 0)
-                    base = 0.8 * float(rets.std()) * math.sqrt(days) * 100 if len(rets) > 5 else 0
-                    implied = round(math.sqrt(max(straddle ** 2 - base ** 2, (straddle * 0.5) ** 2)), 2)
-                    kv_set(f"em-implied:{ticker}:{nxt}", implied)
+                    implied = round(straddle, 2)
+                    key = f"em-implied:{ticker}:{nxt}"
+                    if (date.fromisoformat(nxt) - datetime.now(_ET).date()).days == 1 and _market_open() and not kv_get(key):
+                        kv_set(key, {"move_pct": implied, "as_of": datetime.now(_ET).isoformat(), "horizon": "prior calendar day"})
         ratio = round(implied / avg, 2) if implied and avg else None
         verdict = None
         if ratio:
@@ -291,10 +292,12 @@ def earnings_moves(ticker: str) -> dict:
             "up_count": sum(1 for m in moves if m["move_pct"] > 0), "count": len(moves),
             "next_earnings": nxt, "next_confirmed": info.get("next_confirmed"), "implied_move_pct": implied,
             "implied_expiry": expiry, "ratio": ratio, "verdict": verdict,
-            "note": "Implied move = at-the-money straddle for the first expiry after the report, minus the normal daily "
-                    "movement priced into the other days before that expiry. Actual moves are close-to-close.",
+                "as_of": datetime.now(_ET).isoformat(),
+                "note": "Implied move = at-the-money straddle midpoint divided by spot for the first expiry after the report. "
+                    "Includes non-earnings time value. Actual moves are close-to-close. This is a pricing proxy, not a "
+                    "validated trading edge. Saved observations use the prior calendar day; gaps are not backfilled.",
         }
-    return get_or_fetch(f"earnings-moves-full:{ticker}", _fetch, ttl=900)
+    return get_or_fetch(f"earnings-moves-v2:{ticker}", _fetch, ttl=900)
 
 
 def _spot(ticker: str) -> float:
@@ -1000,13 +1003,18 @@ def directional_ideas(ticker: str, direction: str, budget: float, risk: str) -> 
             needed.append(spread_cost)
 
         args = (direction, risk, budget, S, iv_level == "high")
-        best, why = _pick_best({k: v for k, v in ideas.items() if v["liquidity"] != "thin"}, *args)
-        usual, usual_why = _pick_best(ideas, *args)
-        if not best:
-            best, why = usual, usual_why
-        elif usual != best:
-            why += " (The usual pick here trades too thinly to get a fair fill.)"
-        ordered = sorted(ideas.values(), key=lambda i: i["kind"] != best)
+        eligible = {key: idea for key, idea in ideas.items() if idea.get("liquidity") in ("good", "ok")}
+        no_trade_reason = None
+        if not earnings:
+            no_trade_reason = "Earnings date is unavailable. Event risk is not cleared."
+        elif earnings <= exp:
+            no_trade_reason = "Earnings occur by the selected expiry. No directional trade passes the event-risk checks."
+        elif not eligible:
+            no_trade_reason = "No liquid candidate fits this budget. Thin or unknown liquidity is not eligible."
+        if no_trade_reason:
+            eligible = {}
+        best, why = _pick_best(eligible, *args)
+        ordered = sorted(eligible.values(), key=lambda idea: idea["kind"] != best)
         for i in ordered:
             i["best"] = i["kind"] == best
 
@@ -1018,13 +1026,14 @@ def directional_ideas(ticker: str, direction: str, budget: float, risk: str) -> 
                                                   "low": round(S - em, 2), "high": round(S + em, 2)},
             "earnings_date": earnings, "earnings_before_expiry": e_days is not None and 0 <= e_days <= d,
             **_earnings_extra(ticker),
-            "ideas": ordered, "best_why": why,
+            "ideas": ordered, "best_why": why, "no_trade_reason": no_trade_reason,
             "min_budget_needed": round(min(needed), 2) if not ordered and needed else None,
         }
-        track_record.record_directional(result)
+        if ordered:
+            track_record.record_directional(result)
         return result
 
-    return get_or_fetch(f"directional:{ticker}:{direction}:{risk}:{int(budget)}", _fetch, ttl=180)
+    return get_or_fetch(f"directional-v2:{ticker}:{direction}:{risk}:{budget}", _fetch, ttl=180)
 
 
 # ── Covered calls after assignment (wheel step 2) ───────────────────────────
@@ -1118,7 +1127,7 @@ def assigned_calls(ticker: str, cost_basis: float, shares: int = 100) -> dict:
 
 _ROLL_RULES = [
     "Roll when the short strike is breached or its delta passes ~0.50 — ideally with 2–3 weeks left, not on expiry day.",
-    "Only roll for a net credit. Paying to roll just adds risk; if no credit roll exists, close or accept assignment.",
+    "Compare rolling with closing and assignment. A net credit does not establish lower risk or a better expected outcome.",
     "Avoid rolling into an earnings date unless you accept the gap risk.",
     "Two or three rolls is the limit. If the stock keeps running against you, the thesis is broken — take the loss.",
 ]
@@ -1143,6 +1152,7 @@ def _roll_candidate(r, wing, K, width, close_mid, credit, kind, e, cur_dte, earn
         "short_strike": K2, "long_strike": None if width is None else K2 - width,
         "strike_change": round(sign * (K2 - K), 2) + 0.0,  # + 0.0 turns -0.0 into 0.0
         "new_credit": round(new_credit * 100, 2), "net_credit": round(net * 100, 2),
+        "opening_credit_natural": round((r["bid"] - (wing["ask"] if wing else 0)) * 100, 2),
         "delta": round(r["delta"], 2), "prob_otm_pct": round((1 - r["p_itm"]) * 100),
         "open_interest": oi, "liquidity": _liquidity(oi, worst),
         "spans_earnings": bool(earnings and date.today().isoformat() <= earnings <= e),
@@ -1225,6 +1235,7 @@ def roll_ideas(ticker: str, strategy: str, expiry: str, short_strike: float,
                 c = _roll_candidate(r, wing, K, width, close_mid, credit, kind, e, cur_dte, earnings)
                 if not c:
                     continue
+                c["net_credit_natural"] = round(c["opening_credit_natural"] - close_nat * 100 - (4 if wing else 2), 2)
                 if gain == 0:
                     same = c
                 if not furthest or rank(c) > rank(furthest):
@@ -1234,8 +1245,8 @@ def roll_ideas(ticker: str, strategy: str, expiry: str, short_strike: float,
                     c["type"] = "out" if c["strike_change"] == 0 else "improve"
                     rolls.append(c)
 
-        safe = [r for r in rolls if not r["spans_earnings"] and r["liquidity"] != "thin" and r["added_days"] <= 45]
-        best = tested and max(safe or rolls, key=lambda r: (r["strike_change"], -r["added_days"], r["net_credit"]),
+        safe = [r for r in rolls if earnings and not r["spans_earnings"] and r["liquidity"] != "thin" and r["added_days"] <= 45 and r["net_credit_natural"] >= 0]
+        best = tested and max(safe, key=lambda r: (r["strike_change"], -r["added_days"], r["net_credit_natural"]),
                               default=None)
         for r in rolls:
             r["best"] = r is best

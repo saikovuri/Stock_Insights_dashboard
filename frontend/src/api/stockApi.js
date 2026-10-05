@@ -15,6 +15,7 @@ async function readError(res, fallback) {
     return payload?.detail || 'Rate limited. Try again in a minute.';
   }
 
+  if (Array.isArray(payload?.detail)) return payload.detail.map(item => `${item.loc?.at(-1) || 'Input'}: ${item.msg}`).join('; ');
   return payload?.detail || payload?.message || fallback;
 }
 
@@ -28,7 +29,7 @@ function authHeaders() {
 // fetch() throws a bare TypeError ("Failed to fetch") when the server is unreachable or drops the request
 async function netFetch(url, opts) {
   try {
-    return await fetch(url, opts);
+    return await fetch(url, { ...opts, signal: opts?.signal || AbortSignal.timeout(60000) });
   } catch (e) {
     if (e instanceof TypeError) {
       throw new Error("Couldn't reach the server — it may be waking up or busy. Please try again in a moment.");
@@ -37,41 +38,73 @@ async function netFetch(url, opts) {
   }
 }
 
-/**
- * Wrapper around fetch that auto-refreshes the access token on 401.
- * If the refresh itself fails, clears auth and reloads.
- */
-let _refreshPromise = null;
-async function authFetch(url, opts = {}) {
-  opts.headers = opts.headers || authHeaders();
+let _refreshState = null;
+
+function currentCredentials(credentials) {
+  return localStorage.getItem('token') === credentials.token
+    && localStorage.getItem('refresh_token') === credentials.refresh_token;
+}
+
+export async function authFetch(url, opts = {}) {
+  const credentials = { token: localStorage.getItem('token'), refresh_token: localStorage.getItem('refresh_token') };
+  opts = { ...opts, headers: { ...opts.headers, ...authHeaders() } };
   let res = await netFetch(url, opts);
-  if (res.status === 401 && localStorage.getItem('refresh_token')) {
-    // Deduplicate concurrent refresh attempts
-    if (!_refreshPromise) {
-      _refreshPromise = fetch(`${BASE}/auth/refresh`, {
+  if (res.status === 401 && credentials.refresh_token) {
+    let state = _refreshState;
+    if (!state || state.credentials.token !== credentials.token
+        || state.credentials.refresh_token !== credentials.refresh_token
+        || !currentCredentials(state.result ?? state.credentials)) {
+      if (!currentCredentials(credentials)) throw new Error('Session changed. Retry from the current account.');
+      const pending = { credentials, result: null, promise: null };
+      _refreshState = pending;
+      pending.promise = netFetch(`${BASE}/auth/refresh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refresh_token: localStorage.getItem('refresh_token') }),
-      }).then(async (r) => {
-        if (!r.ok) throw new Error('refresh failed');
-        return r.json();
-      }).finally(() => { _refreshPromise = null; });
+        body: JSON.stringify({ refresh_token: credentials.refresh_token }),
+      }).then(async (response) => {
+        if (!response.ok) {
+          const error = new Error(response.status === 401 || response.status === 403 ? 'Session expired' : 'Session refresh unavailable. Retry shortly.');
+          error.status = response.status;
+          throw error;
+        }
+        const data = await response.json();
+        if (!currentCredentials(credentials)) throw new Error('Session changed. Retry from the current account.');
+        if (typeof data.token !== 'string' || !data.token || typeof data.refresh_token !== 'string' || !data.refresh_token) {
+          throw new Error('Session refresh unavailable. Retry shortly.');
+        }
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('refresh_token', data.refresh_token);
+        pending.result = data;
+        window.dispatchEvent(new Event('stockpilot:auth'));
+        return data;
+      }).catch(error => {
+        if (_refreshState === pending) _refreshState = null;
+        if (currentCredentials(credentials) && (error.status === 401 || error.status === 403)) {
+          localStorage.removeItem('token');
+          localStorage.removeItem('refresh_token');
+          sessionStorage.clear();
+          window.dispatchEvent(new Event('stockpilot:auth'));
+        }
+        throw error;
+      });
+      state = pending;
     }
-    try {
-      const data = await _refreshPromise;
-      localStorage.setItem('token', data.token);
-      localStorage.setItem('refresh_token', data.refresh_token);
-      // Retry original request with new token
-      opts.headers['Authorization'] = `Bearer ${data.token}`;
-      res = await netFetch(url, opts);
-    } catch {
-      localStorage.removeItem('token');
-      localStorage.removeItem('refresh_token');
-      window.location.reload();
-      throw new Error('Session expired');
-    }
+    const data = await state.promise;
+    if (!currentCredentials(data)) throw new Error('Session changed. Retry from the current account.');
+    opts.headers['Authorization'] = `Bearer ${data.token}`;
+    res = await netFetch(url, opts);
   }
   return res;
+}
+
+export async function fetchCurrentUser(signal) {
+  const response = await authFetch(`${BASE}/auth/me`, { signal });
+  if (!response.ok) {
+    const error = new Error(await readError(response, 'Could not load your session.'));
+    error.status = response.status;
+    throw error;
+  }
+  return response.json();
 }
 
 export async function fetchMetrics(ticker) {
@@ -148,10 +181,10 @@ export async function buyOption(ticker, option_type, strike, expiry, premium, co
   return res.json();
 }
 
-export async function closeOption(ticker, option_type, strike, expiry, premium, contracts, position = 'long') {
+export async function closeOption(ticker, option_type, strike, expiry, premium, contracts, position = 'long', option_id = null) {
   const res = await authFetch(`${BASE}/portfolio/options/close`, {
     method: 'POST', headers: authHeaders(),
-    body: JSON.stringify({ ticker, option_type, strike, expiry, premium, contracts, position }),
+    body: JSON.stringify({ ticker, option_type, strike, expiry, premium, contracts, position, option_id }),
   });
   if (!res.ok) throw new Error(await readError(res, 'Failed to close option'));
   return res.json();
@@ -198,6 +231,18 @@ export async function fetchClosedTrades() {
 export async function fetchClosedOptions() {
   const res = await authFetch(`${BASE}/portfolio/options/closed`, { headers: authHeaders() });
   if (!res.ok) throw new Error('Failed to fetch closed options');
+  return res.json();
+}
+
+export async function logClosedOption(payload) {
+  const res = await authFetch(`${BASE}/portfolio/options/closed`, { method: 'POST', body: JSON.stringify(payload) });
+  if (!res.ok) throw new Error(await readError(res, 'Failed to record closed option'));
+  return res.json();
+}
+
+export async function updateClosedOption(id, payload) {
+  const res = await authFetch(`${BASE}/portfolio/options/closed/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+  if (!res.ok) throw new Error(await readError(res, 'Failed to update closed option'));
   return res.json();
 }
 
@@ -384,8 +429,9 @@ export const fetchJournalCoach = () => getJson(`${BASE}/journal/coach`, 'Failed 
 // ── Options flow, macro, smart money ─────────────────────────────
 export const fetchOptionsFlow = (t) => getJson(`${BASE}/stock/${t}/flow`, 'Failed to load options flow');
 export const fetchUnusualOptions = () => getJson(`${BASE}/ideas/unusual-options`, 'Failed to load unusual options');
-export const fetchWheelIdeas = () => getJson(`${BASE}/ideas/wheel`, 'Failed to load wheel candidates');
+export const fetchWheelIdeas = (shortDated = false) => getJson(`${BASE}/ideas/wheel?short_dated=${shortDated}`, 'Failed to load wheel candidates');
 export const fetchEconomicCalendar = (days = 7) => getJson(`${BASE}/market/calendar?days=${days}`, 'Failed to load calendar');
+export const fetchMarketContext = (kind) => getJson(`${BASE}/market/context/${kind}`, 'Market context is unavailable');
 export const fetchShortInterest = (t) => getJson(`${BASE}/stock/${t}/short-interest`, 'No short interest data');
 export const fetchInsiderBuying = () => getJson(`${BASE}/ideas/insiders`, 'Failed to load insider buying');
 export const fetchSuperinvestors = () => getJson(`${BASE}/ideas/superinvestors`, 'Failed to load superinvestors');
@@ -403,8 +449,8 @@ export const fetchWheelLedger = () => getJson(`${BASE}/portfolio/wheel-ledger`, 
 export const fetchOptionsReview = () => getJson(`${BASE}/portfolio/options/review`, 'Failed to load review', true);
 export const fetchOptionsCoach = () => getJson(`${BASE}/portfolio/options/coach`, 'Failed to load AI review', true);
 export const fetchTrackRecord = () => getJson(`${BASE}/ideas/track-record`, 'Failed to load track record');
-export const fetchWheelPlan = (capital, maxPct, maxPerSector) =>
-  getJson(`${BASE}/ideas/wheel/plan?capital=${capital}&max_pct=${maxPct}&max_per_sector=${maxPerSector}`, 'Failed to build plan');
+export const fetchWheelPlan = (capital, maxPct, maxPerSector, shortDated = false) =>
+  getJson(`${BASE}/ideas/wheel/plan?capital=${capital}&max_pct=${maxPct}&max_per_sector=${maxPerSector}&short_dated=${shortDated}`, 'Failed to build plan', true);
 export const fetchEarningsMoves = (t) => getJson(`${BASE}/stock/${t}/earnings-moves`, 'Failed to load earnings moves');
 export const assignOption = (id) => sendJson(`${BASE}/portfolio/options/${id}/assign`, 'POST', null, 'Could not record assignment');
 export const deleteClosedTrade = (id) => sendJson(`${BASE}/portfolio/closed/${id}`, 'DELETE', null, 'Failed to delete trade');

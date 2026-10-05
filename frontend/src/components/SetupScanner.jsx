@@ -33,7 +33,7 @@ const EXPLAIN = {
   },
 };
 
-function SetupExplainer({ k, record, label }) {
+function SetupExplainer({ k, record, label, pointInTime }) {
   const e = EXPLAIN[k];
   if (!e) return <p className="market-sub">{label}</p>;
   const p = v => (v == null ? '—' : `${v > 0 ? '+' : ''}${v}%`);
@@ -49,6 +49,7 @@ function SetupExplainer({ k, record, label }) {
         )}
       </div>
       <p><b>What:</b> {e.what}</p>
+      {record && <p className="market-sub">{pointInTime ? `Dated membership source: ${pointInTime.source}. Provider and delisting coverage require review.` : 'Current S&P 500 constituents only: survivorship bias applies.'} Forward stock returns are not executable strategy P&L and exclude fees and slippage.</p>}
       <p><b>Why it can work:</b> {e.why}</p>
       <p><b>How traders use it:</b> {e.how}</p>
     </div>
@@ -140,17 +141,18 @@ export default function SetupScanner({ onSelect }) {
           </label>
         </div>
         {setup !== 'all' && setup !== 'any' ? (
-          <SetupExplainer k={setup} record={data.track_record?.[setup]} label={data.setup_labels[setup]} />
+          <SetupExplainer k={setup} record={data.track_record?.[setup]} label={data.setup_labels[setup]} pointInTime={data.point_in_time} />
         ) : (
           <details className="setup-guide">
             <summary>What do these setups mean?</summary>
             {Object.keys(data.setup_labels).map(k => (
-              <SetupExplainer key={k} k={k} record={data.track_record?.[k]} label={data.setup_labels[k]} />
+              <SetupExplainer key={k} k={k} record={data.track_record?.[k]} label={data.setup_labels[k]} pointInTime={data.point_in_time} />
             ))}
           </details>
         )}
       </div>
 
+      {data.point_in_time && !data.point_in_time.available && <p className="income-warning" role="status">Historical results unavailable: {data.point_in_time.uncovered_signal_dates.length} uncovered signal dates and {data.point_in_time.missing_price_symbols.length} missing price series. Source: {data.point_in_time.source}.</p>}
       {data.track_record && (
         <div className="card">
           <h3>📈 Setup track record</h3>

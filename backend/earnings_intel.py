@@ -37,32 +37,31 @@ def _reaction(daily: pd.DataFrame, when: pd.Timestamp) -> dict | None:
 
 
 def _implied_move(ticker: str, reaction_day: date) -> dict | None:
-    """ATM straddle for the first expiry on/after the reaction day ≈ expected earnings move."""
-    exps = [e for e in _expirations(ticker) if datetime.strptime(e, "%Y-%m-%d").date() >= reaction_day]
-    if not exps or _dte(exps[0]) > 45:
+    """Use the shared earnings move definition."""
+    from options_analytics import earnings_moves, _spot
+    data = earnings_moves(ticker)
+    move = data.get("implied_move_pct")
+    if move is None:
         return None
-    exp = exps[0]
-    S = float(get_quote(ticker)["price"])
-    calls, puts = _chain(ticker, exp)
-    if calls is None or puts is None or calls.empty or puts.empty:
-        return None
-    c = calls.loc[(calls["strike"] - S).abs().idxmin()]
-    p = puts.loc[(puts["strike"] - S).abs().idxmin()]
-    cm, pm = _mid(c), _mid(p)
-    if not cm or not pm:
-        return None
-    straddle = cm + pm
-    return {"expiry": exp, "straddle": round(straddle, 2), "move_pct": round(straddle / S * 100, 2),
-            "low": round(S - straddle, 2), "high": round(S + straddle, 2)}
+    spot = _spot(ticker)
+    amount = spot * move / 100
+    return {"expiry": data["implied_expiry"], "straddle": round(amount, 2), "move_pct": move,
+            "low": round(spot - amount, 2), "high": round(spot + amount, 2)}
 
 
 def earnings_intel(ticker: str) -> dict:
     def _fetch():
-        ed = yf.Ticker(ticker).get_earnings_dates(limit=16)
+        try:
+            ed = yf.Ticker(ticker).get_earnings_dates(limit=16)
+        except Exception:
+            ed = None
         if ed is None or ed.empty:
-            raise LookupError("No earnings history")
-        daily = get_stock_data(ticker, period="5y", interval="1d")
-        daily = daily.set_axis(pd.to_datetime(daily.index.date))
+            ed = pd.DataFrame()
+        try:
+            daily = get_stock_data(ticker, period="5y", interval="1d")
+            daily = daily.set_axis(pd.to_datetime(daily.index.date))
+        except Exception:
+            daily = pd.DataFrame(index=pd.DatetimeIndex([]))
 
         history, upcoming = [], None
         today = pd.Timestamp(date.today())
@@ -74,7 +73,7 @@ def earnings_intel(ticker: str) -> dict:
                                 "timing": "before open" if when.hour < 12 else "after close",
                                 "eps_estimate": None if pd.isna(est) else float(est)}
                 continue
-            r = _reaction(daily, when)
+            r = _reaction(daily, when) if not daily.empty else None
             if not r:
                 continue
             history.append({
@@ -99,6 +98,13 @@ def earnings_intel(ticker: str) -> dict:
                 "avg_move_on_beat": round(sum(h["move_pct"] for h in beats) / len(beats), 2) if beats else None,
             }
 
+        from options_analytics import earnings_info
+        info = earnings_info(ticker)
+        if info.get("next"):
+            upcoming = {"date": info["next"], "timing": info.get("next_timing"),
+                        "eps_estimate": upcoming.get("eps_estimate") if upcoming and upcoming["date"] == info["next"] else None}
+        else:
+            upcoming = None
         implied = None
         if upcoming:
             d = datetime.strptime(upcoming["date"], "%Y-%m-%d").date()
@@ -114,18 +120,18 @@ def earnings_intel(ticker: str) -> dict:
             ratio = implied["move_pct"] / stats["avg_move_pct"]
             if ratio >= 1.25:
                 verdict = (f"Options price a ±{implied['move_pct']}% move vs a ±{stats['avg_move_pct']}% average "
-                           "historical move — premium looks rich (favours option sellers).")
+                           "historical move. This comparison is not evidence of a profitable selling strategy.")
             elif ratio <= 0.8:
                 verdict = (f"Options price only ±{implied['move_pct']}% vs a ±{stats['avg_move_pct']}% average "
-                           "historical move — premium looks cheap (favours option buyers).")
+                           "historical move. This comparison is not evidence of a profitable buying strategy.")
             else:
                 verdict = (f"Options price ±{implied['move_pct']}%, in line with the ±{stats['avg_move_pct']}% "
                            "average historical move.")
 
         return {"ticker": ticker, "upcoming": upcoming, "implied": implied, "history": list(reversed(history)),
-                "stats": stats, "verdict": verdict}
+                "stats": stats, "verdict": verdict, "as_of": datetime.now().isoformat()}
 
-    return get_or_fetch(f"earnings-intel:{ticker}", _fetch, ttl=1800)
+    return get_or_fetch(f"earnings-intel-v2:{ticker}", _fetch, ttl=900)
 
 
 # ── Press release summary ────────────────────────────────────────────────

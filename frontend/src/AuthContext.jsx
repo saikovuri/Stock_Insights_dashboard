@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import { API_BASE } from './api/config';
+import { fetchCurrentUser } from './api/stockApi';
 
 const AuthContext = createContext(null);
 
@@ -7,23 +8,37 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(localStorage.getItem('token'));
   const [loading, setLoading] = useState(true);
+  const [sessionError, setSessionError] = useState(null);
 
   useEffect(() => {
-    if (token) {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 8000);
-      fetch(`${API_BASE}/auth/me`, {
-        headers: { Authorization: `Bearer ${token}` },
-        signal: controller.signal,
-      })
-        .then(r => { if (!r.ok) throw new Error(); return r.json(); })
-        .then(u => setUser(u))
-        .catch(() => { localStorage.removeItem('token'); localStorage.removeItem('refresh_token'); setToken(null); })
-        .finally(() => { clearTimeout(timeout); setLoading(false); });
+    let active = true;
+    const controller = new AbortController();
+    if (localStorage.getItem('token')) {
+      const timeout = setTimeout(() => controller.abort(), 60000);
+      fetchCurrentUser(controller.signal)
+        .then(current => { if (active) setUser(current); })
+        .catch(error => {
+          if (!active) return;
+          if (error.status === 401 || error.status === 403) {
+            localStorage.removeItem('token'); localStorage.removeItem('refresh_token'); setToken(null); setUser(null);
+          } else setSessionError(error.message);
+        })
+        .finally(() => { clearTimeout(timeout); if (active) setLoading(false); });
     } else {
       setLoading(false);
     }
-  }, [token]);
+    return () => { active = false; controller.abort(); };
+  }, []);
+
+  useEffect(() => {
+    const sync = () => {
+      const current = localStorage.getItem('token');
+      setToken(current);
+      if (!current) setUser(null);
+    };
+    window.addEventListener('stockpilot:auth', sync);
+    return () => window.removeEventListener('stockpilot:auth', sync);
+  }, []);
 
   const login = async (username, password) => {
     const res = await fetch(`${API_BASE}/auth/login`, {
@@ -68,13 +83,19 @@ export function AuthProvider({ children }) {
     } catch { /* ignore */ }
     localStorage.removeItem('token');
     localStorage.removeItem('refresh_token');
+    sessionStorage.clear();
+    setSessionError(null);
     setToken(null);
     setUser(null);
   };
 
   return (
     <AuthContext.Provider value={{ user, token, loading, login, register, logout }}>
-      {children}
+      {sessionError && !user ? <main className="card" role="alert">
+        <h2>Session unavailable</h2><p>{sessionError}</p>
+        <button onClick={() => window.location.reload()}>Retry</button>
+        <button onClick={logout}>Sign out</button>
+      </main> : children}
     </AuthContext.Provider>
   );
 }

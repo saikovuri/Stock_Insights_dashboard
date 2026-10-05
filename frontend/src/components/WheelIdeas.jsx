@@ -58,7 +58,7 @@ function WheelCard({ c, onSelect, onManage }) {
   );
 }
 
-function WheelPlan({ onSelect }) {
+function WheelPlan({ onSelect, shortDated }) {
   const [capital, setCapital] = useState(50000);
   const [maxPct, setMaxPct] = useState(25);
   const [perSector, setPerSector] = useState(2);
@@ -67,7 +67,7 @@ function WheelPlan({ onSelect }) {
   const [err, setErr] = useState(null);
   const build = () => {
     setBusy(true); setErr(null);
-    fetchWheelPlan(capital, maxPct, perSector).then(setPlan).catch(e => setErr(e.message)).finally(() => setBusy(false));
+    fetchWheelPlan(capital, maxPct, perSector, shortDated).then(setPlan).catch(e => setErr(e.message)).finally(() => setBusy(false));
   };
   return (
     <div className="card">
@@ -76,7 +76,7 @@ function WheelPlan({ onSelect }) {
         Spread your cash across several puts instead of one big one, so a single bad stock or sector can't sink the account.
       </p>
       <div className="income-controls">
-        <label>Cash for the wheel ($)
+        <label>Total account cash, including reserves ($)
           <input type="number" className="tool-input" min={1000} step={5000} value={capital} onChange={e => setCapital(+e.target.value)} />
         </label>
         <label>Max per stock (%)
@@ -88,6 +88,8 @@ function WheelPlan({ onSelect }) {
         <button className="btn-primary btn-sm" onClick={build} disabled={busy || capital < 1000}>{busy ? 'Planning…' : 'Build plan'}</button>
       </div>
       {err && <p className="error-text">{err}</p>}
+      {plan?.blocked?.map(reason => <p key={reason} className="error-text">{reason}</p>)}
+      {plan && <p className="market-sub">Already reserved: {money(plan.reserved_cash || 0)}. Cash left: {money(plan.cash_left)}.</p>}
       {plan && (plan.picks.length === 0 ? (
         <p className="empty-state">No candidates fit {money(plan.capital)} with these limits.
           {plan.skipped_expensive.length > 0 && ` ${plan.skipped_expensive[0].reason}.`}</p>
@@ -130,6 +132,7 @@ export default function WheelIdeas({ onSelect }) {
   const [error, setError] = useState(null);
   const [cash, setCash] = useState('');
   const [safeOnly, setSafeOnly] = useState(true);
+  const [shortDated, setShortDated] = useState(false);
   const [preset, setPreset] = useState(null);
   const manage = p => {
     setPreset(p);
@@ -138,21 +141,20 @@ export default function WheelIdeas({ onSelect }) {
 
   useEffect(() => {
     let timer;
-    const load = () => fetchWheelIdeas().then(d => {
+    let active = true;
+    const load = () => fetchWheelIdeas(shortDated).then(d => {
+      if (!active) return;
       setData(d);
-      if (d.status === 'building') timer = setTimeout(load, 15_000);
-    }).catch(e => setError(e.message));
+      if (d.status === 'building' || d.status === 'running') timer = setTimeout(load, 15_000);
+    }).catch(e => { if (active) setError(e.message); });
     load();
-    return () => clearTimeout(timer);
-  }, []);
+    return () => { active = false; clearTimeout(timer); };
+  }, [shortDated]);
 
-  if (error) return <div className="card"><p className="error-text">{error}</p></div>;
-  if (!data) return <div className="card"><p className="loading-text">Loading wheel candidates…</p></div>;
-  if (data.status === 'building') {
-    return <div className="card"><p className="loading-text">Screening quality stocks and their option chains — about a minute the first time…</p></div>;
-  }
-  const rows = data.rows
+  const loading = !error && (!data || data.status === 'building');
+  const rows = (data?.rows || [])
     .filter(c => !cash || c.capital <= Number(cash))
+    .filter(c => c.earnings_date && c.liquidity !== 'thin')
     .filter(c => !safeOnly || !c.earnings_before_expiry);
 
   return (
@@ -160,13 +162,13 @@ export default function WheelIdeas({ onSelect }) {
     <div className="card">
       <div className="ivrank-header">
         <h3 style={{ margin: 0 }}>🎡 Wheel candidates</h3>
-        <span className="market-sub">Updated {new Date(data.updated_at).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })}</span>
+        {data?.updated_at && <span className="market-sub">Updated {new Date(data.updated_at).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })}</span>}
       </div>
       <p className="structures-intro">
         The wheel: sell a cash-secured put on a stock you'd happily own. If it expires, keep the premium and repeat; if
         you're assigned, sell covered calls above your cost until the shares are called away. We screen the S&P 500 for
-        steady uptrends near their highs with calm daily ranges ({data.quality_pool} of {data.screened} pass), then pick a
-        ~{Math.round(data.target_delta * 100)}-delta put 3–7 weeks out on the most liquid strike — before earnings where
+        steady uptrends near their highs with calm daily ranges{data?.screened != null && ` (${data.quality_pool} of ${data.screened} pass)`}, then pick a
+        ~{Math.round((data?.target_delta ?? .15) * 100)}-delta put {shortDated ? '7–20' : '21–50'} days out on the most liquid strike — before earnings where
         possible — and rank by premium per unit of risk.
       </p>
       <div className="income-controls">
@@ -178,14 +180,23 @@ export default function WheelIdeas({ onSelect }) {
           <input type="checkbox" checked={safeOnly} onChange={e => setSafeOnly(e.target.checked)} />
           Skip trades that hold through earnings
         </label>
+        <label className="prepost-toggle">
+          <input type="checkbox" checked={shortDated} onChange={e => {
+            setData(null); setError(null); setShortDated(e.target.checked);
+          }} />
+          Short-dated: 7–20 days
+        </label>
       </div>
-      {rows.length ? (
+      {shortDated && <p className="income-warning" role="status">Short-dated options carry higher near-expiry gamma risk and less time to adjust. Annualized premiums are not expected annual returns.</p>}
+      {error && <p className="error-text">{error}</p>}
+      {loading && <p className="loading-text">Screening wheel candidates for {shortDated ? '7–20' : '21–50'} days to expiry…</p>}
+      {!loading && !error && (rows.length ? (
         <div className="structures-grid income-grid">
           {rows.slice(0, 12).map(c => <WheelCard key={c.ticker} c={c} onSelect={onSelect} onManage={manage} />)}
         </div>
       ) : (
         <p className="empty-state">No candidates match{cash ? ` ${money(Number(cash))} of cash` : ''} right now.</p>
-      )}
+      ))}
       <ul className="ivrank-help">
         <li>Take profit at ~50% of the premium and sell the next put — don't wait for the last few cents.</li>
         <li>If the stock drops through the strike, roll down and out for a credit, or accept the shares — use <b>Manage a wheel position</b> below.</li>
@@ -194,7 +205,7 @@ export default function WheelIdeas({ onSelect }) {
       </ul>
       <p className="ivrank-note">Quotes refresh every few hours during market hours. Probabilities are model estimates, not guarantees. Not financial advice.</p>
     </div>
-    <WheelPlan onSelect={onSelect} />
+    <WheelPlan key={String(shortDated)} onSelect={onSelect} shortDated={shortDated} />
     <WheelAsk onManage={manage} onSelect={onSelect} />
     <WheelManager preset={preset} />
     </>

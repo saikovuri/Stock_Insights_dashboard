@@ -15,7 +15,7 @@ export function FlowTable({ trades, showTicker, onSelect }) {
         <thead>
           <tr>
             {showTicker && <th>Ticker</th>}
-            <th>Contract</th><th>Expiry</th><th>Volume / OI <Tip term="open_interest" /></th><th>Premium</th><th>IV <Tip term="iv" /></th><th>Side</th>
+            <th>Contract</th><th>Expiry</th><th>Volume / OI <Tip term="open_interest" /></th><th>Estimated notional</th><th>IV <Tip term="iv" /></th><th>Last vs quote</th>
           </tr>
         </thead>
         <tbody>
@@ -29,7 +29,7 @@ export function FlowTable({ trades, showTicker, onSelect }) {
               <td data-label="Vol / OI">{num(t.volume)} / {num(t.open_interest)}{t.vol_oi ? <span className="market-sub"> ({t.vol_oi}×)</span> : null}</td>
               <td data-label="Premium"><strong>{money(t.premium)}</strong></td>
               <td data-label="IV">{t.iv_pct ? `${t.iv_pct}%` : '—'}</td>
-              <td data-label="Side" title="Last trade vs bid/ask: at the ask suggests a buyer, at the bid a seller">
+              <td data-label="Last vs quote" title="Last trade and current quote are not synchronized. This does not identify buyer or seller intent.">
                 {t.side === 'bought' ? '🟢 at ask' : t.side === 'sold' ? '🔴 at bid' : '⚪ mid'}
               </td>
             </tr>
@@ -77,7 +77,7 @@ export default function OptionsFlow({ ticker }) {
           </strong>
         </div>
         <div>
-          <span>Dealer gamma <Tip term="dealer_gamma" /></span>
+          <span>Assumed gamma proxy <Tip term="dealer_gamma" /></span>
           <strong className={data.gamma_regime === 'positive' ? 'positive' : data.gamma_regime === 'negative' ? 'negative' : ''}>
             {data.gamma_regime ? `${data.gamma_regime} (${money(Math.abs(data.net_gex))}/1%)` : '—'}
           </strong>

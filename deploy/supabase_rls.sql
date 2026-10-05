@@ -100,6 +100,12 @@ BEGIN
     SELECT tablename, policyname
     FROM pg_policies
     WHERE schemaname = 'public'
+      AND tablename = ANY(ARRAY[
+        'users', 'holdings', 'options', 'transactions', 'watchlist', 'closed_trades',
+        'closed_options', 'refresh_tokens', 'notifications', 'iv_history',
+        'user_alerts', 'journal', 'kv_cache', 'theses', 'idea_log',
+        'accounting_events', 'universe_snapshots'
+      ])
   LOOP
     EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', r.policyname, r.tablename);
   END LOOP;
@@ -115,7 +121,8 @@ BEGIN
   FOREACH t IN ARRAY ARRAY[
     'users', 'holdings', 'options', 'transactions', 'watchlist', 'closed_trades',
     'closed_options', 'refresh_tokens', 'notifications', 'iv_history',
-    'user_alerts', 'journal', 'kv_cache', 'theses', 'idea_log'
+    'user_alerts', 'journal', 'kv_cache', 'theses', 'idea_log',
+    'accounting_events', 'universe_snapshots'
   ] LOOP
     IF to_regclass('public.' || t) IS NULL THEN
       RAISE NOTICE 'Skipping missing table %', t;

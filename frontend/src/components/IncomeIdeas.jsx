@@ -26,7 +26,7 @@ function SafetyBadge({ i }) {
 const LIQ = {
   good: { text: 'Liquid', cls: 'positive' },
   ok: { text: 'OK liquidity', cls: '' },
-  thin: { text: 'Thin — wide spread', cls: 'negative' },
+  thin: { text: 'Execution caution', cls: 'rvol-warm' },
 };
 
 function money(v) {
@@ -63,28 +63,82 @@ const MODES = {
   },
 };
 
-function SpreadCard({ i, mode, expiry, contracts }) {
-  const n = Math.max(contracts, 0);
+function assessIncomeIdea(idea, { mode, cash, risk, shares, earnings, expiry }) {
+  const spread = mode === 'pcs' || mode === 'ic';
+  const quoteValid = spread
+    ? [idea.credit, idea.natural_credit, idea.width].every(Number.isFinite)
+      && idea.natural_credit > 0 && idea.natural_credit <= idea.credit && idea.credit < idea.width
+    : Number.isFinite(idea.bid) && Number.isFinite(idea.ask) && idea.bid > 0 && idea.ask >= idea.bid;
+  const blocked = [];
+  const warnings = [];
+  if (!quoteValid) blocked.push('Valid two-sided quote unavailable; sizing disabled.');
+  if (!earnings) blocked.push('Earnings date unavailable; sizing disabled.');
+  else if (!expiry || earnings <= expiry) blocked.push('Earnings occur on or before expiry; sizing disabled.');
+
+  const available = Number(mode === 'cc' ? shares : mode === 'csp' ? cash : risk);
+  const required = mode === 'cc' ? 100 : mode === 'csp' ? idea.capital_required : idea.max_loss;
+  const affordable = Number.isFinite(available) && Number.isFinite(required) && required > 0 && available >= required;
+  const resource = mode === 'cc' ? 'Shares' : mode === 'csp' ? 'Cash' : 'Risk budget';
+  if (!affordable) {
+    blocked.push(!Number.isFinite(required) || required <= 0
+      ? 'Capital requirement unavailable; sizing disabled.'
+      : `${resource} needed: ${mode === 'cc' ? required : money(required)} per contract; sizing disabled.`);
+  }
+  if (!spread && quoteValid) {
+    const percent = (idea.ask - idea.bid) / ((idea.ask + idea.bid) / 2) * 100;
+    if (percent > 20) warnings.push(`Wide spread: ${percent.toFixed(1)}% exceeds the 20% guideline.`);
+  }
+  if (!Number.isFinite(idea.open_interest)) warnings.push('Open interest unavailable.');
+  else if (idea.open_interest < 100) warnings.push(`Low open interest: ${idea.open_interest}, below the 100-contract guideline.`);
+  if (idea.liquidity === 'thin' && warnings.length === 0) warnings.push('Execution caution: wide bid/ask spread on one or more legs.');
+  else if (!['good', 'ok', 'thin'].includes(idea.liquidity)) warnings.push('Liquidity assessment unavailable.');
+
+  return {
+    blocked, warnings, quoteValid,
+    contracts: blocked.length ? 0 : Math.floor(available / required),
+    budgetMessage: affordable ? `${resource} sufficient${warnings.length ? '; execution caution' : ''}.` : null,
+    safety: idea.safety === 'risky' ? 'risky' : blocked.length || warnings.length ? 'caution' : idea.safety,
+  };
+}
+
+export function eligibleIncomeIdeas(ideas, settings) {
+  return ideas.filter(idea => assessIncomeIdea(idea, settings).contracts > 0);
+}
+
+function CandidateStatus({ assessment }) {
+  return (
+    <div role="status">
+      {assessment.budgetMessage && <p className="structure-notes">{assessment.budgetMessage}</p>}
+      {[...assessment.blocked, ...assessment.warnings].map(message => (
+        <p key={message} className="rvol-warm">{message}</p>
+      ))}
+    </div>
+  );
+}
+
+function SpreadCard({ i, mode, expiry, assessment }) {
+  const n = assessment.contracts;
   const legs = mode === 'ic'
     ? [['BUY', i.put_long, 'put'], ['SELL', i.put_short, 'put'], ['SELL', i.call_short, 'call'], ['BUY', i.call_long, 'call']]
     : [['SELL', i.short_strike, 'put'], ['BUY', i.long_strike, 'put']];
-  const liq = LIQ[i.liquidity];
+  const liq = LIQ[i.liquidity] || { text: 'Liquidity unavailable', cls: 'rvol-warm' };
   return (
-    <div className={`structure-card safety-${i.safety}`}>
+    <div className={`structure-card safety-${assessment.safety}`}>
       <div className="structure-title">
-        {i.label} <span className="income-delta">Δ {i.delta.toFixed(2)}</span> <Tip term="delta" /> <SafetyBadge i={i} />
+        {i.label} <span className="income-delta">Δ {i.delta.toFixed(2)}</span> <Tip term="delta" /> <SafetyBadge i={{ ...i, safety: assessment.safety }} />
       </div>
+      <CandidateStatus assessment={assessment} />
       <div className="structure-legs">
         {legs.map(([action, strike, kind]) => (
           <div key={action + strike + kind} className={`structure-leg ${action === 'BUY' ? 'leg-buy' : 'leg-sell'}`}>
-            {action} {n} × ${strike} {kind} · {fmtDate(expiry)}
+            {n > 0 ? `${action} ${n} ×` : action === 'BUY' ? 'Long' : 'Short'} ${strike} {kind} · {fmtDate(expiry)}
           </div>
         ))}
       </div>
       <div className="structure-stats">
         <div><span>Credit / contract</span><strong className="positive">{money(i.premium)}</strong></div>
         <div><span>Max loss / contract</span><strong className="negative">{money(i.max_loss)}</strong></div>
-        <div><span>Total credit · risk</span><strong>{money(i.premium * n)} · {money(i.max_loss * n)}</strong></div>
+        {n > 0 && <div><span>Total credit · risk</span><strong>{money(i.premium * n)} · {money(i.max_loss * n)}</strong></div>}
         <div><span>Return on risk <Tip term="return_on_risk" /></span><strong>{i.return_on_risk_pct}%</strong></div>
         <div><span>Chance of profit <Tip term="pop" /></span><strong>~{i.prob_profit_pct}% <small>(full credit ~{i.prob_max_profit_pct}%)</small></strong></div>
         {mode === 'ic'
@@ -93,7 +147,7 @@ function SpreadCard({ i, mode, expiry, contracts }) {
       </div>
       <Checks i={i} />
       <p className="structure-notes">
-        Limit ~${i.credit} net credit (natural ${i.natural_credit} <Tip term="natural_credit" />) · ${i.width} wide · OI {i.open_interest.toLocaleString()} ·{' '}
+        Midpoint ${i.credit} net credit (natural ${i.natural_credit} <Tip term="natural_credit" />) · ${i.width} wide · OI {i.open_interest?.toLocaleString() ?? 'Unavailable'} ·{' '}
         <span className={liq.cls}>{liq.text}</span>
       </p>
     </div>
@@ -114,12 +168,14 @@ export default function IncomeIdeas({ ticker }) {
 
   useEffect(() => {
     if (!ticker) return;
+    let active = true;
     setLoading(true);
     setError(null);
     fetchIncomeIdeas(ticker, expiry)
-      .then(setData)
-      .catch(e => setError(e.message))
-      .finally(() => setLoading(false));
+      .then(value => { if (active) setData(value); })
+      .catch(e => { if (active) setError(e.message); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
   }, [ticker, expiry]);
 
   const ideas = data?.[MODES[mode].key] || [];
@@ -129,6 +185,7 @@ export default function IncomeIdeas({ ticker }) {
   const erAhead = erDays != null && erDays >= 0;
   const spansEr = exp => erAhead && exp >= er;
   const safeExp = erAhead ? data.expirations.filter(e => e.date < er).at(-1) : null;
+  const settings = { mode, cash, risk, shares, earnings: er, expiry: data?.expiry };
 
   return (
     <div className="card income-ideas">
@@ -165,13 +222,13 @@ export default function IncomeIdeas({ ticker }) {
           ) : spread ? (
             <label>
               Max risk ($)
-              <input type="number" className="tool-input" min={0} step={100} value={risk} placeholder="optional"
+              <input type="number" className="tool-input" min={0} step={100} value={risk} placeholder="Enter risk budget"
                 onChange={e => setRisk(e.target.value)} />
             </label>
           ) : (
             <label>
               Cash available ($)
-              <input type="number" className="tool-input" min={0} step={1000} value={cash} placeholder="optional"
+              <input type="number" className="tool-input" min={0} step={1000} value={cash} placeholder="Enter cash"
                 onChange={e => setCash(e.target.value)} />
             </label>
           )}
@@ -209,32 +266,31 @@ export default function IncomeIdeas({ ticker }) {
       )}
       {loading && <p className="loading-text">Loading option chain…</p>}
       {error && <p className="empty-state">{error}</p>}
-      {data && !loading && ideas.length === 0 && <p className="empty-state">No liquid strikes found for this expiry.</p>}
+      {data && !loading && ideas.length === 0 && <p className="empty-state" role="status">No candidates returned for this strategy and expiry.</p>}
 
       {data && !loading && ideas.length > 0 && (
         <div className="structures-grid income-grid">
           {ideas.map(i => {
+            const assessment = assessIncomeIdea(i, settings);
             if (spread) {
-              const n = risk ? Math.floor(Number(risk) / i.max_loss) : 1;
-              return <SpreadCard key={i.label} i={i} mode={mode} expiry={data.expiry} contracts={n} />;
+              return <SpreadCard key={i.label} i={i} mode={mode} expiry={data.expiry} assessment={assessment} />;
             }
-            const contracts = mode === 'cc'
-              ? Math.floor(shares / 100)
-              : (cash ? Math.floor(Number(cash) / i.capital_required) : 1);
-            const liq = LIQ[i.liquidity];
+            const contracts = assessment.contracts;
+            const liq = LIQ[i.liquidity] || { text: 'Liquidity unavailable', cls: 'rvol-warm' };
             return (
-              <div key={i.strike} className={`structure-card safety-${i.safety}`}>
+              <div key={i.strike} className={`structure-card safety-${assessment.safety}`}>
                 <div className="structure-title">
-                  {i.label} <span className="income-delta">Δ {Math.abs(i.delta).toFixed(2)}</span> <SafetyBadge i={i} />
+                  {i.label} <span className="income-delta">Δ {Math.abs(i.delta).toFixed(2)}</span> <SafetyBadge i={{ ...i, safety: assessment.safety }} />
                 </div>
+                <CandidateStatus assessment={assessment} />
                 <div className="structure-legs">
                   <div className="structure-leg leg-sell">
-                    SELL {Math.max(contracts, 0)} × ${i.strike} {mode === 'cc' ? 'call' : 'put'} · {fmtDate(data.expiry)}
+                    {contracts > 0 ? `SELL ${contracts} ×` : 'Short'} ${i.strike} {mode === 'cc' ? 'call' : 'put'} · {fmtDate(data.expiry)}
                   </div>
                 </div>
                 <div className="structure-stats">
                   <div><span>Premium / contract</span><strong className="positive">{money(i.premium)}</strong></div>
-                  <div><span>Total premium</span><strong className="positive">{money(i.premium * Math.max(contracts, 0))}</strong></div>
+                  {contracts > 0 && <div><span>Total premium</span><strong className="positive">{money(i.premium * contracts)}</strong></div>}
                   <div><span>Return</span><strong>{i.return_pct}% <small>({i.annualized_pct}%/yr)</small></strong></div>
                   <div><span>Chance of {mode === 'cc' ? 'shares called away' : 'buying shares'}</span><strong>~{i.prob_assigned_pct}%</strong></div>
                   {mode === 'cc' ? (
@@ -251,24 +307,13 @@ export default function IncomeIdeas({ ticker }) {
                 </div>
                 <Checks i={i} />
                 <p className="structure-notes">
-                  Limit ~${i.mid} (bid ${i.bid} / ask ${i.ask}) · OI {i.open_interest.toLocaleString()} ·{' '}
+                  Midpoint ${i.mid} (bid {i.bid == null ? 'Unavailable' : `$${i.bid}`} / ask {i.ask == null ? 'Unavailable' : `$${i.ask}`}) · OI {i.open_interest?.toLocaleString() ?? 'Unavailable'} ·{' '}
                   <span className={liq.cls}>{liq.text}</span>
                 </p>
               </div>
             );
           })}
         </div>
-      )}
-
-      {mode === 'cc' && data && shares < 100 && (
-        <p className="ivrank-note">You need at least 100 shares per covered call contract.</p>
-      )}
-      {mode === 'csp' && data && cash && ideas.length > 0 && Math.floor(Number(cash) / ideas[0].capital_required) < 1 && (
-        <p className="ivrank-note">Not enough cash for one contract at these strikes — try a lower-priced stock.</p>
-      )}
-
-      {spread && data && risk && ideas.length > 0 && ideas.every(i => Number(risk) < i.max_loss) && (
-        <p className="ivrank-note">Max risk is below one contract's max loss — raise it or pick a cheaper stock.</p>
       )}
 
       {data && (

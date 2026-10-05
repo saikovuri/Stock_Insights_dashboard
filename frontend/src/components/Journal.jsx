@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine } from 'recharts';
 import { useAuth } from '../AuthContext';
 import PreTradeChecklist from './PreTradeChecklist';
 import PositionCalculator from './PositionCalculator';
+import { Review } from './OptionsDesk';
 import {
-  fetchJournal, addJournalEntry, updateJournalEntry, deleteJournalEntry, fetchJournalCoach,
+  fetchJournal, addJournalEntry, updateJournalEntry, deleteJournalEntry, fetchJournalCoach, fetchClosedTrades, fetchClosedOptions, logClosedOption, updateClosedOption, deleteClosedOption,
 } from '../api/stockApi';
 
 const SETUP_TAGS = ['Breakout', 'Pullback', 'Gap and go', 'Opening range', 'Reversal', 'Earnings', 'Trend follow', 'Squeeze', 'Long-term buy'];
@@ -38,18 +39,182 @@ function Breakdown({ title, rows }) {
 }
 
 function PlanTrade() {
+  const dialog = useRef(null);
   return (
-    <details className="card plan-trade">
-      <summary><h3 style={{ display: 'inline' }}>🧮 Plan a trade</h3> <span className="market-sub">pre-trade checklist & position size</span></summary>
-      <div className="tools-grid">
-        <PreTradeChecklist />
-        <PositionCalculator />
-      </div>
-    </details>
+    <>
+      <button className="btn-secondary btn-sm" aria-haspopup="dialog" onClick={() => dialog.current.showModal()}>Plan a trade</button>
+      <dialog ref={dialog} className="journal-plan-dialog" aria-labelledby="journal-plan-title">
+        <div className="journal-plan-header">
+          <h2 id="journal-plan-title">Plan a trade</h2>
+          <button className="btn-secondary btn-sm" onClick={() => dialog.current.close()}>Close</button>
+        </div>
+        <div className="tools-grid">
+          <PreTradeChecklist />
+          <PositionCalculator />
+        </div>
+      </dialog>
+    </>
   );
 }
 
-export default function Journal({ onSignIn, onSelect }) {
+function RecordedHistory({ optionsOnly = false, version = 0, onEdit, onDelete, busy = false }) {
+  const [rows, setRows] = useState(null);
+  const [error, setError] = useState(null);
+  useEffect(() => {
+    let active = true;
+    setError(null);
+    setRows(null);
+    Promise.all([optionsOnly ? Promise.resolve({ trades: [] }) : fetchClosedTrades(), fetchClosedOptions()]).then(([stocks, options]) => {
+      if (active) setRows([...stocks.trades.map(trade => ({ ...trade, key: `stock:${trade.id}`, kind: 'Stock', quantity: trade.shares })),
+        ...options.trades.map(trade => ({ ...trade, key: `option:${trade.id}`, kind: `${trade.position} ${trade.option_type} $${trade.strike} ${trade.expiry}`, quantity: trade.contracts }))]
+        .sort((first, second) => String(second.closed_at).localeCompare(String(first.closed_at))));
+    }).catch(reason => { if (active) setError(reason.message); });
+    return () => { active = false; };
+  }, [optionsOnly, version]);
+  if (error) return <p className="error-text">{error}</p>;
+  if (!rows) return <p className="loading-text">Loading recorded trades...</p>;
+  if (!rows.length) return <p className="empty-state">{optionsOnly ? 'No closed options recorded.' : 'No closed stock or option trades recorded.'}</p>;
+  const grossTotal = rows.reduce((total, row) => total + row.pnl, 0);
+  return <section className="portfolio-section">
+    <h3>{optionsOnly ? 'Recorded closed options' : 'Recorded stock and option trades'}</h3>
+    <p>Gross realized P&L: <span className={grossTotal > 0 ? 'positive' : grossTotal < 0 ? 'negative' : ''}>{money(grossTotal)}</span></p>
+    <div className="table-scroll"><table className="market-table">
+      <thead><tr>{onEdit && <th>Actions</th>}<th>Opened</th><th>Closed</th><th>Ticker</th><th>Position</th><th>Quantity</th><th>Open / close premium</th><th>Gross P&L</th><th>Recorded option fees</th><th>Net option P&L</th><th>Notes</th></tr></thead>
+      <tbody>{rows.map(row => <tr key={row.key}>
+        {onEdit && <td className="closed-option-actions">{row.is_manual ? <>
+          <button className="btn-icon" type="button" title="Edit manual option" aria-label={`Edit ${row.ticker} option`} disabled={busy} onClick={() => onEdit(row)}>✎</button>
+          <button className="btn-icon" type="button" title="Delete manual option" aria-label={`Delete ${row.ticker} option`} disabled={busy} onClick={() => onDelete(row)}>🗑</button>
+        </> : '—'}</td>}
+        <td>{row.opened_at || row.acquired_at || '—'}</td><td>{String(row.closed_at).slice(0, 10)}</td><td>{row.ticker}</td><td>{row.kind}</td><td>{row.quantity}</td>
+        <td>{row.open_premium == null ? '—' : `${money(row.open_premium)} / ${money(row.close_premium)}`}</td>
+        <td className={row.pnl > 0 ? 'positive' : row.pnl < 0 ? 'negative' : ''}>{money(row.pnl)}</td><td>{money(row.fees)}</td><td>{money(row.net_pnl)}</td>
+        <td>{row.notes && <details className="closed-option-notes"><summary>Notes</summary><p>{row.notes}</p></details>}</td></tr>)}</tbody>
+    </table></div>
+  </section>;
+}
+
+const EMPTY_OPTION = { ticker: '', option_type: 'put', position: 'short', strike: '', expiry: '', contracts: '1',
+  open_premium: '', close_premium: '', opened_at: '', closed_at: '', fees: '0', notes: '' };
+
+function OptionDateField({ name, label, value, onChange, max }) {
+  const input = useRef(null);
+  const openCalendar = () => {
+    input.current?.focus();
+    try { input.current?.showPicker?.(); } catch { input.current?.focus(); }
+  };
+  return <div className="closed-option-date-field">
+    <label htmlFor={`closed-option-${name}`}>{label}</label>
+    <div className="closed-option-date-control">
+      <input ref={input} id={`closed-option-${name}`} className="tool-input" type="date" required max={max} value={value} onChange={onChange} />
+      <button className="btn-icon" type="button" title={`Open ${label.toLowerCase()} calendar`} aria-label={`Open ${label.toLowerCase()} calendar`} onClick={openCalendar}>📅</button>
+    </div>
+  </div>;
+}
+
+function ClosedOptionJournal() {
+  const [form, setForm] = useState(EMPTY_OPTION);
+  const [show, setShow] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [saved, setSaved] = useState(null);
+  const [version, setVersion] = useState(0);
+  const [editId, setEditId] = useState(null);
+  const tickerInput = useRef(null);
+  const attempt = useRef(null);
+  const pending = useRef(false);
+  useEffect(() => { if (show) tickerInput.current?.focus(); }, [show, editId]);
+  const set = key => event => setForm(value => ({ ...value, [key]: event.target.value }));
+  const numeric = ['strike', 'contracts', 'open_premium', 'close_premium', 'fees'];
+  const validNumbers = numeric.every(key => form[key] !== '' && Number.isFinite(Number(form[key])))
+    && Number(form.strike) > 0 && Number(form.open_premium) > 0 && Number(form.close_premium) >= 0
+    && Number(form.fees) >= 0 && Number.isInteger(Number(form.contracts)) && Number(form.contracts) > 0;
+  const dateError = form.opened_at && form.closed_at && form.opened_at > form.closed_at ? 'Closing date cannot precede opening date.'
+    : form.closed_at && form.closed_at > today() ? 'Completed trades cannot have future dates.'
+      : form.expiry && form.closed_at && form.closed_at > form.expiry ? 'Closing date cannot be after expiry.' : null;
+  const valid = validNumbers && /^[A-Z^][A-Z0-9.^=-]{0,19}$/.test(form.ticker.trim().toUpperCase())
+    && form.opened_at && form.closed_at && form.expiry && !dateError;
+  const gross = validNumbers ? Math.round((Number(form.close_premium) - Number(form.open_premium))
+    * Number(form.contracts) * 100 * (form.position === 'short' ? -1 : 1) * 100) / 100 : null;
+  const save = async event => {
+    event.preventDefault();
+    if (!valid || pending.current) return;
+    const payload = { ...form, ticker: form.ticker.trim().toUpperCase(), contracts: Number(form.contracts) };
+    const signature = JSON.stringify({ editId, payload });
+    if (attempt.current?.signature !== signature) attempt.current = { signature, key: crypto.randomUUID() };
+    pending.current = true;
+    setBusy(true); setError(null); setSaved(null);
+    try {
+      const request = { ...payload, idempotency_key: attempt.current.key };
+      if (editId !== null) await updateClosedOption(editId, request);
+      else await logClosedOption(request);
+      setSaved(`${payload.ticker} closed option ${editId !== null ? 'updated' : 'recorded'}.`);
+      setForm(EMPTY_OPTION); setEditId(null); setShow(false); setVersion(value => value + 1); attempt.current = null;
+    } catch (reason) { setError(reason.message); }
+    finally { pending.current = false; setBusy(false); }
+  };
+  const edit = row => {
+    setForm(Object.fromEntries(Object.keys(EMPTY_OPTION).map(key => [key, String(row[key] ?? EMPTY_OPTION[key])])));
+    setEditId(row.id); setShow(true); setError(null); setSaved(null); attempt.current = null;
+  };
+  const remove = async row => {
+    if (pending.current || !window.confirm(`Delete this ${row.ticker} manual option entry and its recorded fees? The audit history will be retained.`)) return;
+    pending.current = true; setBusy(true); setError(null); setSaved(null);
+    try {
+      await deleteClosedOption(row.id);
+      if (editId === row.id) { setEditId(null); setForm(EMPTY_OPTION); setShow(false); attempt.current = null; }
+      setSaved(`${row.ticker} closed option deleted.`); setVersion(value => value + 1);
+    } catch (reason) { setError(reason.message); }
+    finally { pending.current = false; setBusy(false); }
+  };
+  return <section className="portfolio-section closed-option-journal">
+    <div className="journal-plan-header"><h3>Options journal</h3>
+      <button className="btn-primary btn-sm" disabled={busy} aria-expanded={show} onClick={() => { setShow(!show); setEditId(null); setForm(EMPTY_OPTION); attempt.current = null; setError(null); setSaved(null); }}>
+        {show ? 'Cancel option entry' : 'Log closed option'}
+      </button>
+    </div>
+    {saved && <p role="status" className="positive">{saved}</p>}
+    {error && <p className="error-text" role="alert">{error}</p>}
+    {show && <form className="closed-option-form" aria-label="Closed option entry" onSubmit={save}>
+      <fieldset disabled={busy}>
+        <legend>{editId !== null ? 'Edit closed option' : 'Completed single-leg option'} · Standard 100-share contracts</legend>
+        <label>Option ticker<input ref={tickerInput} className="tool-input" required maxLength={20} value={form.ticker} onChange={set('ticker')} /></label>
+        <label>Option type<select className="tool-input" value={form.option_type} onChange={set('option_type')}><option value="put">Put</option><option value="call">Call</option></select></label>
+        <label>Position<select className="tool-input" value={form.position} onChange={set('position')}><option value="short">Short (sold to open)</option><option value="long">Long (bought to open)</option></select></label>
+        <label>Strike ($)<input className="tool-input" type="number" required min="0.000001" step="0.000001" value={form.strike} onChange={set('strike')} /></label>
+        <OptionDateField name="expiry" label="Expiry" value={form.expiry} onChange={set('expiry')} />
+        <label>Contracts<input className="tool-input" type="number" required min="1" step="1" value={form.contracts} onChange={set('contracts')} /></label>
+        <OptionDateField name="opened" label="Opened on" max={today()} value={form.opened_at} onChange={set('opened_at')} />
+        <OptionDateField name="closed" label="Closed on" max={today()} value={form.closed_at} onChange={set('closed_at')} />
+        <label>Opening premium ($/share)<input className="tool-input" type="number" required min="0.000001" step="0.000001" value={form.open_premium} onChange={set('open_premium')} /></label>
+        <label>Closing premium ($/share)<input className="tool-input" type="number" required min="0" step="0.000001" value={form.close_premium} onChange={set('close_premium')} /></label>
+        <label>Total fees ($, both sides)<input className="tool-input" type="number" required min="0" step="0.01" value={form.fees} onChange={set('fees')} /></label>
+        <div className="closed-option-wide closed-option-notes-field">
+          <label htmlFor="closed-option-notes">Option notes</label>
+          <textarea id="closed-option-notes" className="tool-input" rows={3} maxLength={1000} value={form.notes} onChange={set('notes')} />
+        </div>
+        <div className="closed-option-wide doctor-stats" aria-label="Option P&L preview">
+          <div><span>Gross P&L</span><strong>{money(gross)}</strong></div>
+          <div><span>Recorded fees</span><strong>{validNumbers ? money(Number(form.fees)) : '—'}</strong></div>
+          <div><span>Net P&L</span><strong>{gross == null ? '—' : money(gross - Number(form.fees))}</strong></div>
+        </div>
+        <p className="closed-option-wide market-sub">{editId !== null ? 'Corrections retain the audit history and replace recorded fees.' : 'For previously unrecorded trades only. No automatic matching to existing records or assignment, exercise or adjusted-contract accounting.'}</p>
+        {dateError && <p className="closed-option-wide error-text" role="alert">{dateError}</p>}
+        <button className="btn-primary btn-sm" disabled={!valid || busy} type="submit">{busy ? 'Saving...' : editId !== null ? 'Save option changes' : 'Record closed option'}</button>
+      </fieldset>
+    </form>}
+    <RecordedHistory optionsOnly version={version} onEdit={edit} onDelete={remove} busy={busy} />
+  </section>;
+}
+
+export default function Journal(props) {
+  const { user } = useAuth();
+  return <div className="journal-workspace" key={user?.id ?? user?.username ?? 'guest'}>
+    <header className="journal-plan-header"><h2>Journal</h2><PlanTrade /></header>
+    <JournalViews {...props} />
+  </div>;
+}
+
+function JournalViews({ onSignIn, onSelect }) {
   const { user } = useAuth();
   const [report, setReport] = useState(null);
   const [form, setForm] = useState(EMPTY);
@@ -58,6 +223,7 @@ export default function Journal({ onSignIn, onSelect }) {
   const [msg, setMsg] = useState(null);
   const [coach, setCoach] = useState(null);
   const [coachLoading, setCoachLoading] = useState(false);
+  const [view, setView] = useState('history');
 
   const load = useCallback(() => {
     fetchJournal().then(setReport).catch(e => setMsg(e.message));
@@ -68,7 +234,6 @@ export default function Journal({ onSignIn, onSelect }) {
   if (!user) {
     return (
       <div className="journal">
-        <PlanTrade />
         <div className="card">
           <h3>📓 Trade Journal</h3>
           <p className="empty-state" style={{ padding: 0 }}>Sign in to log trades and get AI coaching on your win rate, R-multiples and habits.</p>
@@ -79,6 +244,13 @@ export default function Journal({ onSignIn, onSelect }) {
   }
 
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
+  const navigation = <nav className="sub-tabs" aria-label="Journal views">
+    {[['history', 'Trade history'], ['journal', 'Manual journal'], ['options', 'Options review']].map(([id, label]) =>
+      <button key={id} className={`sub-tab ${view === id ? 'active' : ''}`} onClick={() => setView(id)}>{label}</button>)}
+  </nav>;
+  if (view !== 'journal') return <div className="journal portfolio-workspace">{navigation}
+    {view === 'history' ? <RecordedHistory /> : <Review version={user.id} />}
+  </div>;
 
   const save = async () => {
     setMsg(null);
@@ -118,12 +290,13 @@ export default function Journal({ onSignIn, onSelect }) {
 
   return (
     <div className="journal">
-      <PlanTrade />
+      {navigation}
+      <ClosedOptionJournal />
       <div className="card">
         <div className="ivrank-header">
-          <h3 style={{ margin: 0 }}>📓 Trade Journal</h3>
+          <h3 style={{ margin: 0 }}>Manual stock journal</h3>
           <button className="btn-primary btn-sm" onClick={() => { setShowForm(!showForm); setEditId(null); setForm(EMPTY); }}>
-            {showForm ? 'Cancel' : '+ Log trade'}
+            {showForm ? 'Cancel' : '+ Log stock trade'}
           </button>
         </div>
         {msg && <p className="error-text">{msg}</p>}

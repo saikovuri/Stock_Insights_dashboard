@@ -212,7 +212,105 @@ def _params(strategy, overrides):
     for k, v in (overrides or {}).items():
         if k in p and v is not None:
             p[k] = v
+    for name, value in p.items():
+        if not np.isfinite(value):
+            raise ValueError(f"{name} must be finite")
+        if name == "vwap_filter":
+            if value not in (0, 1):
+                raise ValueError("VWAP filter must be 0 or 1")
+        elif name in ("lower", "upper"):
+            if not 0 <= value <= 100:
+                raise ValueError("RSI bands must be between 0 and 100")
+        elif value <= 0 or value > 500 or (name != "mult" and int(value) != value):
+            raise ValueError(f"{name} must be a positive {'number' if name == 'mult' else 'integer'} up to 500")
+    if p.get("fast", 0) >= p.get("slow", 501) or p.get("ao_fast", 0) >= p.get("ao_slow", 501):
+        raise ValueError("Fast period must be shorter than slow period")
+    if p.get("lower", 0) >= p.get("upper", 100):
+        raise ValueError("Lower band must be below upper band")
     return p
+
+
+def _validation(df, strategy, params, intraday, bar_min, side, cost, stop, target):
+    signals = None if strategy == "orb" else _signals(df, strategy, params, intraday)
+    boundaries = [0]
+    for fraction in (0.7, 0.8, 0.9):
+        index = int(len(df) * fraction)
+        if intraday:
+            index = int(np.flatnonzero(df["day"].values == df["day"].iloc[index])[0])
+        boundaries.append(index)
+    boundaries.append(len(df))
+
+    def evaluate(start, end):
+        sample = df.iloc[start:end]
+        if len(sample) < 2:
+            return {"stats": {"trades": 0}, "from": None, "to": None}
+        trades = (_orb(sample, params["minutes"], bar_min, side) if strategy == "orb" else
+                  _simulate(sample, tuple(signal.iloc[start:end] for signal in signals), intraday, side, stop, target))
+        sessions = sample["day"].nunique() if intraday else len(sample)
+        return {"from": sample.index[0].isoformat(), "to": sample.index[-1].isoformat(),
+                "stats": _stats(trades, cost, sessions), "double_cost_stats": _stats(trades, cost * 2, sessions)}
+
+    return {"train": evaluate(0, boundaries[1]), "holdout": evaluate(boundaries[1], len(df)),
+            "windows": [evaluate(start, end) for start, end in zip(boundaries[1:-1], boundaries[2:])],
+            "note": "First 70% development window, final 30% chronological holdout with three sequential windows. "
+                    "Parameters are fixed; indicators warm up using earlier observations only and positions reset at boundaries. "
+                    "Retuning after seeing holdout results invalidates the holdout. Costs are round-trip bps including fees/slippage; "
+                    "double-cost results are a sensitivity check. This is not a claim of a validated trading edge."}
+
+
+def _walk_forward(df, strategy, params, intraday, bar_min, side, cost, stop, target):
+    candidates = [params]
+    parameter = next((name for name in ("fast", "length", "atr_len", "bb_len", "minutes") if name in params), None)
+    if parameter:
+        for scale in (0.75, 1.25):
+            try:
+                candidate = _params(strategy, {**params, parameter: max(1, round(params[parameter] * scale))})
+            except ValueError:
+                continue
+            if candidate not in candidates:
+                candidates.append(candidate)
+    boundaries = []
+    for fraction in (0.5, 0.6, 0.7, 0.8, 0.9):
+        boundary = int(len(df) * fraction)
+        if intraday:
+            boundary = int(np.flatnonzero(df["day"].values == df["day"].iloc[boundary])[0])
+        boundaries.append(boundary)
+    boundaries = sorted(set(boundaries + [len(df)]))
+    folds, all_trades = [], []
+    for start, end in zip(boundaries, boundaries[1:]):
+        if start < 30 or end - start < 2:
+            continue
+        train, sample = df.iloc[:start], df.iloc[start:end]
+        training_sessions = train["day"].nunique() if intraday else len(train)
+        ranked = []
+        for candidate in candidates:
+            trades = (_orb(train, candidate["minutes"], bar_min, side) if strategy == "orb" else
+                      _simulate(train, _signals(train, strategy, candidate, intraday), intraday, side, stop, target))
+            stats = _stats(trades, cost, training_sessions)
+            if stats["trades"] >= 5 and stats["total_net_pct"] > 0:
+                ranked.append((stats["total_net_pct"], candidate, stats))
+        fold = {"train_from": train.index[0].isoformat(), "train_to": train.index[-1].isoformat(),
+                "from": sample.index[0].isoformat(), "to": sample.index[-1].isoformat(),
+                "params": None, "training_stats": None, "stats": {"trades": 0}, "double_cost_stats": {"trades": 0}}
+        if ranked:
+            _, chosen, training_stats = max(ranked, key=lambda item: item[0])
+            signals = None if strategy == "orb" else _signals(df.iloc[:end], strategy, chosen, intraday)
+            trades = (_orb(sample, chosen["minutes"], bar_min, side) if strategy == "orb" else
+                      _simulate(sample, tuple(signal.iloc[start:end] for signal in signals), intraday, side, stop, target))
+            sessions = sample["day"].nunique() if intraday else len(sample)
+            fold.update(params=chosen, training_stats=training_stats, stats=_stats(trades, cost, sessions),
+                        double_cost_stats=_stats(trades, cost * 2, sessions))
+            all_trades.extend(trades)
+        folds.append(fold)
+    test = df.iloc[boundaries[0]:]
+    sessions = test["day"].nunique() if intraday else len(test)
+    return {"windows": folds, "candidates": candidates, "stats": _stats(all_trades, cost, sessions),
+            "double_cost_stats": _stats(all_trades, cost * 2, sessions),
+            "note": "Expanding-window parameter selection: first 50% training, five subsequent 10% test windows. "
+                    "The declared grid varies one lookback by +/-25%; each choice uses only preceding training data. "
+                    "Selection maximizes training net return with at least five trades and positive net return; otherwise no trade. "
+                    "Positions reset each window. Forward results include round-trip costs; double-cost results stress the assumptions. "
+                    "This is single-ticker research, not a point-in-time universe test or evidence of future profitability."}
 
 
 def run(ticker, tf, strategy, overrides=None, side="both", cost_bps=3.0, stop_pct=0.0, target_pct=0.0):
@@ -220,6 +318,8 @@ def run(ticker, tf, strategy, overrides=None, side="both", cost_bps=3.0, stop_pc
         raise ValueError("Unsupported timeframe")
     if strategy not in STRATEGIES:
         raise ValueError("Unknown strategy")
+    if side not in {"both", "long", "short"} or any(not np.isfinite(value) or value < 0 for value in (cost_bps, stop_pct, target_pct)):
+        raise ValueError("Invalid side, costs, stop or target")
     intraday, bar_min = TIMEFRAMES[tf][2], TIMEFRAMES[tf][3]
     p = _params(strategy, overrides)
     key = f"bt:{ticker}:{tf}:{strategy}:{sorted(p.items())}:{side}:{cost_bps}:{stop_pct}:{target_pct}"
@@ -253,6 +353,8 @@ def run(ticker, tf, strategy, overrides=None, side="both", cost_bps=3.0, stop_pc
             "params": p, "side": side, "cost_bps": cost_bps, "stop_pct": stop_pct, "target_pct": target_pct,
             "from": df.index[0].strftime(fmt), "to": df.index[-1].strftime(fmt), "sessions": int(sessions),
             "stats": _stats(trades, cost, sessions), "baseline": baseline,
+            "validation": _validation(df, strategy, p, intraday, bar_min, side, cost, stop_pct / 100, target_pct / 100),
+            "walk_forward": _walk_forward(df, strategy, p, intraday, bar_min, side, cost, stop_pct / 100, target_pct / 100),
             "equity": [{"t": trades[i]["exit_time"].strftime(fmt), "equity": round(float(eq[i]), 3)}
                        for i in range(0, len(trades), step)],
             "recent_trades": [{"side": "long" if t["side"] == 1 else "short",
@@ -261,7 +363,7 @@ def run(ticker, tf, strategy, overrides=None, side="both", cost_bps=3.0, stop_pc
                                "ret_pct": round((t["ret"] - cost) * 100, 2), "why": t["why"]}
                               for t in trades[-25:]][::-1],
         }
-    return get_or_fetch(key, _fetch, ttl=600)
+    return get_or_fetch("walk-forward-v1:" + key, _fetch, ttl=600)
 
 
 def compare(ticker, tf, cost_bps=3.0):

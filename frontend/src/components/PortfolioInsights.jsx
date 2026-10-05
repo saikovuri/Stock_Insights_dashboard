@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid } from 'recharts';
 import CorrelationHeatmap from './CorrelationHeatmap';
+import Accounting from './Accounting';
+import { Ledger, PremiumIncome } from './OptionsDesk';
 import {
   fetchPerformance, fetchDividendIncome, fetchTaxWarnings, importPortfolioCsv, fetchWeeklyReview,
 } from '../api/stockApi';
@@ -165,7 +167,7 @@ function WeeklyReview() {
   );
 }
 
-function ImportCsv({ onImported }) {
+export function ImportCsv({ onImported }) {
   const [text, setText] = useState('');
   const [preview, setPreview] = useState(null);
   const [msg, setMsg] = useState(null);
@@ -219,11 +221,10 @@ function ImportCsv({ onImported }) {
   );
 }
 
-const TABS = [['spy', '📈 vs S&P 500'], ['divs', '💰 Dividend income'], ['tax', '🧾 Tax'],
-  ['corr', '🔗 Correlation'], ['weekly', '🗞️ Weekly review'], ['import', '📥 Import CSV']];
+const TABS = [['combined', 'Combined P&L'], ['accounting', 'Account ledger'], ['income', 'Premium cash flow'], ['spy', 'vs S&P 500'], ['divs', 'Dividends'], ['tax', 'Tax'], ['weekly', 'Weekly review']];
 
 export default function PortfolioInsights({ tickers, version, onImported }) {
-  const [tab, setTab] = useState('spy');
+  const [tab, setTab] = useState('combined');
   return (
     <div className="card portfolio-insights">
       <nav className="sub-tabs">
@@ -231,6 +232,9 @@ export default function PortfolioInsights({ tickers, version, onImported }) {
           <button key={id} className={`sub-tab ${tab === id ? 'active' : ''}`} onClick={() => setTab(id)}>{label}</button>
         ))}
       </nav>
+      {tab === 'combined' && <Ledger version={version} />}
+      {tab === 'accounting' && <Accounting version={version} />}
+      {tab === 'income' && <PremiumIncome version={version} />}
       {tab === 'spy' && <VsSpy version={version} />}
       {tab === 'divs' && <DividendIncome version={version} />}
       {tab === 'tax' && <TaxCheck version={version} />}

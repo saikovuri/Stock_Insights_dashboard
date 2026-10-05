@@ -1,6 +1,29 @@
 import { useState, useMemo, useCallback } from 'react';
 import { fetchMetrics } from '../api/stockApi';
 
+export function calculatePosition({ portfolio, cashAvailable, allocPct, stockPrice, stopLoss, targetPrice }) {
+  const port = Number(portfolio), price = Number(stockPrice), alloc = Number(allocPct) / 100;
+  const availCash = cashAvailable === '' ? port : Number(cashAvailable);
+  if (![port, price, alloc, availCash].every(Number.isFinite) || port <= 0 || price <= 0 || alloc <= 0 || alloc > 1 || availCash < 0) return null;
+  const stop = stopLoss === '' ? null : Number(stopLoss);
+  const target = targetPrice === '' ? null : Number(targetPrice);
+  if (stop !== null && (!Number.isFinite(stop) || stop < 0 || stop >= price)) return null;
+  if (target !== null && (!Number.isFinite(target) || target <= price)) return null;
+  const desiredAmount = port * alloc;
+  const idealShares = Math.floor(desiredAmount / price);
+  const actualShares = Math.floor(Math.min(desiredAmount, availCash) / price);
+  const capitalDeployed = actualShares * price;
+  const riskPerShare = stop === null ? null : price - stop;
+  const slLoss = riskPerShare === null ? null : actualShares * riskPerShare;
+  const ptGain = target === null ? null : actualShares * (target - price);
+  return { desiredAmount, idealShares, cashConstrained: desiredAmount > availCash, actualShares, capitalDeployed,
+    actualPct: capitalDeployed / port * 100, remainingCash: availCash - capitalDeployed, availCash, price,
+    slLoss, slLossPct: slLoss === null ? null : slLoss / port * 100, riskPerShare,
+    stopPct: riskPerShare === null ? null : riskPerShare / price * 100,
+    ptGain, ptGainPct: ptGain === null ? null : ptGain / port * 100,
+    rr: riskPerShare && target !== null ? (target - price) / riskPerShare : null };
+}
+
 export default function PositionCalculator() {
   const [portfolio, setPortfolio] = useState('');
   const [cashAvailable, setCashAvailable] = useState('');
@@ -37,59 +60,15 @@ export default function PositionCalculator() {
     if (e.key === 'Enter') lookupTicker();
   };
 
-  const calc = useMemo(() => {
-    const port = parseFloat(portfolio);
-    const cash = parseFloat(cashAvailable);
-    const alloc = parseFloat(allocPct) / 100;
-    const price = stockPrice;
-    const stop = parseFloat(stopLoss);
-    const target = parseFloat(targetPrice);
-
-    if (!port || port <= 0 || !price || price <= 0 || !alloc) return null;
-    const availCash = cash > 0 ? cash : port;
-
-    // Desired position
-    const desiredAmount = port * alloc;
-    const idealShares = Math.floor(desiredAmount / price);
-
-    // Cash constraint
-    const cashConstrained = desiredAmount > availCash;
-    const actualShares = cashConstrained ? Math.floor(availCash / price) : idealShares;
-    const capitalDeployed = actualShares * price;
-    const actualPct = (capitalDeployed / port) * 100;
-    const remainingCash = availCash - capitalDeployed;
-
-    // SL/PT scenarios (optional)
-    let slLoss = null, slLossPct = null, riskPerShare = null, stopPct = null;
-    if (stop > 0 && stop !== price) {
-      riskPerShare = Math.abs(price - stop);
-      stopPct = (riskPerShare / price) * 100;
-      slLoss = actualShares * riskPerShare;
-      slLossPct = (slLoss / port) * 100;
-    }
-
-    let ptGain = null, ptGainPct = null, rr = null;
-    if (target > 0 && target !== price) {
-      const gainPerShare = Math.abs(target - price);
-      ptGain = actualShares * gainPerShare;
-      ptGainPct = (ptGain / port) * 100;
-      if (riskPerShare) rr = gainPerShare / riskPerShare;
-    }
-
-    return {
-      desiredAmount, idealShares, cashConstrained,
-      actualShares, capitalDeployed, actualPct, remainingCash,
-      availCash, price,
-      slLoss, slLossPct, riskPerShare, stopPct,
-      ptGain, ptGainPct, rr,
-    };
-  }, [portfolio, cashAvailable, allocPct, stockPrice, stopLoss, targetPrice]);
+  const calc = useMemo(() => calculatePosition({ portfolio, cashAvailable, allocPct, stockPrice, stopLoss, targetPrice }),
+    [portfolio, cashAvailable, allocPct, stockPrice, stopLoss, targetPrice]);
 
   const fmt = (v, d = 0) => v.toLocaleString(undefined, { maximumFractionDigits: d });
 
   return (
     <div className="tool-card">
       <h3>🎯 Position Size Calculator</h3>
+      {stockPrice > 0 && Number(portfolio) > 0 && !calc && <p className="error-text">Use nonnegative cash, a stop below entry, and a target above entry.</p>}
       <p className="tool-desc">How many shares to buy for your desired portfolio allocation.</p>
 
       <div className="tool-form">

@@ -2,6 +2,7 @@
 
 import io
 import logging
+import os
 import threading
 import time
 from datetime import datetime, timezone
@@ -47,6 +48,10 @@ def universe() -> list[dict]:
         t = pd.read_html(io.StringIO(html))[0]
         data = [{"symbol": str(r["Symbol"]).replace(".", "-"), "name": r["Security"], "sector": r["GICS Sector"]}
                 for _, r in t.iterrows()]
+        from research_universe import save_snapshot
+        observed = datetime.now(timezone.utc)
+        save_snapshot({"as_of": observed.date().isoformat(), "known_at": observed.isoformat(),
+                   "source": "observed-current-wikipedia", "members": [member["symbol"] for member in data]})
         kv_set(UNIVERSE_KEY, data)
         return data
     except Exception as e:
@@ -140,7 +145,7 @@ def _record_events(sym: str, df: pd.DataFrame, sig: pd.DataFrame, events: list) 
         fresh = sig[s] & ~recent
         for i in np.flatnonzero(fresh.values[start:]) + start:
             events.append((s, df.index[i], {h: (None if pd.isna(fwd[h].iloc[i]) else float(fwd[h].iloc[i]))
-                                            for h in HORIZONS}))
+                                            for h in HORIZONS}, sym))
 
 
 def _track_record(events: list, spy: pd.Series | None) -> dict:
@@ -168,6 +173,19 @@ def _track_record(events: list, spy: pd.Series | None) -> dict:
     return out
 
 
+def _point_in_time_record(events, spy, source, missing_symbols):
+    from research_universe import members_at
+    memberships = {day: members_at(day, source) for day in {event[1].date().isoformat() for event in events}}
+    uncovered = sorted(day for day, snapshot in memberships.items() if not snapshot["available"])
+    eligible = [event for event in events if event[3] in memberships[event[1].date().isoformat()]["members"]]
+    available = bool(memberships) and not uncovered and not missing_symbols
+    return {"source": source, "available": available, "missing_price_symbols": sorted(missing_symbols),
+        "uncovered_signal_dates": uncovered, "excluded_nonmember_signals": len(events) - len(eligible),
+        "track_record": _track_record(eligible, spy) if available else {},
+        "note": "Dated membership is filtered using information available by the signal-date US market close. "
+            "Returns remain descriptive, not a portfolio simulation. Verify provider coverage, corporate actions and delisting proceeds before relying on results."}
+
+
 def run_scan() -> dict:
     global _running
     with _lock:
@@ -179,7 +197,12 @@ def run_scan() -> dict:
         uni = universe()
         meta = {u["symbol"]: u for u in uni}
         symbols = list(meta)
+        historical_source = os.getenv("RESEARCH_UNIVERSE_SOURCE", "").strip()
+        if historical_source:
+            from research_universe import source_symbols
+            symbols = sorted(set(symbols) | set(source_symbols(historical_source)))
         rows, events = [], []
+        missing_symbols = []
         for i in range(0, len(symbols), BATCH):
             batch = symbols[i:i + BATCH]
             try:
@@ -187,14 +210,17 @@ def run_scan() -> dict:
                                    auto_adjust=True, threads=True, progress=False)
             except Exception as e:
                 log.warning("Scan batch %d failed: %s", i, e)
+                missing_symbols.extend(batch)
                 continue
             for sym in batch:
                 try:
                     r = _analyze(sym, data[sym], events)
                 except Exception:
                     r = None
-                if r:
+                if r and sym in meta:
                     rows.append({**r, "name": meta[sym]["name"], "sector": meta[sym]["sector"]})
+                elif not r:
+                    missing_symbols.append(sym)
             del data
             time.sleep(1)
 
@@ -222,9 +248,14 @@ def run_scan() -> dict:
             spy.index = spy.index.tz_localize(None) if spy.index.tz is not None else spy.index
         except Exception:
             spy = None
-        track = _track_record(events, spy)
+        track = _track_record([event for event in events if event[3] in meta], spy)
+        point_in_time = _point_in_time_record(events, spy, historical_source, missing_symbols) if historical_source else None
+        if point_in_time is not None:
+            track = point_in_time["track_record"]
 
         result = {"rows": rows, "sectors": sector_rows, "universe": "S&P 500", "rs_dist": rs_dist,
+                  "research_status": "Current-constituent exploratory returns; not point-in-time validated. Historical membership and delisted price coverage are required.",
+                  "point_in_time": point_in_time,
                   "track_record": track, "track_period_days": BACKTEST_BARS,
                   "updated_at": datetime.now(timezone.utc).isoformat(), "seconds": round(time.time() - started)}
         kv_set(SCAN_KEY, result)

@@ -1,14 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { AuthProvider, useAuth } from './AuthContext';
 import { ThemeProvider, useTheme } from './ThemeContext';
 import LoginPage from './components/LoginPage';
 import SearchBar from './components/SearchBar';
 import KeyMetrics from './components/KeyMetrics';
-import PriceChart from './components/CandleChart';
+const PriceChart = lazy(() => import('./components/CandleChart'));
 import NewsSentiment from './components/NewsSentiment';
 import AiBrief from './components/AiBrief';
 import Alerts from './components/Alerts';
-import Portfolio from './components/Portfolio';
+const Portfolio = lazy(() => import('./components/Portfolio'));
 import Watchlist from './components/Watchlist';
 import AiChat from './components/AiChat';
 import PeerBenchmark from './components/PeerBenchmark';
@@ -16,15 +16,14 @@ import WatchlistRail from './components/WatchlistRail';
 import AnalystRatings from './components/AnalystRatings';
 import Financials from './components/Financials';
 import Ownership from './components/Ownership';
-import OptionsHub from './components/OptionsHub';
+const OptionsHub = lazy(() => import('./components/OptionsHub'));
 import NotificationBell from './components/NotificationBell';
 import DailyBriefing from './components/DailyBriefing';
 import MarketOverview from './components/MarketOverview';
 import PriceAlerts from './components/PriceAlerts';
-import EarningsIntel from './components/EarningsIntel';
-import Ideas from './components/Ideas';
+const Ideas = lazy(() => import('./components/Ideas'));
 import RelativeStrength from './components/RelativeStrength';
-import Journal from './components/Journal';
+const Journal = lazy(() => import('./components/Journal'));
 import LongTermView from './components/LongTermView';
 import ShortAndSmartMoney from './components/ShortAndSmartMoney';
 import ThesisCard from './components/ThesisCard';
@@ -69,6 +68,7 @@ function AppShell() {
   const [prepost, setPrepost] = useState(false);
   const [subTab, setSubTab] = useState('overview');
   const [showAll, setShowAll] = useState(false);
+  const searchGeneration = useRef(0);
 
   useEffect(() => {
     const onHashChange = () => {
@@ -87,6 +87,7 @@ function AppShell() {
   }
 
   const handleSearch = async (t, p, i, pp) => {
+    const request = ++searchGeneration.current;
     const usePeriod = p ?? period;
     const useInterval = i ?? interval;
     const usePrepost = pp ?? prepost;
@@ -102,6 +103,7 @@ function AppShell() {
         fetchAlerts(t).catch(() => []),
         fetchEvents(t).catch(() => null),
       ]);
+      if (request !== searchGeneration.current) return;
       if (!m) throw new Error(`No data found for "${t}"`);
       setMetrics(m);
       setHistory(h);
@@ -109,6 +111,7 @@ function AppShell() {
       setAlerts(a);
       setEvents(ev);
     } catch (e) {
+      if (request !== searchGeneration.current) return;
       setError(e.message);
       setMetrics(null);
       setHistory(null);
@@ -116,7 +119,7 @@ function AppShell() {
       setAlerts(null);
       setEvents(null);
     } finally {
-      setLoading(false);
+      if (request === searchGeneration.current) setLoading(false);
     }
   };
 
@@ -193,6 +196,7 @@ function AppShell() {
         </nav>
       </header>
 
+      <Suspense fallback={<p className="loading-text">Loading workspace...</p>}>
       {activeTab === 'dashboard' && (
         <div className="dashboard-layout">
           <div className="dashboard-main">
@@ -258,7 +262,6 @@ function AppShell() {
                 {subTab === 'fundamentals' && (
                   <>
                     {show('longterm') && <LongTermView ticker={ticker} />}
-                    <EarningsIntel ticker={ticker} />
                     {show('ownership') && <Ownership ticker={ticker} />}
                     {show('financials') && (
                       <details className="raw-statements">
@@ -300,6 +303,7 @@ function AppShell() {
       {activeTab === 'portfolio' && <Portfolio />}
 
       {activeTab === 'journal' && <Journal onSignIn={() => setShowLogin(true)} onSelect={openTicker} />}
+      </Suspense>
 
       <footer className="app-footer">
         Data: Finnhub, Yahoo Finance, CBOE, SEC EDGAR, FINRA, Nasdaq &middot; AI-generated analysis can be wrong &middot; Not financial advice

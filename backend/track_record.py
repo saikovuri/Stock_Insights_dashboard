@@ -28,7 +28,9 @@ def _row(kind, label, ticker, expiry, legs, net, risk, spot, delta) -> dict:
     return {"kind": kind, "label": label, "ticker": ticker, "expiry": expiry, "legs": legs,
             "legs_key": "|".join(f"{l['side'][0]}{l['type'][0]}{l['strike']:g}" for l in legs),
             "net": round(net, 4), "risk": None if risk is None else round(risk, 4), "spot": round(spot, 4),
-            "delta": delta, "created_day": datetime.now(_ET).date().isoformat()}
+            "delta": delta, "created_day": datetime.now(_ET).date().isoformat(),
+            "cost_per_share": round(len(legs) * 0.04, 4),
+            "cost_model": "v1: $1 commission/leg/side plus $0.01/share slippage/leg/side; 100-share contracts"}
 
 
 def _save_async(rows: list[dict]) -> None:
@@ -106,8 +108,8 @@ def settle() -> int:
             log.info("Settle %s: no prices (%s)", t, e)
             continue
         for r in rows:
-            on = closes[closes.index <= pd.Timestamp(r["expiry"])]
-            if not len(on) or on.index[-1] < pd.Timestamp(r["expiry"]) - pd.Timedelta(days=4):
+            on = closes[closes.index == pd.Timestamp(r["expiry"])]
+            if not len(on) or not pd.notna(on.iloc[-1]) or on.iloc[-1] <= 0:
                 continue
             S = float(on.iloc[-1])
             settle_idea(r["id"], round(S, 4), round(r["net"] + _payoff(r["legs"], S), 4))
@@ -118,7 +120,9 @@ def settle() -> int:
 
 def summary() -> dict:
     rows = idea_log_rows()
-    settled = [r for r in rows if r["pnl"] is not None]
+    legacy_settled = [row for row in rows if row["pnl"] is not None and row.get("cost_per_share") is None]
+    settled = [{**row, "gross_pnl": row["pnl"], "pnl": row["pnl"] - row["cost_per_share"]}
+               for row in rows if row["pnl"] is not None and row.get("cost_per_share") is not None]
     groups = defaultdict(list)
     for r in settled:
         groups[(r["kind"], r["label"] if r["kind"] != "wheel" else None)].append(r)
@@ -126,8 +130,8 @@ def summary() -> dict:
     out = []
     for (kind, label), rs in groups.items():
         wins = [r for r in rs if r["pnl"] > 0]
-        full = [r for r in rs if r["pnl"] >= r["net"] - 1e-6] if rs[0]["net"] > 0 else []
-        roi = [r["pnl"] / r["risk"] for r in rs if r["risk"]]
+        full = [r for r in rs if r["gross_pnl"] >= r["net"] - 1e-6] if rs[0]["net"] > 0 else []
+        roi = [r["pnl"] / (r["risk"] + r["cost_per_share"]) for r in rs if r["risk"]]
         out.append({
             "kind": kind, "name": KIND_LABELS.get(kind, kind), "label": label, "ideas": len(rs),
             "win_rate": round(len(wins) / len(rs) * 100),
@@ -135,14 +139,19 @@ def summary() -> dict:
             "avg_return_on_risk_pct": round(sum(roi) / len(roi) * 100, 1) if roi else None,
             "avg_delta": round(sum(r["delta"] or 0 for r in rs) / len(rs), 2),
             "worst_pct": round(min(roi) * 100, 1) if roi else None,
+            "avg_net_pnl_per_contract": round(sum(row["pnl"] for row in rs) / len(rs) * 100, 2),
         })
     order = list(KIND_LABELS)
     out.sort(key=lambda g: (order.index(g["kind"]) if g["kind"] in order else 99, str(g["label"])))
     today = date.today().isoformat()
     return {
-        "groups": out, "settled": len(settled), "open": len(rows) - len(settled),
+        "groups": out, "settled": len(settled), "open": sum(row["pnl"] is None for row in rows),
+        "legacy_uncosted": len(legacy_settled),
         "next_expiry": min((r["expiry"] for r in rows if r["pnl"] is None and r["expiry"] >= today), default=None),
         "since": min((r["created_day"] for r in rows), default=None),
-        "note": "Every idea is logged the first time it's shown and held to expiry at the mid price it was shown at. "
-                "Real fills, early management (taking profit at 50%, rolling) and commissions will differ.",
+        "note": "Hypothetical midpoint-entry paper ideas, not executed trades. New observations freeze a cost model of $1 "
+            "commission per leg per side plus $0.01/share slippage per leg per side. Reported outcomes are net of these costs. "
+            "Legacy observations without recorded costs are excluded. Outcomes require an exact expiry-date close; "
+            "missing dates remain unsettled. Early assignment, intraday fills and management are not modeled. "
+            "Repeated and correlated ideas are not independent observations; this is not evidence of a tradable edge.",
     }

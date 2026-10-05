@@ -149,11 +149,14 @@ export default function Structures({ ticker }) {
         </div>
       )}
 
-      {data && data.ideas.length === 0 && (
+      {data?.no_trade_reason && (
+        <p className="empty-state" role="status">{data.no_trade_reason}</p>
+      )}
+
+      {data && !data.no_trade_reason && data.ideas.length === 0 && (
         <p className="empty-state">
           Nothing fits a ${budget.toLocaleString()} budget for {ticker}
           {data.min_budget_needed ? ` — the cheapest idea needs about $${Math.ceil(data.min_budget_needed).toLocaleString()}` : ''}.
-          {!['high', 'extreme'].includes(risk) && ' A higher-risk (shorter-dated) choice is cheaper.'}
         </p>
       )}
 

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef, Fragment } from 'react';
 import { fetchReturns } from '../api/stockApi';
 
 function pearsonCorrelation(a, b) {
@@ -17,17 +17,22 @@ function pearsonCorrelation(a, b) {
     db += dB * dB;
   }
   const denom = Math.sqrt(da * db);
-  return denom === 0 ? 0 : num / denom;
+  return denom === 0 ? null : num / denom;
 }
 
-function logReturns(prices) {
-  const rets = [];
-  for (let i = 1; i < prices.length; i++) {
-    if (prices[i - 1] > 0 && prices[i] > 0) {
-      rets.push(Math.log(prices[i] / prices[i - 1]));
+export function alignedCorrelation(first, second) {
+  const returns = prices => {
+    const result = new Map();
+    for (let index = 1; index < prices.length; index++) {
+      const previous = prices[index - 1], current = prices[index];
+      if (previous.close > 0 && current.close > 0 && previous.date && current.date)
+        result.set(`${previous.date}:${current.date}`, Math.log(current.close / previous.close));
     }
-  }
-  return rets;
+    return result;
+  };
+  const firstReturns = returns(first), secondReturns = returns(second);
+  const common = [...firstReturns.keys()].filter(date => secondReturns.has(date));
+  return pearsonCorrelation(common.map(date => firstReturns.get(date)), common.map(date => secondReturns.get(date)));
 }
 
 function corrColor(r) {
@@ -50,6 +55,9 @@ export default function CorrelationHeatmap({ tickers }) {
   const [loading, setLoading] = useState(false);
   const [matrix, setMatrix] = useState(null);
   const [error, setError] = useState(null);
+  const generation = useRef(0);
+  const tickerKey = (tickers || []).join(',');
+  useEffect(() => { generation.current++; setMatrix(null); setOpen(false); }, [tickerKey]);
 
   if (!tickers || tickers.length < 2) return null;
 
@@ -59,21 +67,21 @@ export default function CorrelationHeatmap({ tickers }) {
     if (matrix) return;
     setLoading(true);
     setError(null);
+    const request = ++generation.current;
     try {
       const results = await Promise.all(tickers.map(t => fetchReturns(t, '3mo')));
       const returnsMap = {};
       tickers.forEach((t, i) => {
-        const prices = results[i].map(p => p.close).filter(Boolean);
-        returnsMap[t] = logReturns(prices);
+        returnsMap[t] = results[i];
       });
 
       const mat = tickers.map(a =>
         tickers.map(b => {
           if (a === b) return 1;
-          return pearsonCorrelation(returnsMap[a], returnsMap[b]);
+          return alignedCorrelation(returnsMap[a], returnsMap[b]);
         })
       );
-      setMatrix(mat);
+      if (request === generation.current) setMatrix(mat);
     } catch (e) {
       setError('Failed to load correlation data');
     } finally {
@@ -101,7 +109,7 @@ export default function CorrelationHeatmap({ tickers }) {
 
                 {/* data rows */}
                 {tickers.map((rowTicker, ri) => (
-                  <>
+                  <Fragment key={rowTicker}>
                     <div key={`lbl-${rowTicker}`} className="corr-cell corr-label-row">{rowTicker}</div>
                     {tickers.map((colTicker, ci) => {
                       const val = matrix[ri][ci];
@@ -116,7 +124,7 @@ export default function CorrelationHeatmap({ tickers }) {
                         </div>
                       );
                     })}
-                  </>
+                  </Fragment>
                 ))}
               </div>
               <div className="corr-legend">

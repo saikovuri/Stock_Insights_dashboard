@@ -16,14 +16,16 @@ function useLoad(fn, dep) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   useEffect(() => {
+    let active = true;
     setData(null); setError(null);
-    fn().then(setData).catch(e => setError(e.message));
+    fn().then(value => { if (active) setData(value); }).catch(e => { if (active) setError(e.message); });
+    return () => { active = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dep]);
   return [data, error];
 }
 
-function Today({ version, onRepair, onAssign }) {
+export function Today({ version, onRepair, onAssign }) {
   const [d, err] = useLoad(fetchOptionActions, version);
   if (err) return <p className="error-text">{err}</p>;
   if (!d) return <p className="loading-text">Checking your option positions…</p>;
@@ -32,7 +34,7 @@ function Today({ version, onRepair, onAssign }) {
   return (
     <>
       <p className="structures-intro">
-        Daily rules: take profit at {d.rules.take_profit_pct}% of max, act when a short strike's delta passes {d.rules.tested_delta},
+        Review thresholds: {d.rules.take_profit_pct}% of premium captured, short-strike delta above {d.rules.tested_delta},
         avoid the last {d.rules.gamma_days} days, and watch earnings and ex-dividend dates. Must-act items are also pushed to
         your notifications each morning.
       </p>
@@ -65,13 +67,14 @@ function Today({ version, onRepair, onAssign }) {
   );
 }
 
-function Earnings({ version }) {
+export function Earnings({ version }) {
   const [d, err] = useLoad(fetchPortfolioEarnings, version);
   if (err) return <p className="error-text">{err}</p>;
   if (!d) return <p className="loading-text">Checking earnings dates…</p>;
   return (
     <>
-      {d.upcoming.length === 0 ? <p className="empty-state">No holdings or options report in the next 30 days.</p> : (
+      {d.unavailable?.length > 0 && <p className="error-text">Earnings dates unavailable: {d.unavailable.join(', ')}. Event risk is not cleared.</p>}
+      {d.upcoming.length === 0 ? <p className="empty-state">No known reports in the next 30 days.</p> : (
         <table className="market-table">
           <thead><tr><th>Stock</th><th>Reports</th><th>Typical move</th><th>Your exposure</th></tr></thead>
           <tbody>
@@ -128,17 +131,21 @@ function bs(S, K, T, sigma, kind) {
   return kind === 'call' ? S * ncdf(d1) - K * Math.exp(-0.04 * T) * ncdf(d2)
     : K * Math.exp(-0.04 * T) * ncdf(-d2) - S * ncdf(-d1);
 }
-function pnlAt(options, holdings, move, ivChg, days, withStocks) {
+export function pnlAt(options, holdings, move, ivChg, days, withStocks) {
+  const incomplete = options.some(option => option.quoted === false || option.market_price == null || !(option.current_price > 0))
+    || (withStocks && holdings.some(holding => !(holding.current_price > 0)));
+  if (incomplete) return { total: null, rows: [], incomplete: true };
   let total = 0;
   const rows = options.map(o => {
     const S = o.current_price * (1 + move / 100);
     const sigma = (o.iv || 30) / 100;
     const iv = Math.max(sigma * (1 + ivChg / 100), 0.01);
-    const T0 = Math.max(o.dte, 0) / 365;
-    const T = Math.max(o.dte - days, 0) / 365;
+    const T0 = o.time_to_expiry_years ?? Math.max(o.dte, 1 / 24) / 365;
+    const T = Math.max(T0 - days / 365, 0);
     // Anchor the model to today's market mark; the gap fades out by expiry
     const gap = o.quoted !== false && T0 > 0 ? o.market_price - bs(o.current_price, o.strike, T0, sigma, o.type) : 0;
-    const v = Math.max(bs(S, o.strike, T, iv, o.type) + gap * (T0 > 0 ? T / T0 : 0), 0);
+    const v = move === 0 && ivChg === 0 && days === 0 ? o.market_price
+      : Math.max(bs(S, o.strike, T, iv, o.type) + gap * (T0 > 0 ? T / T0 : 0), 0);
     const pnl = ((o.position === 'short' ? o.premium - v : v - o.premium) * 100 * o.contracts);
     total += pnl;
     return { key: `o${o.id}`, label: `${o.ticker} ${o.position} $${o.strike} ${o.type}`, pnl };
@@ -153,8 +160,8 @@ function pnlAt(options, holdings, move, ivChg, days, withStocks) {
   return { total, rows };
 }
 
-function WhatIf({ options, holdings }) {
-  const maxDte = Math.max(0, ...options.map(o => o.dte));
+export function WhatIf({ options, holdings }) {
+  const maxDte = Math.max(0, ...options.map(o => Math.ceil((o.time_to_expiry_years ?? o.dte / 365) * 365)));
   const [move, setMove] = useState(0);
   const [ivChg, setIvChg] = useState(0);
   const [days, setDays] = useState(0);
@@ -163,10 +170,11 @@ function WhatIf({ options, holdings }) {
   const res = useMemo(() => pnlAt(options, holdings, move, ivChg, days, withStocks), [options, holdings, move, ivChg, days, withStocks]);
   const curve = useMemo(() => Array.from({ length: 41 }, (_, i) => {
     const m = -20 + i;
-    return { move: m, scenario: Math.round(pnlAt(options, holdings, m, ivChg, days, withStocks).total),
-      expiry: Math.round(pnlAt(options, holdings, m, 0, maxDte, withStocks).total) };
+    return { move: m, scenario: pnlAt(options, holdings, m, ivChg, days, withStocks).total,
+      expiry: pnlAt(options, holdings, m, 0, maxDte, withStocks).total };
   }), [options, holdings, ivChg, days, withStocks, maxDte]);
   if (!options.length && !holdings.length) return <p className="empty-state">Add positions to run scenarios.</p>;
+  if (res.incomplete) return <p className="error-text">Scenario unavailable: one or more positions has no usable quote. No positions have been omitted.</p>;
   return (
     <>
       <div className="whatif-controls">
@@ -202,37 +210,38 @@ function WhatIf({ options, holdings }) {
       </table>
       <p className="ivrank-note">
         Every stock gets the same % move. Options are repriced with Black-Scholes from their current implied volatility
-        (30% if unquoted); options already past their expiry in the scenario are worth intrinsic value.
+        (30% when IV is unavailable); missing market quotes block the calculation. Expired scenario options are worth intrinsic value.
       </p>
     </>
   );
 }
 
-function Ledger({ version }) {
+export function Ledger({ version }) {
   const [d, err] = useLoad(fetchWheelLedger, version);
   if (err) return <p className="error-text">{err}</p>;
-  if (!d) return <p className="loading-text">Adding up your wheel…</p>;
-  if (!d.rows.length) return <p className="empty-state">No short options recorded yet — sell a put or covered call to start a wheel.</p>;
+  if (!d) return <p className="loading-text">Calculating combined performance...</p>;
+  if (!d.rows.length) return <p className="empty-state">No positions recorded.</p>;
   return (
     <>
-      <div className="doctor-stats"><div><span>Total wheel P&L</span><strong className={cls(d.total_pnl)}>{usd(d.total_pnl)}</strong></div></div>
+      <div className="doctor-stats"><div><span>Combined stock and option P&L</span><strong className={cls(d.total_pnl)}>{usd(d.total_pnl)}</strong></div></div>
+      {d.incomplete && <p className="error-text">Missing quotes: combined P&L is incomplete.</p>}
+      {d.capital_requirements?.uncovered_calls > 0 && <p className="error-text">{d.capital_requirements.uncovered_calls} uncovered call contracts: collateral cannot bound this risk.</p>}
       <table className="market-table">
-        <thead><tr><th>Stock</th><th>Since</th><th>Premium</th><th>Shares · cost</th><th>Total P&L</th><th>Return</th><th>Buy &amp; hold</th></tr></thead>
+        <thead><tr><th>Stock</th><th>Since</th><th>Realized options</th><th>Shares · cost</th><th>Total P&L</th><th>Current capital</th></tr></thead>
         <tbody>
           {d.rows.map(r => (
             <tr key={r.ticker}>
               <td><strong>{r.ticker}</strong><div className="market-sub">{r.cycles} trade{r.cycles !== 1 ? 's' : ''}{r.open_shorts ? `, ${r.open_shorts} open` : ''}</div></td>
               <td>{fmtDate(r.since)}</td>
-              <td className="positive">{usd(r.premium_kept + r.open_premium)}{r.open_premium > 0 && <div className="market-sub">{usd(r.open_premium)} open</div>}</td>
-              <td>{r.shares ? <>{r.shares} @ ${r.avg_cost}<div className="market-sub">adjusted ${r.adjusted_cost}</div></> : '—'}</td>
+              <td className={cls(r.premium_kept)}>{usd(r.premium_kept)}</td>
+              <td>{r.shares ? <>{r.shares} @ ${r.avg_cost}</> : '—'}</td>
               <td className={cls(r.total_pnl)}><strong>{usd(r.total_pnl)}</strong></td>
-              <td className={cls(r.return_pct)}>{r.return_pct != null ? `${r.return_pct}%` : '—'}{r.annualized_pct != null && <div className="market-sub">{r.annualized_pct}%/yr</div>}</td>
-              <td className={cls(r.buy_hold_pct)}>{r.buy_hold_pct != null ? `${r.buy_hold_pct}%` : '—'}</td>
+              <td>{usd(r.capital)}</td>
             </tr>
           ))}
         </tbody>
       </table>
-      <p className="ivrank-note">{d.note} Adjusted cost = share cost minus all premium collected on the stock.</p>
+      <p className="ivrank-note">{d.note}</p>
     </>
   );
 }
@@ -250,7 +259,7 @@ function Breakdown({ title, rows }) {
   );
 }
 
-function Review({ version }) {
+export function Review({ version }) {
   const [d, err] = useLoad(fetchOptionsReview, version);
   const [ai, setAi] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -265,14 +274,14 @@ function Review({ version }) {
       <div className="doctor-stats">
         <div><span>Closed trades</span><strong>{s.trades}</strong></div>
         <div><span>Win rate</span><strong>{s.win_rate}%</strong></div>
-        <div><span>Total P&L</span><strong className={cls(s.total_pnl)}>{usd(s.total_pnl)}</strong></div>
+        <div><span>Net P&L (recorded fees)</span><strong className={cls(s.total_pnl)}>{usd(s.total_pnl)}</strong></div>
         <div><span>Avg win / loss</span><strong>{usd(s.avg_win)} / {usd(s.avg_loss)}</strong></div>
         <div><span>Profit factor</span><strong>{s.profit_factor ?? '—'}</strong></div>
       </div>
       <div className="two-column">
         <Breakdown title="By strategy" rows={d.breakdowns.strategy} />
         <Breakdown title="By days to expiry when opened" rows={d.breakdowns.dte_at_open} />
-        <Breakdown title="Held to expiry vs closed early" rows={d.breakdowns.exit} />
+        <Breakdown title="Recorded close prices" rows={d.breakdowns.exit} />
         <Breakdown title="By stock" rows={d.breakdowns.ticker} />
       </div>
       <button className="btn-secondary btn-sm" onClick={coach} disabled={busy}>{busy ? 'Reviewing…' : '🧠 AI review of my option trades'}</button>
@@ -289,16 +298,17 @@ function Review({ version }) {
   );
 }
 
-function PremiumIncome({ version }) {
+export function PremiumIncome({ version }) {
   const [d, err] = useLoad(fetchPremiumIncome, version);
   const [goal, setGoal] = useState('');
   const [saved, setSaved] = useState(null);
+  const [saveError, setSaveError] = useState(null);
   useEffect(() => { if (d) { setGoal(d.goal ?? ''); setSaved(d.goal); } }, [d]);
   if (err) return <p className="error-text">{err}</p>;
   if (!d) return <p className="loading-text">Adding up premium…</p>;
-  const save = () => saveIncomeGoal(goal === '' ? null : Number(goal)).then(r => setSaved(r.goal)).catch(() => {});
+  const save = () => { setSaveError(null); saveIncomeGoal(goal === '' ? null : Number(goal)).then(r => setSaved(r.goal)).catch(error => setSaveError(error.message)); };
   const t = d.this_month;
-  const pct = saved ? Math.round(t.net / saved * 100) : null;
+  const pct = saved ? Math.round(t.realized / saved * 100) : null;
   const label = m => new Date(m + '-15').toLocaleDateString(undefined, { month: 'short', year: '2-digit' });
   return (
     <>
@@ -309,7 +319,7 @@ function PremiumIncome({ version }) {
         <div><span>Avg last 3 months</span><strong className={cls(d.avg_net_3m)}>{usd(d.avg_net_3m)}</strong></div>
       </div>
       <div className="income-goal">
-        <label>Monthly goal ($)
+        <label>Monthly realized P&L goal ($)
           <input type="number" className="tool-input" min={0} step={100} value={goal} placeholder="e.g. 1000"
             onChange={e => setGoal(e.target.value)} />
         </label>
@@ -317,10 +327,11 @@ function PremiumIncome({ version }) {
         {saved > 0 && (
           <div className="goal-progress">
             <div className="goal-track"><div className={`goal-fill ${pct >= 100 ? 'goal-done' : ''}`} style={{ width: `${Math.min(Math.max(pct, 0), 100)}%` }} /></div>
-            <span>{usd(t.net)} of {usd(saved)} this month ({pct}%){pct >= 100 ? ' 🎉' : ''}</span>
+            <span>{usd(t.realized)} of {usd(saved)} realized this month ({pct}%)</span>
           </div>
         )}
       </div>
+      {saveError && <p className="error-text">{saveError}</p>}
       <ResponsiveContainer width="100%" height={240}>
         <ComposedChart data={d.months.map(r => ({ ...r, label: label(r.month), paid: -r.paid }))}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
@@ -346,7 +357,7 @@ const TABS = [['today', '🛠 Today'], ['income', '💵 Premium income'], ['earn
 
 export default function OptionsDesk({ options, holdings, closedCount, onRepair, onAssign }) {
   const [tab, setTab] = useState(options.length ? 'today' : 'earnings');
-  const version = options.map(o => `${o.id}:${o.contracts}`).join(',') + `|${holdings.length}|${closedCount}`;
+  const version = JSON.stringify([options, holdings, closedCount]);
   return (
     <div className="card portfolio-insights">
       <nav className="sub-tabs">

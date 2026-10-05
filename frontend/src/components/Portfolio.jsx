@@ -12,7 +12,9 @@ import SectorAllocation from './SectorAllocation';
 import PortfolioDoctor from './PortfolioDoctor';
 import PortfolioInsights from './PortfolioInsights';
 import RollRepair from './RollRepair';
-import OptionsDesk from './OptionsDesk';
+import { Today, Earnings, WhatIf } from './OptionsDesk';
+import { ImportCsv } from './PortfolioInsights';
+import CorrelationHeatmap from './CorrelationHeatmap';
 
 const GUEST_HOLDINGS_KEY = 'guest_holdings';
 
@@ -29,6 +31,8 @@ export default function Portfolio() {
   const isGuest = !user;
 
   const [tab, setTab] = useState('stocks');
+  const [section, setSection] = useState('holdings');
+  const [loadError, setLoadError] = useState(null);
   const [view, setView] = useState('current');   // 'current' | 'sold'
   const [portfolio, setPortfolio] = useState(null);
   const [optionsSummary, setOptionsSummary] = useState(null);
@@ -46,6 +50,8 @@ export default function Portfolio() {
   const [sellLotId, setSellLotId] = useState(null);    // lot id being sold
   const [expanded, setExpanded] = useState({});         // { ticker: true/false } for collapsibles
   const [repairOpt, setRepairOpt] = useState(null);     // short option position open in Roll / repair
+  const validOptionPremium = String(optForm.premium).trim() !== ''
+    && Number.isFinite(Number(optForm.premium)) && Number(optForm.premium) >= 0;
 
   // ── Guest: build portfolio summary from localStorage + live prices ──
 
@@ -57,18 +63,20 @@ export default function Portfolio() {
         try {
           const res = await fetch(`${API_BASE}/stock/${h.ticker}/metrics`);
           const m = res.ok ? await res.json() : {};
-          const current_price = m.price ?? h.buy_price;
+          const current_price = Number.isFinite(m.price) && m.price > 0 ? m.price : null;
           const sector = m.sector || 'Unknown';
-          const pnl = (current_price - h.buy_price) * h.shares;
-          const pnl_pct = h.buy_price > 0 ? ((current_price - h.buy_price) / h.buy_price) * 100 : 0;
+          const pnl = current_price == null ? null : (current_price - h.buy_price) * h.shares;
+          const pnl_pct = current_price != null && h.buy_price > 0 ? ((current_price - h.buy_price) / h.buy_price) * 100 : null;
           return { ...h, current_price, sector, pnl, pnl_pct };
-        } catch { return { ...h, current_price: h.buy_price, pnl: 0, pnl_pct: 0 }; }
+        } catch { return { ...h, current_price: null, pnl: null, pnl_pct: null }; }
       }));
       const total_invested = holdings.reduce((s, h) => s + h.buy_price * h.shares, 0);
       const total_current = holdings.reduce((s, h) => s + h.current_price * h.shares, 0);
       const total_pnl = total_current - total_invested;
       const total_pnl_pct = total_invested > 0 ? (total_pnl / total_invested) * 100 : 0;
-      setPortfolio({ holdings, total_invested, total_current, total_pnl, total_pnl_pct });
+      const incomplete = holdings.some(holding => holding.current_price == null);
+      setPortfolio({ holdings, total_invested, incomplete, total_current: incomplete ? null : total_current,
+        total_pnl: incomplete ? null : total_pnl, total_pnl_pct: incomplete ? null : total_pnl_pct });
     } catch { /* ignore */ }
   }, []);
 
@@ -76,12 +84,12 @@ export default function Portfolio() {
 
   const loadStocks = useCallback(async () => {
     if (isGuest) { await loadGuestStocks(); return; }
-    try { setPortfolio(await fetchPortfolioSummary()); } catch { /* empty */ }
+    try { setPortfolio(await fetchPortfolioSummary()); } catch (error) { setLoadError(error.message); }
   }, [isGuest, loadGuestStocks]);
 
   const loadOptions = useCallback(async () => {
     if (isGuest) return;
-    try { setOptionsSummary(await fetchOptionsSummary()); } catch { /* empty */ }
+    try { setOptionsSummary(await fetchOptionsSummary()); } catch (error) { setLoadError(error.message); }
   }, [isGuest]);
 
   const loadClosed = useCallback(async () => {
@@ -93,8 +101,8 @@ export default function Portfolio() {
       } catch { setClosedStocks({ total_realized_pnl: 0, trades: [] }); }
       return;
     }
-    try { setClosedStocks(await fetchClosedTrades()); } catch { /* empty */ }
-    try { setClosedOpts(await fetchClosedOptions()); } catch { /* empty */ }
+    try { setClosedStocks(await fetchClosedTrades()); } catch (error) { setLoadError(error.message); }
+    try { setClosedOpts(await fetchClosedOptions()); } catch (error) { setLoadError(error.message); }
   }, [isGuest]);
 
   useEffect(() => { loadStocks(); loadOptions(); loadClosed(); }, [loadStocks, loadOptions, loadClosed]);
@@ -106,7 +114,7 @@ export default function Portfolio() {
 
   // ── Stock handlers ──────────────────────────────────────────
   const handleBuy = async () => {
-    if (!form.ticker) return;
+    if (!form.ticker || !Number.isFinite(form.shares) || form.shares <= 0 || !Number.isFinite(form.price) || form.price < 0) { setMsg('Enter valid shares and price.'); return; }
     const ticker = form.ticker.toUpperCase();
 
     if (isGuest) {
@@ -129,7 +137,7 @@ export default function Portfolio() {
   };
 
   const handleSell = async () => {
-    if (!form.ticker) return;
+    if (!form.ticker || !Number.isFinite(form.shares) || form.shares <= 0 || !Number.isFinite(form.price) || form.price < 0) { setMsg('Enter valid shares and price.'); return; }
     const ticker = form.ticker.toUpperCase();
 
     if (isGuest) {
@@ -138,6 +146,7 @@ export default function Portfolio() {
       const lotId = sellLotId;
       const existing = lotId ? raw.find((h) => h.id === lotId) : raw.find((h) => h.ticker === ticker);
       if (!existing) { setMsg(`No position in ${ticker}`); return; }
+      if (form.shares > existing.shares) { setMsg('Sale exceeds this lot. Select and sell each guest lot separately.'); return; }
       const soldShares = Math.min(form.shares, existing.shares);
       const remaining = existing.shares - soldShares;
       const updated = remaining <= 0
@@ -185,6 +194,7 @@ export default function Portfolio() {
 
   const handleSaveEdit = async () => {
     if (editIdx === null) return;
+    if (!form.ticker || !Number.isFinite(form.shares) || form.shares <= 0 || !Number.isFinite(form.price) || form.price < 0) { setMsg('Enter valid shares and price.'); return; }
 
     if (isGuest) {
       const updated = getGuestHoldings().map((h) =>
@@ -225,9 +235,10 @@ export default function Portfolio() {
 
   // ── Option handlers ─────────────────────────────────────────
   const handleOptionSubmit = async () => {
-    if (!optForm.ticker || !optForm.expiry) return;
+    if (!optForm.ticker || !optForm.expiry || !validOptionPremium) return;
     const t = optForm.ticker.toUpperCase();
-    const { type, strike, expiry, premium, contracts, action } = optForm;
+    const { type, strike, expiry, contracts, action } = optForm;
+    const premium = Number(optForm.premium);
     try {
       if (action === 'bto') {
         await buyOption(t, type, strike, expiry, premium, contracts, 'long');
@@ -236,10 +247,10 @@ export default function Portfolio() {
         await buyOption(t, type, strike, expiry, premium, contracts, 'short');
         setMsg(`STO ${contracts} ${type.toUpperCase()} on ${t}`);
       } else if (action === 'stc') {
-        await closeOption(t, type, strike, expiry, premium, contracts, 'long');
+        await closeOption(t, type, strike, expiry, premium, contracts, 'long', optForm.option_id);
         setMsg(`STC ${contracts} ${type.toUpperCase()} on ${t}`);
       } else if (action === 'btc') {
-        await closeOption(t, type, strike, expiry, premium, contracts, 'short');
+        await closeOption(t, type, strike, expiry, premium, contracts, 'short', optForm.option_id);
         setMsg(`BTC ${contracts} ${type.toUpperCase()} on ${t}`);
       }
       setOptForm({ ticker: '', type: 'call', strike: 100, expiry: '', premium: 2.5, contracts: 1, action: 'bto' });
@@ -258,12 +269,12 @@ export default function Portfolio() {
   };
 
   const handleSaveOptEdit = async () => {
-    if (editOptIdx === null) return;
+    if (editOptIdx === null || !validOptionPremium) return;
     const position = (optForm.action === 'sto' || optForm.action === 'btc') ? 'short' : 'long';
     try {
       await editOption(
         editOptIdx, optForm.ticker.toUpperCase(), optForm.type,
-        optForm.strike, optForm.expiry, optForm.premium, optForm.contracts, position
+        optForm.strike, optForm.expiry, Number(optForm.premium), optForm.contracts, position
       );
       setMsg(`Updated option on ${optForm.ticker.toUpperCase()}`);
       setEditOptIdx(null);
@@ -324,9 +335,38 @@ export default function Portfolio() {
   const realizedStockPnl = closedStocks?.total_realized_pnl || 0;
   const realizedOptPnl = closedOpts?.total_realized_pnl || 0;
   const totalRealizedPnl = realizedStockPnl + realizedOptPnl;
+  const holdings = portfolio?.holdings || [];
+  const options = optionsSummary?.options || [];
+  const version = JSON.stringify([holdings, options, closedStocks, closedOpts]);
+  const repair = id => {
+    const option = options.find(item => item.id === id);
+    if (option) { setSection('holdings'); setTab('options'); setView('current'); setRepairOpt(option); }
+  };
 
   return (
-    <div className="card">
+    <div className="portfolio-workspace">
+      <nav className="sub-tabs" aria-label="Portfolio views">
+        {[['holdings', 'Holdings'], ['risk', 'Portfolio Risk'], ['performance', 'Income & Performance']].map(([id, label]) =>
+          <button key={id} className={`sub-tab ${section === id ? 'active' : ''}`} onClick={() => setSection(id)}>{label}</button>)}
+      </nav>
+      {loadError && <p className="error-text" role="alert">{loadError} <button className="link-btn" onClick={() => { setLoadError(null); loadStocks(); loadOptions(); loadClosed(); }}>Retry</button></p>}
+      {portfolio?.incomplete && <p className="error-text">Some stock quotes are unavailable. Current value and P&L totals are incomplete.</p>}
+      {!portfolio && !loadError && <p className="loading-text">Loading holdings...</p>}
+      {section === 'risk' && <section className="portfolio-section">
+        {isGuest ? <p>Sign in to review portfolio risk.</p> : <>
+          <h3>Position alerts</h3><Today version={version} onRepair={repair} onAssign={id => { const option = options.find(item => item.id === id); if (option) handleAssign(option); }} />
+          <h3>Earnings exposure</h3><Earnings version={version} />
+          <PortfolioDoctor key={version} />
+          <h3>Stress scenarios</h3><WhatIf options={options} holdings={holdings} />
+          {holdings.length >= 2 && <CorrelationHeatmap tickers={[...new Set(holdings.map(item => item.ticker))]} />}
+          {holdings.length > 0 && !portfolio?.incomplete && <SectorAllocation holdings={holdings} />}
+        </>}
+      </section>}
+      {section === 'performance' && <section className="portfolio-section">
+        {holdings.length > 0 && !portfolio?.incomplete && <PortfolioChart holdings={holdings} closedTrades={closedStocks} />}
+        {!isGuest && <PortfolioInsights tickers={[...new Set(holdings.map(item => item.ticker))]} version={version} onImported={loadStocks} />}
+      </section>}
+      {section === 'holdings' && <>
       {/* ── Realized P/L Banner ─────────────────────────── */}
       {(closedStocks?.trades?.length > 0 || closedOpts?.trades?.length > 0) && (
         <div className={`realized-pnl-banner ${totalRealizedPnl >= 0 ? 'banner-positive' : 'banner-negative'}`}>
@@ -342,40 +382,6 @@ export default function Portfolio() {
             </span>
           )}
         </div>
-      )}
-
-      {/* ── Performance Chart & Sector Allocation ──── */}
-      {portfolio?.holdings?.length > 0 && (
-        <div className="portfolio-charts-row">
-          <PortfolioChart holdings={portfolio.holdings} closedTrades={closedStocks} />
-          <SectorAllocation holdings={portfolio.holdings} />
-        </div>
-      )}
-
-      {!isGuest && portfolio?.holdings?.length > 0 && <PortfolioDoctor />}
-      {!isGuest && (
-        <PortfolioInsights
-          tickers={[...new Set((portfolio?.holdings || []).map(h => h.ticker))]}
-          version={(portfolio?.holdings || []).map(h => `${h.id}:${h.shares}`).join(',') + `|${closedStocks?.trades?.length || 0}`}
-          onImported={loadStocks}
-        />
-      )}
-      {!isGuest && (optionsSummary?.options?.length > 0 || portfolio?.holdings?.length > 0) && (
-        <OptionsDesk
-          options={optionsSummary?.options || []}
-          holdings={portfolio?.holdings || []}
-          closedCount={closedOpts?.trades?.length || 0}
-          onRepair={(id) => {
-            const o = optionsSummary?.options?.find(x => x.id === id);
-            if (!o) return;
-            setTab('options'); setView('current'); setRepairOpt(o);
-            setTimeout(() => document.getElementById('roll-panel')?.scrollIntoView({ behavior: 'smooth' }), 100);
-          }}
-          onAssign={(id) => {
-            const o = optionsSummary?.options?.find(x => x.id === id);
-            if (o) handleAssign(o);
-          }}
-        />
       )}
 
       <div className="portfolio-tabs">
@@ -467,12 +473,12 @@ export default function Portfolio() {
                   </div>
                   <div className="metric">
                     <span className="metric-label">Current Value</span>
-                    <span className="metric-value">${portfolio.total_current.toLocaleString()}</span>
+                    <span className="metric-value">{portfolio.total_current == null ? 'Unavailable' : `$${portfolio.total_current.toLocaleString()}`}</span>
                   </div>
-                  <div className={`metric ${portfolio.total_pnl >= 0 ? 'metric-positive' : 'metric-negative'}`}>
+                  <div className={`metric ${portfolio.total_pnl == null ? '' : portfolio.total_pnl >= 0 ? 'metric-positive' : 'metric-negative'}`}>
                     <span className="metric-label">Total P/L</span>
-                    <span className={`metric-value ${portfolio.total_pnl >= 0 ? 'positive' : 'negative'}`}>
-                      ${portfolio.total_pnl.toLocaleString()} ({portfolio.total_pnl_pct.toFixed(2)}%)
+                    <span className={`metric-value ${portfolio.total_pnl == null ? '' : portfolio.total_pnl >= 0 ? 'positive' : 'negative'}`}>
+                      {portfolio.total_pnl == null ? 'Unavailable' : `$${portfolio.total_pnl.toLocaleString()} (${portfolio.total_pnl_pct.toFixed(2)}%)`}
                     </span>
                   </div>
                 </div>
@@ -500,9 +506,9 @@ export default function Portfolio() {
                           <span className="lot-shares">{totalShares} shares</span>
                           {hasMultipleLots && <span className="lot-count">{lots.length} lots</span>}
                           <span className="lot-avg">Avg ${avgBuy.toFixed(2)}</span>
-                          <span className="lot-current">${currentPrice.toFixed(2)}</span>
-                          <span className={`lot-pnl ${totalPnl >= 0 ? 'positive' : 'negative'}`}>
-                            ${totalPnl.toFixed(2)} ({totalPnlPct.toFixed(2)}%)
+                          <span className="lot-current">{currentPrice == null ? 'Unavailable' : `$${currentPrice.toFixed(2)}`}</span>
+                          <span className={`lot-pnl ${currentPrice == null ? '' : totalPnl >= 0 ? 'positive' : 'negative'}`}>
+                            {currentPrice == null ? 'Unavailable' : `$${totalPnl.toFixed(2)} (${totalPnlPct.toFixed(2)}%)`}
                           </span>
                           {!hasMultipleLots && (
                             <span className="lot-actions">
@@ -539,9 +545,9 @@ export default function Portfolio() {
                                   <td>{i + 1}</td>
                                   <td>{h.shares}</td>
                                   <td>${h.buy_price.toFixed(2)}</td>
-                                  <td>${h.current_price.toFixed(2)}</td>
-                                  <td className={h.pnl >= 0 ? 'positive' : 'negative'}>${h.pnl.toFixed(2)}</td>
-                                  <td className={h.pnl_pct >= 0 ? 'positive' : 'negative'}>{h.pnl_pct.toFixed(2)}%</td>
+                                  <td>{h.current_price == null ? 'Unavailable' : `$${h.current_price.toFixed(2)}`}</td>
+                                  <td className={h.pnl == null ? '' : h.pnl >= 0 ? 'positive' : 'negative'}>{h.pnl == null ? 'Unavailable' : `$${h.pnl.toFixed(2)}`}</td>
+                                  <td className={h.pnl_pct == null ? '' : h.pnl_pct >= 0 ? 'positive' : 'negative'}>{h.pnl_pct == null ? 'Unavailable' : `${h.pnl_pct.toFixed(2)}%`}</td>
                                   <td>{new Date(h.date_added || h.date).toLocaleDateString()}</td>
                                   <td className="action-cell">
                                     <button className="btn-icon" title="Sell this lot" onClick={() => startSellLot(h)}>💲</button>
@@ -567,7 +573,7 @@ export default function Portfolio() {
               </>
             );
           })() : (
-            <p className="empty-state">No stock holdings yet. Use the form above to add positions.</p>
+            portfolio && <p className="empty-state">No stock holdings yet.</p>
           )}
         </>
       )}
@@ -645,7 +651,8 @@ export default function Portfolio() {
             <div className="form-field">
               <label htmlFor="opt-action">Action</label>
               <select id="opt-action" value={optForm.action}
-                onChange={(e) => setOptForm({ ...optForm, action: e.target.value })}>
+                onChange={(e) => setOptForm({ ...optForm, action: e.target.value,
+                  premium: ['btc', 'stc'].includes(e.target.value) ? '' : optForm.premium })}>
                 <option value="bto">Buy to Open (Long)</option>
                 <option value="sto">Sell to Open (Short)</option>
                 <option value="stc">Sell to Close</option>
@@ -676,9 +683,9 @@ export default function Portfolio() {
                 min={new Date().toISOString().split('T')[0]} />
             </div>
             <div className="form-field">
-              <label htmlFor="opt-premium">Premium ($)</label>
-              <input id="opt-premium" type="number" placeholder="Per share" value={optForm.premium} min={0.01} step={0.05}
-                onChange={(e) => setOptForm({ ...optForm, premium: parseFloat(e.target.value) || 0 })} />
+              <label htmlFor="opt-premium">{optForm.action === 'btc' ? 'Buy-back price ($/share)' : optForm.action === 'stc' ? 'Closing sale price ($/share)' : 'Premium ($)'}</label>
+              <input id="opt-premium" type="number" placeholder="Actual fill per share" value={optForm.premium} min={0} step="any" required
+                onChange={(e) => setOptForm({ ...optForm, premium: e.target.value })} />
             </div>
             <div className="form-field">
               <label htmlFor="opt-contracts">Contracts</label>
@@ -688,11 +695,11 @@ export default function Portfolio() {
             <div className="form-actions">
               {editOptIdx !== null ? (
                 <>
-                  <button className="btn-primary" onClick={handleSaveOptEdit}>Save</button>
+                  <button className="btn-primary" onClick={handleSaveOptEdit} disabled={!validOptionPremium}>Save</button>
                   <button className="btn-secondary" onClick={cancelEdit}>Cancel</button>
                 </>
               ) : (
-                <button className="btn-primary" onClick={handleOptionSubmit}>
+                <button className="btn-primary" onClick={handleOptionSubmit} disabled={!validOptionPremium}>
                   {optForm.action === 'bto' ? 'Buy to Open' : optForm.action === 'sto' ? 'Sell to Open'
                     : optForm.action === 'stc' ? 'Sell to Close' : 'Buy to Close'}
                 </button>
@@ -709,12 +716,12 @@ export default function Portfolio() {
                 </div>
                 <div className="metric">
                   <span className="metric-label">Market Value</span>
-                  <span className="metric-value">${optionsSummary.total_value.toLocaleString()}</span>
+                  <span className="metric-value">{optionsSummary.total_value == null ? 'Unavailable' : `$${optionsSummary.total_value.toLocaleString()}`}</span>
                 </div>
-                <div className={`metric ${optionsSummary.total_pnl >= 0 ? 'metric-positive' : 'metric-negative'}`}>
+                <div className={`metric ${optionsSummary.total_pnl == null ? '' : optionsSummary.total_pnl >= 0 ? 'metric-positive' : 'metric-negative'}`}>
                   <span className="metric-label">Total P/L</span>
-                  <span className={`metric-value ${optionsSummary.total_pnl >= 0 ? 'positive' : 'negative'}`}>
-                    ${optionsSummary.total_pnl.toLocaleString()} ({optionsSummary.total_pnl_pct.toFixed(2)}%)
+                  <span className={`metric-value ${optionsSummary.total_pnl == null ? '' : optionsSummary.total_pnl >= 0 ? 'positive' : 'negative'}`}>
+                    {optionsSummary.total_pnl == null ? 'Incomplete quotes' : `$${optionsSummary.total_pnl.toLocaleString()} (${optionsSummary.total_pnl_pct.toFixed(2)}%)`}
                   </span>
                 </div>
               </div>
@@ -741,7 +748,7 @@ export default function Portfolio() {
                     const diff = o.type === 'call'
                       ? o.current_price - o.strike
                       : o.strike - o.current_price;
-                    const moneyness = Math.abs(diff) < 0.5 ? 'ATM'
+                    const moneyness = o.current_price == null ? 'Unknown' : Math.abs(diff) < 0.5 ? 'ATM'
                       : diff > 0 ? 'ITM' : 'OTM';
                     const moneyClass = moneyness === 'ITM' ? 'positive'
                       : moneyness === 'OTM' ? 'negative' : '';
@@ -758,7 +765,7 @@ export default function Portfolio() {
                         </span>
                       </td>
                       <td>${o.strike.toFixed(2)}</td>
-                      <td>${o.current_price.toFixed(2)}</td>
+                      <td>{o.current_price == null ? 'Unavailable' : `$${o.current_price.toFixed(2)}`}</td>
                       <td className={moneyClass}>
                         <span className="moneyness-badge" title={
                           moneyness === 'ITM' ? 'In the Money — has intrinsic value'
@@ -773,15 +780,22 @@ export default function Portfolio() {
                       <td>{o.contracts}</td>
                       <td>${o.premium.toFixed(2)}</td>
                       <td title={o.quoted === false
-                        ? 'No live quote for this exact contract (expired or not listed) — valued at intrinsic value'
+                        ? 'No usable two-sided quote for this exact contract; excluded from valuation'
                         : `Bid: $${(o.bid || 0).toFixed(2)} / Ask: $${(o.ask || 0).toFixed(2)}`}>
-                        ${o.market_price.toFixed(2)}{o.quoted === false && <small className="market-sub"> est.</small>}
+                        {o.market_price == null ? 'Unavailable' : `$${o.market_price.toFixed(2)}`}
                       </td>
                       <td title="Implied Volatility">{o.iv ? `${o.iv}%` : '—'}</td>
-                      <td className={o.pnl >= 0 ? 'positive' : 'negative'}>
-                        ${o.pnl.toFixed(2)} ({o.pnl_pct.toFixed(1)}%)
+                      <td className={o.pnl == null ? '' : o.pnl >= 0 ? 'positive' : 'negative'}>
+                        {o.pnl == null ? 'Unavailable' : `$${o.pnl.toFixed(2)} (${o.pnl_pct?.toFixed(1) ?? '0'}%)`}
                       </td>
                       <td className="action-cell">
+                        <button className="btn-icon" title="Close this option lot" onClick={() => {
+                          setEditOptIdx(null); setOptForm({ ticker: o.ticker, type: o.type, strike: o.strike, expiry: o.expiry,
+                            premium: '', contracts: o.contracts, action: side === 'short' ? 'btc' : 'stc', option_id: o.id });
+                          const priceInput = document.getElementById('opt-premium');
+                          priceInput?.scrollIntoView({ block: 'center' });
+                          priceInput?.focus();
+                        }}>×</button>
                         {side === 'short' && o.dte >= 0 && (
                           <button className="btn-icon" title="Roll / repair this short option"
                             onClick={() => setRepairOpt(repairOpt?.id === o.id ? null : o)}>🔧</button>
@@ -821,7 +835,7 @@ export default function Portfolio() {
               )}
             </>
           ) : (
-            <p className="empty-state">No options positions yet. Use the form above to add calls or puts.</p>
+            optionsSummary && <p className="empty-state">No options positions yet.</p>
           )}
         </>
         )
@@ -843,13 +857,15 @@ export default function Portfolio() {
                   <span className="metric-value">{closedOpts.trades.length}</span>
                 </div>
                 <div className={`metric ${closedOpts.total_realized_pnl >= 0 ? 'metric-positive' : 'metric-negative'}`}>
-                  <span className="metric-label">Realized P/L</span>
+                  <span className="metric-label">Gross Realized P/L</span>
                   <span className={`metric-value ${closedOpts.total_realized_pnl >= 0 ? 'positive' : 'negative'}`}>
                     ${closedOpts.total_realized_pnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                 </div>
+                <div className="metric"><span className="metric-label">Recorded Fees</span><span className="metric-value">{closedOpts.total_fees == null ? 'Unavailable' : `$${closedOpts.total_fees.toFixed(2)}`}</span></div>
+                <div className="metric"><span className="metric-label">Net Realized P/L</span><span className="metric-value">{closedOpts.total_net_pnl == null ? 'Unavailable' : `$${closedOpts.total_net_pnl.toFixed(2)}`}</span></div>
               </div>
-              <table className="portfolio-table">
+              <div className="table-scroll"><table className="portfolio-table">
                 <thead>
                   <tr>
                     <th>Ticker</th>
@@ -860,8 +876,10 @@ export default function Portfolio() {
                     <th>Qty</th>
                     <th>Open</th>
                     <th>Close</th>
-                    <th>P/L ($)</th>
-                    <th>P/L %</th>
+                    <th>Gross P/L ($)</th>
+                    <th>Fees ($)</th>
+                    <th>Net P/L ($)</th>
+                    <th>Gross P/L %</th>
                     <th>Date</th>
                     <th></th>
                   </tr>
@@ -878,8 +896,10 @@ export default function Portfolio() {
                       <td>${t.open_premium.toFixed(2)}</td>
                       <td>${t.close_premium.toFixed(2)}</td>
                       <td className={t.pnl >= 0 ? 'positive' : 'negative'}>${t.pnl.toFixed(2)}</td>
+                      <td>{t.fees == null ? 'Unavailable' : `$${t.fees.toFixed(2)}`}</td>
+                      <td>{t.net_pnl == null ? 'Unavailable' : `$${t.net_pnl.toFixed(2)}`}</td>
                       <td className={t.pnl_pct >= 0 ? 'positive' : 'negative'}>{t.pnl_pct.toFixed(2)}%</td>
-                      <td>{new Date(t.closed_at).toLocaleDateString()}</td>
+                      <td>{String(t.closed_at).slice(0, 10)}</td>
                       <td className="action-cell">
                         {confirmDelete?.type === 'closed-option' && confirmDelete?.id === t.id ? (
                           <>
@@ -893,7 +913,7 @@ export default function Portfolio() {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </table></div>
             </>
           ) : (
             <p className="empty-state">No closed options yet. Close a position to see it here.</p>
@@ -901,6 +921,8 @@ export default function Portfolio() {
         </>
         )
       )}
+      {!isGuest && <details className="portfolio-section"><summary>Import positions</summary><ImportCsv onImported={loadStocks} /></details>}
+      </>}
     </div>
   );
 }

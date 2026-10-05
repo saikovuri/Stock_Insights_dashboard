@@ -30,13 +30,17 @@ export default function PreTradeChecklist() {
     [vals],
   );
 
-  const lossPct = parseFloat(vals.max_loss_pct);
-  const sizingWarning = !isNaN(lossPct) && lossPct > 2;
+  const loss = Number(vals.max_loss);
+  const lossPct = Number(vals.max_loss_pct);
+  const validRisk = Number.isFinite(loss) && loss > 0 && Number.isFinite(lossPct) && lossPct > 0 && lossPct <= 100;
+  const invalidRisk = !missing.includes('max_loss') && !missing.includes('max_loss_pct') && !validRisk;
+  const validTicker = /^[A-Z^][A-Z0-9.^=-]{0,14}$/.test((vals.ticker || '').trim().toUpperCase());
+  const sizingWarning = Number.isFinite(lossPct) && lossPct > 2;
   const ivWarning = vals.iv_check === 'High (avoid buying naked options)' && (vals.structure === 'Long call' || vals.structure === 'Long put');
   const earningsWarning = vals.earnings === 'Yes — accidental (re-think)';
   const noCheck = vals.iv_check === 'Did not check';
 
-  const ready = missing.length === 0 && !sizingWarning && !ivWarning && !earningsWarning && !noCheck;
+  const ready = missing.length === 0 && validRisk && validTicker && !sizingWarning && !ivWarning && !earningsWarning && !noCheck;
 
   const reset = () => {
     setVals({});
@@ -47,16 +51,16 @@ export default function PreTradeChecklist() {
     <div className="tool-card">
       <h3>✅ Pre-Trade Checklist</h3>
       <p className="tool-desc">
-        Fill every field before you submit an options order. The point is friction — most blowups are
-        trades you would not have placed if you had to write the bear case down first.
+        Self-reported plan. Market data, account balances and trade suitability are not independently verified.
       </p>
 
       <div className="tool-form">
         {FIELDS.map(f => (
           <div key={f.id} className="tool-row">
-            <label>{f.label}</label>
+            <label htmlFor={`plan-${f.id}`}>{f.label}</label>
             {f.type === 'textarea' ? (
               <textarea
+                id={`plan-${f.id}`}
                 className="tool-input"
                 rows={2}
                 placeholder={f.placeholder}
@@ -65,6 +69,7 @@ export default function PreTradeChecklist() {
               />
             ) : f.type === 'select' ? (
               <select
+                id={`plan-${f.id}`}
                 className="tool-input"
                 value={vals[f.id] || ''}
                 onChange={e => set(f.id, e.target.value)}
@@ -74,8 +79,12 @@ export default function PreTradeChecklist() {
               </select>
             ) : (
               <input
+                id={`plan-${f.id}`}
                 className="tool-input"
                 type={f.type}
+                min={f.type === 'number' ? '0' : undefined}
+                max={f.id === 'max_loss_pct' ? '100' : undefined}
+                step={f.type === 'number' ? 'any' : undefined}
                 placeholder={f.placeholder}
                 value={vals[f.id] || ''}
                 onChange={e => set(f.id, e.target.value)}
@@ -86,43 +95,48 @@ export default function PreTradeChecklist() {
       </div>
 
       {submitted && (
-        <div className="tool-result">
+        <div className="tool-result" role="status">
           {missing.length > 0 && (
             <div className="checklist-block bad">
-              <strong>Stop.</strong> {missing.length} field{missing.length === 1 ? '' : 's'} missing.
-              You should not place this trade until you can fill them in.
+              <strong>Checklist incomplete.</strong> {missing.length} field{missing.length === 1 ? '' : 's'} missing.
             </div>
+          )}
+          {!missing.includes('ticker') && !validTicker && (
+            <div className="checklist-block bad"><strong>Invalid ticker format.</strong> Enter a symbol, not a company name.</div>
+          )}
+          {invalidRisk && (
+            <div className="checklist-block bad"><strong>Invalid risk values.</strong> Enter a positive, finite maximum loss and an account percentage above zero and no greater than 100.</div>
           )}
           {sizingWarning && (
             <div className="checklist-block bad">
-              <strong>Position too large.</strong> {lossPct}% of account on a single options trade is past the standard 1–2% rule. This is the #1 cause of account blowups.
+              <strong>Risk guideline exceeded.</strong> Reported risk of {lossPct}% exceeds this checklist's 2% guideline.
             </div>
           )}
           {ivWarning && (
             <div className="checklist-block bad">
-              <strong>High IV + long option.</strong> You are buying expensive premium. Consider a debit spread instead — same direction, less theta and vega risk.
+              <strong>High IV + long option.</strong> Your answers indicate high IV with a long call or put. Review premium and volatility exposure against current quotes.
             </div>
           )}
           {earningsWarning && (
             <div className="checklist-block bad">
-              <strong>Accidental earnings.</strong> Expiry crosses earnings but you did not plan for it. IV crush after the print is the #1 unforced loss for retail.
+              <strong>Accidental earnings.</strong> You reported an unplanned earnings overlap. Verify the date and review event risk.
             </div>
           )}
           {noCheck && (
             <div className="checklist-block warn">
-              <strong>No IV check.</strong> Open the IV Rank panel for this ticker before you decide. Long options into high IV is the most common losing setup.
+              <strong>No IV check.</strong> Your IV assessment is still missing.
             </div>
           )}
           {ready && (
             <div className="checklist-block good">
-              <strong>Cleared.</strong> Every check passed. Place the trade and log it in your journal.
+              <strong>Checklist complete.</strong> Your answers meet the checklist rules. This is not trade qualification or a recommendation; market data and account risk remain unverified.
             </div>
           )}
         </div>
       )}
 
       <div className="checklist-actions">
-        <button className="btn-primary btn-sm" onClick={() => setSubmitted(true)}>Run Check</button>
+        <button className="btn-primary btn-sm" onClick={() => setSubmitted(true)}>Review checklist</button>
         <button className="btn-secondary btn-sm" onClick={reset}>Reset</button>
       </div>
     </div>

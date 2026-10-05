@@ -4,6 +4,7 @@ import EconomicCalendar from './EconomicCalendar';
 import InPlay from './InPlay';
 import StrategyTester from './StrategyTester';
 import WheelIdeas from './WheelIdeas';
+import MarketContext from './MarketContext';
 import { useProfile } from '../ProfileContext';
 import { FlowTable } from './OptionsFlow';
 import { fetchUnusualOptions, fetchInsiderBuying, fetchSuperinvestors, fetchTrackRecord } from '../api/stockApi';
@@ -46,13 +47,13 @@ function UnusualOptions({ onSelect }) {
         </div>
         <p className="structures-intro">
           Contracts trading more than their open interest with at least $25K premium, 2–60 days out — often new positions
-          by large traders. Includes the liquid leaders plus everything in users' portfolios and watchlists.
+          or spread activity. Volume does not establish institutional intent; notional uses volume times a quote proxy, not observed execution proceeds.
         </p>
         {callShare != null && (
           <div className="doctor-stats">
-            <div><span>Premium bought at the ask: calls</span><strong className="positive">{money(data.bought_call_premium)}</strong></div>
-            <div><span>Premium bought at the ask: puts</span><strong className="negative">{money(data.bought_put_premium)}</strong></div>
-            <div><span>Bullish share</span><strong className={callShare >= 55 ? 'positive' : callShare <= 45 ? 'negative' : ''}>{callShare}%</strong></div>
+            <div><span>Call notional, last near ask</span><strong>{money(data.bought_call_premium)}</strong></div>
+            <div><span>Put notional, last near ask</span><strong>{money(data.bought_put_premium)}</strong></div>
+            <div><span>Call share of proxy notional</span><strong>{callShare}%</strong></div>
           </div>
         )}
         <FlowTable trades={data.trades} showTicker onSelect={onSelect} />
@@ -245,13 +246,13 @@ export default function Ideas({ onSelect }) {
           <button key={id} className={`sub-tab ${tab === id ? 'active' : ''}`} onClick={() => choose(id)}>{label}</button>
         ))}
       </nav>
-      {tab === 'inplay' && <InPlay onSelect={onSelect} />}
+      {tab === 'inplay' && <><InPlay onSelect={onSelect} /><MarketContext key="attention" kind="attention" onSelect={onSelect} /></>}
       {tab === 'setups' && <SetupScanner onSelect={onSelect} />}
       {tab === 'wheel' && <WheelIdeas onSelect={onSelect} />}
       {tab === 'flow' && <UnusualOptions onSelect={onSelect} />}
       {tab === 'insiders' && <InsiderBuying onSelect={onSelect} />}
       {tab === 'super' && <Superinvestors onSelect={onSelect} />}
-      {tab === 'macro' && <EconomicCalendar />}
+      {tab === 'macro' && <><EconomicCalendar /><MarketContext key="predictions" kind="predictions" /></>}
       {tab === 'tester' && <StrategyTester />}
       {tab === 'record' && <TrackRecord />}
     </div>

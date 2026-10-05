@@ -22,13 +22,14 @@ function RollCard({ r, strat, data }) {
     <div className={`roll-card ${r.best ? 'structure-best' : ''}`}>
       <div className="roll-title">
         {r.type === 'out' ? 'Roll out' : `Roll out & ${s.away}`} → {fmtDate(r.expiry)} <small>(+{r.added_days}d)</small>
-        {r.best && <span className="structure-best-badge">⭐ Best repair</span>}
+        {r.best && <span className="structure-best-badge">Passes roll filters</span>}
       </div>
       <div className="roll-legs">
-        {legs} — as one order {r.net_credit > 0 ? `for ≥ $${(r.net_credit / 100).toFixed(2)} credit` : 'for even (no debit)'}
+        {legs}
       </div>
       <div className="roll-stats">
-        <span className="positive">+{usd(r.net_credit)} net credit</span>
+        <span>Midpoint estimate: {usd(r.net_credit)}</span>
+        <span className={r.net_credit_natural >= 0 ? 'positive' : 'negative'}>Natural after estimated fees: {r.net_credit_natural == null ? 'unavailable' : usd(r.net_credit_natural)}</span>
         {r.strike_change > 0 && <span>strike {s.away} ${r.strike_change}</span>}
         <span>Δ {r.delta} <Tip term="delta" /></span>
         <span>~{r.prob_otm_pct}% expires OTM</span>

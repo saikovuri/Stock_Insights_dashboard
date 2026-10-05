@@ -2,6 +2,7 @@
 early assignment before ex-dividend), earnings exposure, wheel ledger and an AI review of closed options."""
 
 import logging
+import math
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 
@@ -71,16 +72,17 @@ def _contract(ticker: str, kind: str, strike: float, expiry: str, S: float) -> d
     if m.empty:
         return {}
     row = m.iloc[0]
-    mid = oa._mid(row)
-    if mid is None:
+    bid, ask = float(row.get("bid") or 0), float(row.get("ask") or 0)
+    if not all(math.isfinite(value) for value in (bid, ask)) or bid <= 0 or ask < bid:
         return {}
+    mid = (bid + ask) / 2
     T = oa._years(expiry)
     iv = oa._row_iv(row, S, T, kind)
     delta = None
     if iv:
         d1, _ = oa._d1_d2(S, strike, T, iv)
         delta = oa._ncdf(d1) if kind == "call" else oa._ncdf(d1) - 1
-    return {"mid": mid, "iv": iv, "delta": delta, "bid": float(row.get("bid") or 0), "ask": float(row.get("ask") or 0)}
+    return {"mid": mid, "iv": iv, "delta": delta, "bid": bid, "ask": ask}
 
 
 def _actions(o: dict, S: float, c: dict, shares_held: float, earnings: dict, div: dict | None) -> list[dict]:
@@ -101,14 +103,14 @@ def _actions(o: dict, S: float, c: dict, shares_held: float, earnings: dict, div
             captured = (o["premium"] - mid) / o["premium"]
             if captured >= TAKE_PROFIT:
                 acts.append({"level": "act", "code": "take_profit",
-                             "text": f"{captured * 100:.0f}% of the max profit is in. Buy it back near ${mid:.2f} and "
+                             "text": f"{captured * 100:.0f}% of premium is captured. Consider closing near ${mid:.2f} and "
                                      "re-sell further out — the last part of the premium carries most of the risk."})
         delta = abs(c["delta"]) if c.get("delta") is not None else None
         if itm or (delta is not None and delta >= TESTED_DELTA):
             acts.append({"level": "warn", "code": "tested",
                          "text": (f"In the money ({'above' if kind == 'call' else 'below'} the ${K:g} strike). " if itm else
                                   f"Delta {delta:.2f} — the strike is being tested. ")
-                                 + f"Roll out and {'up' if kind == 'call' else 'down'} for a credit or close; see Repair.", "repair": True})
+                                 + "Compare closing, holding through assignment, and rolling after costs. A credit alone does not reduce risk.", "repair": True})
         if dte <= GAMMA_DAYS and not any(a["code"] == "take_profit" for a in acts):
             acts.append({"level": "warn" if (delta or 0) >= 0.25 or itm else "info", "code": "gamma",
                          "text": f"{dte} day{'s' if dte != 1 else ''} left: small moves now swing the price hard. "
@@ -158,28 +160,41 @@ def position_actions(user_id: int) -> dict:
     spots, earnings, divs, out = {}, {}, {}, []
     for o in options:
         t = o["ticker"]
+        coverage = min(shares[t], 100 * o["contracts"])
+        if o.get("position") == "short" and o["option_type"] == "call":
+            shares[t] -= coverage
+        S, c, acts = None, {}, []
         try:
             if t not in spots:
                 spots[t] = oa._spot(t)
                 earnings[t] = oa.earnings_info(t)
                 divs[t] = next_dividend(t)
             S = spots[t]
+            if not S or not math.isfinite(S):
+                raise ValueError("Underlying quote unavailable")
             c = _contract(t, o["option_type"], o["strike"], o["expiry"], S)
+            acts = _actions(o, S, c, coverage, earnings[t], divs[t])
         except Exception as e:
             log.info("Position check failed for %s: %s", t, e)
-            continue
-        acts = sorted(_actions(o, S, c, shares[t], earnings[t], divs[t]), key=lambda a: _LEVEL[a["level"]])
+            S = None
+        if not c:
+            acts.append({"level": "warn", "code": "unavailable", "text": "Quote unavailable: risk and P&L are incomplete. Verify this position with your broker."})
+        if S is None and o.get("position") == "short" and o["option_type"] == "call" and coverage < 100 * o["contracts"]:
+            acts.append({"level": "warn", "code": "naked", "text": "Insufficient unallocated shares to cover this call."})
+        if not earnings.get(t, {}).get("next"):
+            acts.append({"level": "warn", "code": "earnings_unknown", "text": "Next earnings date unknown; event risk has not been cleared."})
+        acts.sort(key=lambda a: _LEVEL[a["level"]])
         mid = c.get("mid")
         short = o.get("position") == "short"
         out.append({
             "id": o["id"], "ticker": t, "type": o["option_type"], "position": o.get("position", "long"),
             "strike": o["strike"], "expiry": o["expiry"], "dte": oa._dte(o["expiry"]), "contracts": o["contracts"],
-            "premium": o["premium"], "spot": round(S, 2), "mid": None if mid is None else round(mid, 2),
+            "premium": o["premium"], "spot": round(S, 2) if S is not None else None, "mid": None if mid is None else round(mid, 2),
             "delta": None if c.get("delta") is None else round(c["delta"], 2),
             "iv_pct": None if not c.get("iv") else round(c["iv"] * 100, 1),
             "profit_captured_pct": round((o["premium"] - mid) / o["premium"] * 100) if short and mid is not None and o["premium"] else None,
             "pnl": None if mid is None else round(((o["premium"] - mid) if short else (mid - o["premium"])) * 100 * o["contracts"], 2),
-            "next_dividend": divs[t], "actions": acts,
+            "next_dividend": divs.get(t), "actions": acts,
         })
     out.sort(key=lambda p: (min((_LEVEL[a["level"]] for a in p["actions"]), default=9), p["dte"]))
     return {"positions": out, "counts": {lvl: sum(1 for p in out for a in p["actions"] if a["level"] == lvl) for lvl in _LEVEL},
@@ -197,8 +212,15 @@ def earnings_exposure(user_id: int) -> dict:
         opts[o["ticker"]].append(o)
     today = date.today()
     upcoming, recent = [], []
-    for t in sorted(set(shares) | set(opts))[:40]:
-        info = oa.earnings_info(t)
+    unavailable = []
+    for t in sorted(set(shares) | set(opts)):
+        try:
+            info = oa.earnings_info(t)
+        except Exception:
+            unavailable.append(t)
+            continue
+        if not info.get("next"):
+            unavailable.append(t)
         nxt = info.get("next")
         days = (_d(nxt) - today).days if nxt else None
         if days is not None and 0 <= days <= 30:
@@ -226,7 +248,7 @@ def earnings_exposure(user_id: int) -> dict:
                            "shares": round(shares[t], 4), "has_options": bool(opts[t])})
     upcoming.sort(key=lambda r: r["days"])
     recent.sort(key=lambda r: r["days_ago"])
-    return {"upcoming": upcoming, "recent": recent}
+    return {"upcoming": upcoming, "recent": recent, "unavailable": unavailable}
 
 
 def _legs_key(o: dict) -> tuple:
@@ -240,30 +262,74 @@ def _spread_longs(opts: list[dict], closed: list[dict]) -> tuple[list[dict], lis
             [c for c in closed if c.get("position") == "long" and _legs_key(c) in keys])
 
 
-def _put_capital(short: dict, longs: list[dict]) -> float:
-    """Cash at risk on a short put: the spread width when a lower long put protects it, else the strike."""
-    wings = [l["strike"] for l in longs if _legs_key(l) == _legs_key(short) and l["strike"] < short["strike"]]
-    return ((short["strike"] - max(wings)) if wings else short["strike"]) * 100 * short["contracts"]
+def _put_capital(short: dict, longs: list[dict], remaining=None) -> float:
+    """Gross put collateral, allocating each protective contract at most once."""
+    if remaining is None:
+        remaining = {index: leg["contracts"] for index, leg in enumerate(longs)}
+    needed, capital = short["contracts"], 0.0
+    wings = sorted(enumerate(longs), key=lambda item: item[1]["strike"], reverse=True)
+    for index, leg in wings:
+        if _legs_key(leg) != _legs_key(short) or leg["strike"] >= short["strike"]:
+            continue
+        matched = min(needed, remaining[index])
+        capital += matched * (short["strike"] - leg["strike"]) * 100
+        needed -= matched
+        remaining[index] -= matched
+    return capital + needed * short["strike"] * 100
+
+
+def capital_requirements(options: list[dict], holdings: list[dict]) -> dict:
+    longs = [option for option in options if option.get("position") == "long"]
+    remaining = {index: leg["contracts"] for index, leg in enumerate(longs)}
+    shares = defaultdict(float)
+    for holding in holdings:
+        shares[holding["ticker"]] += holding["shares"]
+    reserved, uncovered = 0.0, 0
+    by_ticker = defaultdict(float)
+    for option in sorted(options, key=lambda item: (item["ticker"], item["expiry"], -item["strike"])):
+        if option.get("position") != "short":
+            continue
+        if option["option_type"] == "put":
+            capital = _put_capital(option, longs, remaining)
+            reserved += capital
+            by_ticker[option["ticker"]] += capital
+        else:
+            covered = min(option["contracts"], int(shares[option["ticker"]] // 100))
+            shares[option["ticker"]] -= covered * 100
+            needed = option["contracts"] - covered
+            for index, leg in enumerate(longs):
+                if _legs_key(leg) != _legs_key(option):
+                    continue
+                matched = min(needed, remaining[index])
+                capital = matched * max(leg["strike"] - option["strike"], 0) * 100
+                reserved += capital
+                by_ticker[option["ticker"]] += capital
+                remaining[index] -= matched
+                needed -= matched
+            uncovered += needed
+    return {"reserved_cash": round(reserved, 2), "uncovered_calls": uncovered, "by_ticker": dict(by_ticker)}
 
 
 def wheel_ledger(user_id: int) -> dict:
     """Per-stock wheel results: option premium kept, stock P&L, adjusted cost basis, vs buy-and-hold."""
     opts, closed = get_user_options(user_id), get_closed_options(user_id)
-    long_open, long_closed = _spread_longs(opts, closed)
-    tickers = sorted({o["ticker"] for o in opts + closed if o.get("position") == "short"})
+    holdings = get_user_holdings(user_id)
+    closed_stocks = get_closed_trades(user_id)
+    tickers = sorted({o["ticker"] for o in opts + closed + holdings + closed_stocks})
+    requirements = capital_requirements(opts, holdings)
     lots = defaultdict(list)
-    for h in get_user_holdings(user_id):
+    for h in holdings:
         lots[h["ticker"]].append(h)
     sold = defaultdict(list)
-    for t in get_closed_trades(user_id):
+    for t in closed_stocks:
         sold[t["ticker"]].append(t)
     rows = []
-    for t in tickers[:30]:
+    for t in tickers:
         shorts_closed = [c for c in closed if c["ticker"] == t and c["position"] == "short"]
         shorts_open = [o for o in opts if o["ticker"] == t and o.get("position") == "short"]
-        wings_open = [o for o in long_open if o["ticker"] == t]
-        wings_closed = [c for c in long_closed if c["ticker"] == t]
-        realized_opts = sum(c["pnl"] for c in shorts_closed + wings_closed)
+        wings_open = [o for o in opts if o["ticker"] == t and o.get("position") == "long"]
+        wings_closed = [c for c in closed if c["ticker"] == t and c.get("position") == "long"]
+        realized_opts = sum(c.get("net_pnl", c["pnl"]) for c in shorts_closed + wings_closed)
         open_premium = (sum(o["premium"] * 100 * o["contracts"] for o in shorts_open)
                         - sum(o["premium"] * 100 * o["contracts"] for o in wings_open))
         sh = sum(h["shares"] for h in lots[t])
@@ -273,47 +339,57 @@ def wheel_ledger(user_id: int) -> dict:
             S = oa._spot(t)
         except Exception:
             S = None
+        if S is not None and (not math.isfinite(S) or S <= 0):
+            S = None
         unreal_stock = sh * S - stock_cost if S is not None and sh else 0.0
+        unreal_opts, missing = 0.0, bool(sh and S is None)
+        for option in shorts_open + wings_open:
+            try:
+                contract = _contract(t, option["option_type"], option["strike"], option["expiry"], S) if S else {}
+                if contract.get("mid") is None:
+                    missing = True
+                    continue
+                direction = -1 if option["position"] == "short" else 1
+                unreal_opts += direction * (contract["mid"] - option["premium"]) * 100 * option["contracts"]
+            except Exception:
+                missing = True
         dates = [d for d in ([_d(c.get("opened_at")) or _d(c.get("closed_at")) for c in shorts_closed]
                              + [_d(o.get("date_added")) for o in opts if o["ticker"] == t]
                              + [_d(h.get("date_added")) for h in lots[t]]) if d]
         start = min(dates) if dates else date.today()
         days = max((date.today() - start).days, 1)
-        capital = max([stock_cost]
-                      + [_put_capital(o, wings_open) for o in shorts_open if o["option_type"] == "put"]
-                      + [_put_capital(c, wings_closed) for c in shorts_closed if c["option_type"] == "put"])
-        total = realized_opts + open_premium + realized_stock + unreal_stock
-        hold_pct = None
-        try:
-            closes = get_stock_data(t, period="2y", interval="1d")["Close"]
-            then = closes[closes.index.date >= start]
-            if len(then) and S:
-                hold_pct = round((S / float(then.iloc[0]) - 1) * 100, 2)
-        except Exception:
-            pass
+        capital = stock_cost + requirements["by_ticker"].get(t, 0)
+        total = None if missing else realized_opts + unreal_opts + realized_stock + unreal_stock
         rows.append({
             "ticker": t, "since": start.isoformat(), "days": days,
             "cycles": len(shorts_closed) + len(shorts_open), "open_shorts": len(shorts_open),
             "premium_kept": round(realized_opts, 2), "open_premium": round(open_premium, 2),
             "shares": round(sh, 4), "avg_cost": round(stock_cost / sh, 2) if sh else None,
-            "adjusted_cost": round((stock_cost - realized_opts - open_premium) / sh, 2) if sh else None,
-            "stock_pnl": round(realized_stock + unreal_stock, 2), "total_pnl": round(total, 2), "capital": round(capital, 2),
-            "return_pct": round(total / capital * 100, 2) if capital else None,
-            "annualized_pct": round(total / capital * 365 / days * 100, 1) if capital and days >= 14 else None,
-            "buy_hold_pct": hold_pct,
+            "adjusted_cost": None,
+            "stock_pnl": round(realized_stock + unreal_stock, 2) if not (sh and S is None) else None,
+            "unrealized_options": round(unreal_opts, 2) if not missing else None,
+            "total_pnl": round(total, 2) if total is not None else None, "capital": round(capital, 2),
+            "return_pct": None, "annualized_pct": None, "incomplete": missing,
+            "buy_hold_pct": None,
         })
-    rows.sort(key=lambda r: r["total_pnl"], reverse=True)
-    return {"rows": rows, "total_pnl": round(sum(r["total_pnl"] for r in rows), 2),
-            "note": "Counts every short option on the stock, plus long options with the same expiry and type (spread "
-                    "wings). Open premium is net of wings and counted as received; buy-backs would reduce it. Capital "
-                    "is the largest cash-secured put, spread width or share cost."}
+    rows.sort(key=lambda row: row["total_pnl"] if row["total_pnl"] is not None else -math.inf, reverse=True)
+    incomplete = any(row["incomplete"] for row in rows)
+    return {
+        "rows": rows,
+        "total_pnl": None if incomplete else round(sum(row["total_pnl"] for row in rows), 2),
+        "incomplete": incomplete,
+        "capital_requirements": requirements,
+        "note": "Combined stock and option P&L by ticker, not linked wheel cycles. Closed options include recorded fees. Open options are marked at "
+                "two-sided quote midpoints, not realized income or executable fills. Missing marks suppress totals. "
+                "Capital is current stock cost plus gross option collateral, not historical capital or broker margin. "
+                "Returns and adjusted tax basis are omitted because cash flows and strategy links are not recorded.",
+    }
 
 
 def premium_income(user_id: int, months: int = 12) -> dict:
     """Premium collected and paid back per month, realized option P&L per month, and progress to a monthly goal."""
     from database import kv_get
     opts, closed = get_user_options(user_id), get_closed_options(user_id)
-    long_open, long_closed = _spread_longs(opts, closed)
     m = defaultdict(lambda: {"collected": 0.0, "paid": 0.0, "realized": 0.0, "trades": 0})
     key = lambda d: d.strftime("%Y-%m") if d else None
     for o in opts:
@@ -324,11 +400,9 @@ def premium_income(user_id: int, months: int = 12) -> dict:
         if o.get("position") == "short":
             m[k]["collected"] += amt
             m[k]["trades"] += 1
-        elif o in long_open:
+        else:
             m[k]["paid"] += amt
     for c in closed:
-        if c["position"] != "short" and c not in long_closed:
-            continue
         n = c["contracts"] * 100
         opened, done = key(_d(c.get("opened_at")) or _d(c.get("closed_at"))), key(_d(c.get("closed_at")))
         if c["position"] == "short":
@@ -338,7 +412,7 @@ def premium_income(user_id: int, months: int = 12) -> dict:
         else:
             m[opened]["paid"] += c["open_premium"] * n
             m[done]["collected"] += (c["close_premium"] or 0) * n
-        m[done]["realized"] += c["pnl"]
+        m[done]["realized"] += c.get("net_pnl", c["pnl"])
     today = date.today()
     first = today.replace(day=1)
     keys = []
@@ -355,11 +429,11 @@ def premium_income(user_id: int, months: int = 12) -> dict:
     this = rows[-1]
     return {
         "months": rows, "goal": goal, "this_month": this,
-        "goal_pct": round(this["net"] / goal * 100) if goal else None,
+        "goal_pct": round(this["realized"] / goal * 100) if goal else None,
         "ytd_net": round(sum(r["net"] for r in ytd), 2), "ytd_realized": round(sum(r["realized"] for r in ytd), 2),
         "avg_net_3m": round(sum(r["net"] for r in rows[-4:-1]) / 3, 2),
         "note": "Collected = premium received when you sell (counted in the month you opened). Paid = buy-backs and "
-                "spread wings. Realized = P&L of trades closed that month. Trades closed before open dates were "
+                "all purchased options. Premium cash flow excludes fees; realized P&L includes recorded fees for trades closed that month. Cash flow is not profit. Trades closed before open dates were "
                 "recorded are counted in their close month.",
     }
 
@@ -382,7 +456,7 @@ def _group(rows, key):
 
 
 def options_review(user_id: int) -> dict:
-    closed = get_closed_options(user_id)
+    closed = [{**trade, "pnl": trade.get("net_pnl", trade["pnl"])} for trade in get_closed_options(user_id)]
     if not closed:
         return {"stats": None, "breakdowns": {}}
     wins = [c for c in closed if c["pnl"] > 0]
@@ -399,7 +473,7 @@ def options_review(user_id: int) -> dict:
     breakdowns = {
         "strategy": _group(closed, lambda c: f"{c['position']} {c['option_type']}"),
         "dte_at_open": _group(closed, _dte_bucket),
-        "exit": _group(closed, lambda c: "held to expiry" if (c["close_premium"] or 0) == 0 else "closed early"),
+        "exit": _group(closed, lambda c: "zero-price close (reason unrecorded)" if (c["close_premium"] or 0) == 0 else "priced close"),
         "ticker": _group(closed, lambda c: c["ticker"])[:8],
     }
     return {"stats": stats, "breakdowns": breakdowns}
@@ -413,10 +487,11 @@ def options_coach(user_id: int) -> dict:
     if not llm.ai_enabled():
         return {"ai": False, "summary": "AI review needs an AI key on the server.", "strengths": [], "leaks": [], "rules": []}
     recent = [{k: c.get(k) for k in ("ticker", "position", "option_type", "strike", "expiry", "opened_at", "open_premium",
-                                       "close_premium", "contracts", "pnl")} for c in get_closed_options(user_id)[:40]]
+                                       "close_premium", "contracts", "pnl", "fees", "net_pnl")} for c in get_closed_options(user_id)[:40]]
     system = ("You are an options trading coach. Base every observation on the statistics and trades given and quote the "
               "numbers. Be direct and practical. Output JSON only.")
-    user = f"""Stats: {s}
+    user = f"""Stats and breakdowns use net P&L after recorded fees. Recent trades include gross pnl and net_pnl.
+Stats: {s}
 Breakdowns (strategy, days to expiry when opened, held to expiry vs closed early, ticker): {report['breakdowns']}
 Recent closed option trades: {recent}
 

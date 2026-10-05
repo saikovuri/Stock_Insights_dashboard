@@ -1,5 +1,45 @@
-/* ── Reset & Base ──────────────────────────────────────────────── */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+.market-context { min-width: 0; padding: 20px 0; border-top: 1px solid var(--border); }
+.market-context header { display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline; justify-content: space-between; }
+.market-context p { margin: 10px 0; }
+.market-context a { color: var(--text-secondary); text-underline-offset: 3px; overflow-wrap: anywhere; }
+.market-context a:hover { color: var(--accent-secondary); }
+.market-context .table-scroll { max-width: 100%; overflow-x: auto; }
+.market-context table { min-width: 560px; }
+.market-context td { white-space: nowrap; }
+.market-context td .market-sub { max-width: 230px; white-space: normal; }
+.prediction-list { list-style: none; padding: 0; }
+.prediction-list > li { padding: 18px 0; border-bottom: 1px solid var(--border); }
+.prediction-heading { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; }
+.prediction-heading a { flex: 1 1 230px; }
+.prediction-heading strong { white-space: nowrap; color: var(--accent-secondary); }
+.prediction-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin-top: 12px; }
+.prediction-metrics dt { color: var(--text-muted); font-size: 0.8rem; }
+.prediction-metrics dd { margin: 0; }
+
+.accounting-section { min-width: 0; }
+.accounting-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 16px; }
+.accounting-toolbar h3 { margin: 0 auto 0 0; }
+.accounting-toolbar button { width: auto; }
+.accounting-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr)); gap: 12px; margin: 20px 0; align-items: end; }
+.accounting-form label { display: grid; gap: 6px; font-size: 0.85rem; }
+.accounting-form input, .accounting-form select { min-width: 0; width: 100%; box-sizing: border-box; padding: 9px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 4px; }
+.accounting-table { max-width: 100%; overflow-x: auto; }
+.accounting-table pre { max-width: 420px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.portfolio-workspace { min-width: 0; padding: 1rem; }
+.portfolio-section { min-width: 0; padding: 1.25rem 0; border-top: 1px solid var(--border); }
+.portfolio-section > h3 { margin: 1.25rem 0 0.75rem; }
+.portfolio-workspace .portfolio-insights,
+.portfolio-workspace .portfolio-doctor { border: 0; box-shadow: none; border-radius: 0; padding: 1rem 0; background: transparent; }
+.portfolio-workspace table { display: block; max-width: 100%; overflow-x: auto; }
+@media (max-width: 600px) {
+  .portfolio-workspace { padding: 0.75rem; }
+  .portfolio-workspace .doctor-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .portfolio-workspace .bull-bear-grid { display: block; }
+  .portfolio-workspace .bull-bear-col { margin-bottom: 1rem; }
+}
+/* ── Reset & Base ──────────────────────────────────────────────── */
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -4700,11 +4740,28 @@ button.signal-chip { cursor: pointer; }
 .key-levels li { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; }
 .key-level-btn { margin-left: auto; padding: 0.15rem 0.5rem; font-size: 0.75rem; }
 
-.plan-trade summary { cursor: pointer; list-style: none; }
-.plan-trade summary::-webkit-details-marker { display: none; }
-.plan-trade[open] summary { margin-bottom: 0.75rem; }
-.plan-trade summary::before { content: '▸ '; color: var(--text-muted); }
-.plan-trade[open] summary::before { content: '▾ '; }
+.journal-plan-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 1rem; }
+.journal-plan-header h2 { margin: 0; font-size: 1.2rem; }
+.journal-plan-dialog { box-sizing: border-box; width: min(1100px, calc(100% - 2rem)); max-height: calc(100dvh - 2rem); margin: auto; padding: 1rem; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text-primary); overflow: auto; }
+.journal-plan-dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
+.journal-plan-dialog .tool-card { min-width: 0; }
+.journal-plan-dialog .tool-input { box-sizing: border-box; min-width: 0; max-width: 100%; }
+.closed-option-journal { margin-bottom: 1.5rem; }
+.closed-option-form { margin-bottom: 1.5rem; }
+.closed-option-form fieldset { border: 0; padding: 0; min-width: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr)); gap: 0.85rem; }
+.closed-option-form legend { padding: 0 0 0.85rem; font-size: 0.85rem; color: var(--text-muted); }
+.closed-option-form label { display: flex; flex-direction: column; gap: 0.35rem; min-width: 0; font-size: 0.8rem; color: var(--text-secondary); }
+.closed-option-form .tool-input { box-sizing: border-box; min-width: 0; width: 100%; max-width: 100%; }
+.closed-option-wide { grid-column: 1 / -1; }
+.closed-option-date-field, .closed-option-notes-field { min-width: 0; display: flex; flex-direction: column; gap: 0.35rem; }
+.closed-option-date-control { display: grid; grid-template-columns: minmax(0, 1fr) 36px; gap: 0.35rem; }
+.closed-option-date-control .btn-icon { width: 36px; height: 36px; padding: 0; border: 1px solid var(--border); border-radius: 4px; }
+.closed-option-date-control input[type="date"] { color-scheme: dark; }
+.closed-option-date-control input[type="date"]::-webkit-calendar-picker-indicator { display: none; }
+[data-theme="light"] .closed-option-date-control input[type="date"] { color-scheme: light; }
+.closed-option-actions { white-space: nowrap; }
+.closed-option-actions .btn-icon { width: 32px; height: 32px; }
+.closed-option-notes { min-width: 12ch; max-width: 30ch; white-space: normal; overflow-wrap: anywhere; }
 
 .raw-statements { margin-bottom: 1.25rem; }
 .raw-statements > summary {

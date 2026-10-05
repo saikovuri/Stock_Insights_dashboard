@@ -10,6 +10,7 @@ import math
 import re
 from typing import Literal
 from pydantic import Field
+from portfolio_models import AccountingEntryRequest, HoldingRequest, HoldingUpdateRequest, OptionRequest, OptionUpdateRequest, ClosedOptionRequest
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -51,7 +52,7 @@ from database import (
     get_user_options, add_user_option, close_user_option, update_user_option, delete_user_option,
     assign_user_option, kv_set,
     get_user_transactions, get_user_watchlist, add_to_watchlist, remove_from_watchlist,
-    get_closed_trades, get_closed_options, delete_closed_trade, delete_closed_option,
+    get_closed_trades, get_closed_options, delete_closed_trade, delete_closed_option, record_closed_option,
     store_refresh_token, get_refresh_token, delete_refresh_token, delete_user_refresh_tokens,
     list_notifications, mark_notifications_read, get_ntfy_topic, set_ntfy_topic,
     get_trader_profile, set_trader_profile, list_user_alerts, add_user_alert, delete_user_alert,
@@ -115,18 +116,20 @@ async def health_check():
 @app.api_route("/api/health", methods=["GET", "HEAD"])
 async def api_health_check():
     """Health check that pings the DB to keep Supabase alive."""
+    conn = None
     try:
-        from database import get_db, _release, USE_PG
-        if USE_PG:
-            conn = get_db()
-            cur = conn.cursor()
-            cur.execute("SELECT 1")
-            cur.close()
-            _release(conn)
+        from database import get_db, _release
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT 1")
+        cur.close()
         return {"status": "ok", "db": "connected"}
-    except Exception as e:
-        log.error("Health check DB error: %s", e)
-        return {"status": "ok", "db": "error"}
+    except Exception:
+        log.error("Health check database unavailable")
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    finally:
+        if conn is not None:
+            _release(conn)
 
 # ── Rate limiting ───────────────────────────────────────────────────────────
 
@@ -212,34 +215,6 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     username: str
     password: str
-
-class HoldingRequest(BaseModel):
-    ticker: str
-    shares: float
-    price: float
-
-class OptionRequest(BaseModel):
-    ticker: str
-    option_type: str
-    strike: float
-    expiry: str
-    premium: float
-    contracts: int = 1
-    position: str = "long"
-
-class HoldingUpdateRequest(BaseModel):
-    ticker: str
-    shares: float
-    price: float
-
-class OptionUpdateRequest(BaseModel):
-    ticker: str
-    option_type: str
-    strike: float
-    expiry: str
-    premium: float
-    contracts: int = 1
-    position: str = "long"
 
 class WatchlistRequest(BaseModel):
     ticker: str
@@ -498,9 +473,12 @@ def portfolio_summary_endpoint(user: dict = Depends(get_current_user)):
     current_prices = {}
     if finnhub_enabled():
         for t in unique_tickers:
-            q = finnhub_quote(t)
-            if q:
-                current_prices[t] = round(float(q["c"]), 2)
+            try:
+                q = finnhub_quote(t)
+                if q and math.isfinite(float(q["c"])) and float(q["c"]) > 0:
+                    current_prices[t] = round(float(q["c"]), 2)
+            except Exception:
+                pass
     remaining = [t for t in unique_tickers if t not in current_prices]
     try:
         if len(remaining) == 1:
@@ -533,13 +511,16 @@ def portfolio_summary_endpoint(user: dict = Depends(get_current_user)):
         ticker = h["ticker"]
         shares = h["shares"]
         buy_price = h["buy_price"]
-        current = current_prices.get(ticker, buy_price)
+        current = current_prices.get(ticker)
+        current = float(current) if current is not None else None
+        if current is not None and (not math.isfinite(current) or current <= 0):
+            current = None
         invested = shares * buy_price
-        current_val = shares * current
-        pnl = current_val - invested
-        pnl_pct = (pnl / invested * 100) if invested else 0
+        current_val = shares * current if current is not None else None
+        pnl = current_val - invested if current_val is not None else None
+        pnl_pct = (pnl / invested * 100) if invested and pnl is not None else None
         total_invested += invested
-        total_current += current_val
+        total_current += current_val or 0
         # Get sector from cached metrics
         sector = "Unknown"
         try:
@@ -551,16 +532,18 @@ def portfolio_summary_endpoint(user: dict = Depends(get_current_user)):
         details.append({
             "id": h["id"], "ticker": ticker, "shares": shares,
             "buy_price": buy_price, "current_price": current,
-            "invested": round(invested, 2), "current_value": round(current_val, 2),
-            "pnl": round(pnl, 2), "pnl_pct": round(pnl_pct, 2),
+            "invested": round(invested, 2), "current_value": round(current_val, 2) if current_val is not None else None,
+            "pnl": round(pnl, 2) if pnl is not None else None, "pnl_pct": round(pnl_pct, 2) if pnl_pct is not None else None,
             "sector": sector,
         })
     total_pnl = total_current - total_invested
+    incomplete = any(holding["current_price"] is None for holding in details)
     return {
         "total_invested": round(total_invested, 2),
-        "total_current": round(total_current, 2),
-        "total_pnl": round(total_pnl, 2),
-        "total_pnl_pct": round((total_pnl / total_invested * 100) if total_invested else 0, 2),
+        "total_current": None if incomplete else round(total_current, 2),
+        "total_pnl": None if incomplete else round(total_pnl, 2),
+        "total_pnl_pct": None if incomplete else round((total_pnl / total_invested * 100) if total_invested else 0, 2),
+        "incomplete": incomplete,
         "holdings": details,
     }
 
@@ -572,7 +555,10 @@ def portfolio_buy(req: HoldingRequest, user: dict = Depends(get_current_user)):
 
 @app.post("/api/portfolio/sell")
 def portfolio_sell(req: HoldingRequest, user: dict = Depends(get_current_user)):
-    result = sell_user_holding(user["user_id"], req.ticker, req.shares, req.price)
+    try:
+        result = sell_user_holding(user["user_id"], req.ticker, req.shares, req.price)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
     if result is None:
         raise HTTPException(status_code=404, detail=f"{req.ticker} not found in portfolio")
     return result
@@ -580,7 +566,10 @@ def portfolio_sell(req: HoldingRequest, user: dict = Depends(get_current_user)):
 
 @app.post("/api/portfolio/sell-lot/{holding_id}")
 def portfolio_sell_lot(holding_id: int, req: HoldingRequest, user: dict = Depends(get_current_user)):
-    result = sell_user_holding_by_lot(user["user_id"], holding_id, req.shares, req.price)
+    try:
+        result = sell_user_holding_by_lot(user["user_id"], holding_id, req.shares, req.price)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
     if result is None:
         raise HTTPException(status_code=404, detail="Lot not found")
     return result
@@ -607,6 +596,30 @@ def portfolio_history(user: dict = Depends(get_current_user)):
     return get_user_transactions(user["user_id"])
 
 
+@app.get("/api/accounting/events")
+def accounting_events(after_id: int = 0, limit: int = 200, user: dict = Depends(get_current_user)):
+    import accounting
+    try:
+        return {"events": accounting.list_events(user["user_id"], after_id, limit)}
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+
+
+@app.get("/api/accounting/report")
+def accounting_report(user: dict = Depends(get_current_user)):
+    import accounting
+    return accounting.report(user["user_id"])
+
+
+@app.post("/api/accounting/entries")
+def accounting_entry(req: AccountingEntryRequest, user: dict = Depends(get_current_user)):
+    import accounting
+    try:
+        return accounting.record_entry(user["user_id"], req)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+
+
 @app.get("/api/portfolio/closed")
 def closed_trades_endpoint(user: dict = Depends(get_current_user)):
     trades = get_closed_trades(user["user_id"])
@@ -618,7 +631,27 @@ def closed_trades_endpoint(user: dict = Depends(get_current_user)):
 def closed_options_endpoint(user: dict = Depends(get_current_user)):
     trades = get_closed_options(user["user_id"])
     total_pnl = sum(t["pnl"] for t in trades)
-    return {"total_realized_pnl": round(total_pnl, 2), "trades": trades}
+    return {"total_realized_pnl": round(total_pnl, 2), "trades": trades,
+            "total_fees": round(sum(t["fees"] for t in trades), 2),
+            "total_net_pnl": round(sum(t["net_pnl"] for t in trades), 2)}
+
+
+@app.post("/api/portfolio/options/closed")
+def record_closed_option_endpoint(req: ClosedOptionRequest, user: dict = Depends(get_current_user)):
+    try:
+        return record_closed_option(user["user_id"], req)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error))
+
+
+@app.put("/api/portfolio/options/closed/{trade_id}")
+def update_closed_option_endpoint(trade_id: int, req: ClosedOptionRequest, user: dict = Depends(get_current_user)):
+    try:
+        return record_closed_option(user["user_id"], req, trade_id=trade_id)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error))
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error))
 
 
 @app.delete("/api/portfolio/closed/{trade_id}")
@@ -662,12 +695,13 @@ def options_summary_endpoint(user: dict = Depends(get_current_user)):
                 p = m.get("price", 0)
                 if not p:
                     p = getattr(yf.Ticker(yf_sym).fast_info, "last_price", 0) or 0
-                current_prices[o["ticker"]] = p if p else o["strike"]
+                current_prices[o["ticker"]] = p if p and math.isfinite(p) and p > 0 else None
             except Exception:
                 try:
-                    current_prices[o["ticker"]] = getattr(yf.Ticker(yf_sym).fast_info, "last_price", o["strike"]) or o["strike"]
+                    price = getattr(yf.Ticker(yf_sym).fast_info, "last_price", None)
+                    current_prices[o["ticker"]] = price if price and math.isfinite(price) and price > 0 else None
                 except Exception:
-                    current_prices[o["ticker"]] = o["strike"]
+                    current_prices[o["ticker"]] = None
 
     # Cache option chains per (ticker, expiry)
     chain_cache: dict[tuple[str, str], dict] = {}
@@ -693,13 +727,13 @@ def options_summary_endpoint(user: dict = Depends(get_current_user)):
         if match.empty:
             return {}
         row = match.iloc[0]
+        def number(key):
+            value = float(row.get(key, 0) or 0)
+            return value if math.isfinite(value) else 0
         return {
-            "last_price": float(row.get("lastPrice", 0) or 0),
-            "bid": float(row.get("bid", 0) or 0),
-            "ask": float(row.get("ask", 0) or 0),
-            "iv": float(row.get("impliedVolatility", 0) or 0),
-            "volume": int(row.get("volume", 0) or 0),
-            "open_interest": int(row.get("openInterest", 0) or 0),
+            "last_price": number("lastPrice"), "bid": number("bid"), "ask": number("ask"),
+            "iv": number("impliedVolatility"), "volume": int(number("volume")),
+            "open_interest": int(number("openInterest")),
         }
 
     details = []
@@ -708,7 +742,7 @@ def options_summary_endpoint(user: dict = Depends(get_current_user)):
         contracts = o["contracts"]
         premium = o["premium"]
         strike = o["strike"]
-        current = current_prices.get(ticker, strike)
+        current = current_prices.get(ticker)
         position = o.get("position", "long")
         opt_type = o["option_type"]
 
@@ -718,42 +752,47 @@ def options_summary_endpoint(user: dict = Depends(get_current_user)):
         except (ValueError, KeyError):
             dte = 0
 
-        intrinsic = max(current - strike, 0) if opt_type == "call" else max(strike - current, 0)
+        intrinsic = (max(current - strike, 0) if opt_type == "call" else max(strike - current, 0)) if current else None
 
         market = _get_market_price(ticker, opt_type, strike, o["expiry"])
-        if market:
+        quoted = bool(market and market["bid"] > 0 and market["ask"] >= market["bid"] and current)
+        if quoted:
             bid, ask = market.get("bid", 0), market.get("ask", 0)
             market_price = (bid + ask) / 2 if bid > 0 and ask > 0 else market.get("last_price", 0)
             iv, volume, oi = market.get("iv", 0), market.get("volume", 0), market.get("open_interest", 0)
         else:
-            market_price, iv, volume, oi = intrinsic, 0, 0, 0
+            market_price, iv, volume, oi = None, 0, 0, 0
 
         cost = premium * 100 * contracts
-        current_value = market_price * 100 * contracts
-        pnl = (current_value - cost) if position == "long" else (cost - current_value)
-        pnl_pct = (pnl / cost * 100) if cost else 0
+        current_value = market_price * 100 * contracts if quoted else None
+        pnl = ((current_value - cost) if position == "long" else (cost - current_value)) if quoted else None
+        pnl_pct = (pnl / cost * 100) if quoted and cost else None
 
         details.append({
             "id": o["id"], "ticker": ticker, "type": opt_type, "position": position,
             "strike": strike, "expiry": o["expiry"], "dte": dte,
+            "time_to_expiry_years": options_analytics._years(o["expiry"]) if options_analytics._live(o["expiry"]) else 0,
             "contracts": contracts, "premium": premium, "cost": round(cost, 2),
-            "current_price": current, "intrinsic": round(intrinsic, 2),
-            "market_price": round(market_price, 2), "quoted": bool(market),
+            "current_price": current, "intrinsic": round(intrinsic, 2) if intrinsic is not None else None,
+            "market_price": round(market_price, 2) if quoted else None, "quoted": quoted,
+            "mark_status": "midpoint_estimate" if quoted else "unavailable",
             "bid": round(market.get("bid", 0), 2) if market else 0,
             "ask": round(market.get("ask", 0), 2) if market else 0,
             "iv": round(iv * 100, 1), "volume": volume, "open_interest": oi,
-            "est_value": round(market_price, 2),
-            "pnl": round(pnl, 2), "pnl_pct": round(pnl_pct, 2),
+            "est_value": round(market_price, 2) if quoted else None,
+            "pnl": round(pnl, 2) if pnl is not None else None, "pnl_pct": round(pnl_pct, 2) if pnl_pct is not None else None,
         })
 
     total_cost = sum(d["cost"] for d in details)
-    total_pnl = sum(d["pnl"] for d in details)
-    total_market = sum(d["market_price"] * d["contracts"] * 100 for d in details)
+    incomplete = any(not detail["quoted"] for detail in details)
+    total_pnl = sum(d["pnl"] or 0 for d in details)
+    total_market = sum((d["market_price"] or 0) * d["contracts"] * 100 for d in details)
     return {
         "total_cost": round(total_cost, 2),
-        "total_value": round(total_market, 2),
-        "total_pnl": round(total_pnl, 2),
-        "total_pnl_pct": round((total_pnl / total_cost * 100) if total_cost else 0, 2),
+        "total_value": None if incomplete else round(total_market, 2),
+        "total_pnl": None if incomplete else round(total_pnl, 2),
+        "total_pnl_pct": None if incomplete else round((total_pnl / total_cost * 100) if total_cost else 0, 2),
+        "incomplete": incomplete,
         "options": details,
     }
 
@@ -766,8 +805,11 @@ def options_buy(req: OptionRequest, user: dict = Depends(get_current_user)):
 
 @app.post("/api/portfolio/options/close")
 def options_close(req: OptionRequest, user: dict = Depends(get_current_user)):
-    result = close_user_option(user["user_id"], req.ticker, req.option_type, req.strike,
-                               req.expiry, req.premium, req.contracts, req.position)
+    try:
+        result = close_user_option(user["user_id"], req.ticker, req.option_type, req.strike,
+                                   req.expiry, req.premium, req.contracts, req.position, option_id=req.option_id)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
     if result is None:
         raise HTTPException(status_code=404, detail="Option not found in portfolio")
     return result
@@ -1504,7 +1546,10 @@ def stock_earnings_moves(request: Request, ticker: str):
 # ── Options desk: position actions, earnings exposure, wheel ledger, reviews ──
 
 def _options_version(uid: int) -> str:
-    return ",".join(f"{o['id']}:{o['contracts']}" for o in get_user_options(uid))
+    import hashlib
+    import json
+    payload = [get_user_options(uid), get_user_holdings(uid)]
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()[:24]
 
 
 @app.get("/api/portfolio/options/actions")
@@ -1546,9 +1591,12 @@ def portfolio_options_review(request: Request, user: dict = Depends(get_current_
 @app.get("/api/portfolio/options/coach")
 @limiter.limit("6/minute")
 def portfolio_options_coach(request: Request, user: dict = Depends(get_current_user)):
+    import hashlib
+    import json
     uid = int(user["user_id"])
     closed = get_closed_options(uid)
-    key = f"opt-coach:{uid}:{len(closed)}:{max((c['id'] for c in closed), default=0)}"
+    version = hashlib.sha256(json.dumps(closed, sort_keys=True, default=str).encode()).hexdigest()[:24]
+    key = f"opt-coach:{uid}:{version}"
     try:
         return get_or_fetch(key, lambda: options_desk.options_coach(uid), ttl=3600)
     except Exception as e:
@@ -1565,8 +1613,10 @@ def ideas_track_record(request: Request):
 @app.get("/api/ideas/wheel/plan")
 @limiter.limit("20/minute")
 def ideas_wheel_plan(request: Request, capital: float = Query(..., ge=1000, le=10_000_000),
-                     max_pct: float = Query(25, ge=5, le=100), max_per_sector: int = Query(2, ge=1, le=10)):
-    return wheel.plan(capital, max_pct, max_per_sector)
+                     max_pct: float = Query(25, ge=5, le=100), max_per_sector: int = Query(2, ge=1, le=10),
+                     short_dated: bool = False,
+                     user: dict = Depends(get_current_user)):
+    return wheel.plan(capital, max_pct, max_per_sector, user_id=int(user["user_id"]), short_dated=short_dated)
 
 
 @app.get("/api/stock/{ticker}/structures")
@@ -1664,11 +1714,19 @@ def market_movers(request: Request, kind: str = Query("gainers", pattern="^(gain
 @app.get("/api/market/my-earnings")
 def market_my_earnings(user: dict = Depends(get_current_user)):
     from database import get_all_user_tickers
-    from providers import finnhub_earnings_calendar
+    from datetime import date, timedelta
     tickers = get_all_user_tickers().get(int(user["user_id"]), set())
-    items = [{"ticker": e["symbol"], "date": e.get("date"), "hour": e.get("hour"), "eps_estimate": e.get("epsEstimate")}
-             for e in finnhub_earnings_calendar(14) if e.get("symbol") in tickers]
-    return {"items": sorted(items, key=lambda e: e["date"] or "")}
+    items, unavailable = [], []
+    today, end = date.today().isoformat(), (date.today() + timedelta(days=14)).isoformat()
+    for ticker in sorted(tickers):
+        info = options_analytics.earnings_info(ticker)
+        upcoming = info.get("next")
+        if not upcoming:
+            unavailable.append(ticker)
+        elif today <= upcoming <= end:
+            items.append({"ticker": ticker, "date": upcoming, "eps_estimate": None,
+                          "hour": {"before open": "bmo", "after close": "amc"}.get(info.get("next_timing"))})
+    return {"items": sorted(items, key=lambda event: event["date"]), "unavailable": unavailable}
 
 
 # ── Earnings intelligence ────────────────────────────────────────────────────
@@ -1819,9 +1877,9 @@ def ideas_unusual_options(request: Request):
 
 @app.get("/api/ideas/wheel")
 @limiter.limit("20/minute")
-def ideas_wheel(request: Request):
+def ideas_wheel(request: Request, short_dated: bool = False):
     """Quality stocks ranked by the risk-adjusted premium of a conservative cash-secured put."""
-    return wheel.get_wheel()
+    return wheel.get_wheel(short_dated=short_dated)
 
 
 @app.post("/api/ideas/wheel/ask/{ticker}")
@@ -1990,6 +2048,13 @@ def stock_levels(request: Request, ticker: str):
         return intraday.key_levels(ticker)
     except Exception as e:
         raise _upstream_error(e, 404)
+
+
+@app.get("/api/market/context/{kind}")
+@limiter.limit("20/minute")
+def external_market_context(request: Request, kind: Literal["attention", "predictions"]):
+    from market_context import get_context
+    return get_context(kind)
 
 
 @app.get("/api/ideas/in-play")

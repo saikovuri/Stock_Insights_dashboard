@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAuth } from '../AuthContext';
 import PriceAlerts from './PriceAlerts';
+import { authFetch } from '../api/stockApi';
 
 import { API_BASE } from '../api/config';
 const BASE = API_BASE;
@@ -28,9 +29,16 @@ function formatVol(n) {
   return n.toLocaleString();
 }
 
-export default function Watchlist({ onSelect, onSignIn }) {
-  const { token, user } = useAuth();
+export default function Watchlist(props) {
+  const session = useAuth();
+  const accountKey = session.user ? `user:${session.user.id ?? session.user.username}` : 'guest';
+  return <AccountWatchlist key={accountKey} {...props} session={session} />;
+}
+
+function AccountWatchlist({ onSelect, onSignIn, session }) {
+  const { token, user } = session;
   const isGuest = !user;
+  const cacheKey = `${SCREENER_CACHE_KEY}:${user?.id ?? user?.username ?? 'guest'}`;
 
   const [stocks, setStocks] = useState([]);
   const [guestTickers, setGuestTickers] = useState(getGuestList);
@@ -42,38 +50,56 @@ export default function Watchlist({ onSelect, onSignIn }) {
   const [lastUpdated, setLastUpdated] = useState(null);
   const [customOrder, setCustomOrder] = useState([]);
   const [alertPanelTicker, setAlertPanelTicker] = useState(null);
+  const active = useRef(false);
+  const loadGeneration = useRef(0);
+
+  useEffect(() => {
+    active.current = true;
+    return () => { active.current = false; loadGeneration.current += 1; };
+  }, []);
 
   // ── Auth mode ──────────────────────────────────────────────────
 
   const fetchScreenerAuth = useCallback(async (forceRefresh = false) => {
+    if (!active.current) return;
+    const generation = ++loadGeneration.current;
     // Show cached data immediately (stale-while-revalidate)
     try {
-      const cached = JSON.parse(sessionStorage.getItem(SCREENER_CACHE_KEY) || 'null');
+      const cached = JSON.parse(sessionStorage.getItem(cacheKey) || 'null');
       if (cached && !forceRefresh && Date.now() - cached.ts < SCREENER_CACHE_TTL) {
         setStocks(cached.stocks);
         setLastUpdated(new Date(cached.ts));
+        setLoading(false);
         return;  // Cache is fresh enough, skip fetch
       }
       if (cached) { setStocks(cached.stocks); setLastUpdated(new Date(cached.ts)); }
     } catch { /* ignore */ }
     setLoading(true);
     try {
-      const res = await fetch(`${BASE}/screener`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await authFetch(`${BASE}/screener`);
+      if (!active.current || generation !== loadGeneration.current) return;
       if (res.ok) {
         const data = (await res.json()).stocks || [];
+        if (!active.current || generation !== loadGeneration.current) return;
         const now = Date.now();
         setStocks(data);
         setLastUpdated(new Date(now));
-        sessionStorage.setItem(SCREENER_CACHE_KEY, JSON.stringify({ stocks: data, ts: now }));
+        sessionStorage.setItem(cacheKey, JSON.stringify({ stocks: data, ts: now }));
       }
-    } catch { /* ignore */ }
-    setLoading(false);
-  }, [token]);
+      else setAddMsg('Watchlist unavailable. Please retry.');
+    } catch (error) {
+      if (active.current && generation === loadGeneration.current) setAddMsg(error.message);
+    } finally {
+      if (active.current && generation === loadGeneration.current) setLoading(false);
+    }
+  }, [token, cacheKey]);
 
   // ── Guest mode: fetch metrics per-ticker ──────────────────────
 
   const fetchScreenerGuest = useCallback(async () => {
-    if (!guestTickers.length) { setStocks([]); return; }
+    if (!active.current) return;
+    const generation = ++loadGeneration.current;
+    if (!guestTickers.length) { setStocks([]); setLoading(false); return; }
     setLoading(true);
     try {
       const results = await Promise.all(guestTickers.map(async (t) => {
@@ -92,9 +118,9 @@ export default function Watchlist({ onSelect, onSignIn }) {
           };
         } catch { return { ticker: t, name: t, error: true }; }
       }));
-      setStocks(results);
+      if (active.current && generation === loadGeneration.current) setStocks(results);
     } catch { /* ignore */ }
-    setLoading(false);
+    if (active.current && generation === loadGeneration.current) setLoading(false);
   }, [guestTickers]);
 
   useEffect(() => {
@@ -114,22 +140,24 @@ export default function Watchlist({ onSelect, onSignIn }) {
       if (guestTickers.includes(t)) { setAddMsg('Already in watchlist'); return; }
       try {
         const res = await fetch(`${BASE}/stock/${t}/metrics`);
+        if (!active.current) return;
         if (!res.ok) { setAddMsg(`Ticker '${t}' not found`); return; }
-      } catch { setAddMsg('Network error'); return; }
+      } catch { if (active.current) setAddMsg('Network error'); return; }
       const newList = [...guestTickers, t];
       localStorage.setItem(GUEST_KEY, JSON.stringify(newList));
       setGuestTickers(newList);
       setAddTicker('');
     } else {
       try {
-        const res = await fetch(`${BASE}/watchlist`, {
+        const res = await authFetch(`${BASE}/watchlist`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ ticker: t }),
         });
-        if (res.ok) { setAddTicker(''); sessionStorage.removeItem(SCREENER_CACHE_KEY); fetchScreenerAuth(true); }
-        else { const err = await res.json(); setAddMsg(err.detail || 'Failed to add'); }
-      } catch { setAddMsg('Network error'); }
+        if (!active.current) return;
+        if (res.ok) { setAddTicker(''); sessionStorage.removeItem(cacheKey); fetchScreenerAuth(true); }
+        else { const err = await res.json(); if (active.current) setAddMsg(err.detail || 'Failed to add'); }
+      } catch { if (active.current) setAddMsg('Network error'); }
     }
   };
 
@@ -143,12 +171,16 @@ export default function Watchlist({ onSelect, onSignIn }) {
       setStocks((prev) => prev.filter((s) => s.ticker !== ticker));
     } else {
       try {
-        await fetch(`${BASE}/watchlist/${ticker}`, {
+        const response = await authFetch(`${BASE}/watchlist/${ticker}`, {
           method: 'DELETE', headers: { Authorization: `Bearer ${token}` },
         });
-        sessionStorage.removeItem(SCREENER_CACHE_KEY);
+        if (!active.current) return;
+        if (!response.ok) throw new Error('Could not remove ticker. Please retry.');
+        loadGeneration.current += 1;
+        setLoading(false);
+        sessionStorage.removeItem(cacheKey);
         setStocks((prev) => prev.filter((s) => s.ticker !== ticker));
-      } catch { /* ignore */ }
+      } catch (error) { if (active.current) setAddMsg(error.message); }
     }
   };
 

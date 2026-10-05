@@ -5,7 +5,7 @@ import { fetchEarningsMoves } from '../api/stockApi';
 const fmtDate = d => new Date(d + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', year: '2-digit' });
 const VERDICT = {
   rich: ['Options price a bigger move than usual', 'ivrank-high',
-    'The market expects more than this stock typically delivers — historically an edge for premium sellers (defined risk only).'],
+    'The straddle price exceeds the average past reaction. This does not establish a profitable selling strategy.'],
   fair: ['Priced about right', 'ivrank-mid', 'The implied move is in line with past reactions.'],
   cheap: ['Options price a smaller move than usual', 'ivrank-low',
     'Past reactions were bigger than what options price now — selling premium through this report is riskier than it looks.'],

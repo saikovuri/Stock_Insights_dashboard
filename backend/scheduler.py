@@ -251,15 +251,27 @@ def build_weekly_review(user_id: int, tickers: set[str]) -> dict:
     scan = kv_get("scan:sp500")
     setups = [{"ticker": r["symbol"], "setups": r["setups"]} for r in (scan["data"]["rows"] if scan else [])
               if r["symbol"] in tickers and r["setups"]]
-    earnings = [{"ticker": e["symbol"], "date": e.get("date")} for e in finnhub_earnings_calendar(9)
-                if e.get("symbol") in tickers]
+    from options_analytics import earnings_info
+    today = datetime.now(ET).date()
+    start = today + timedelta(days=7 - today.weekday())
+    end = start + timedelta(days=6)
+    earnings = []
+    for ticker in sorted(tickers):
+        try:
+            next_date = earnings_info(ticker).get("next")
+            if next_date and start.isoformat() <= next_date <= end.isoformat():
+                earnings.append({"ticker": ticker, "date": next_date})
+        except Exception:
+            pass
     try:
-        macro = [f"{e['date']} {e['event']}" for e in economic_calendar(7)["events"] if e["impact"] == "high"]
+        macro = [f"{e['date']} {e['event']}" for e in economic_calendar(14)["events"]
+             if e["impact"] == "high" and start.isoformat() <= e["date"][:10] <= end.isoformat()]
     except Exception:
         macro = []
     theses = [{"ticker": t["ticker"], "status": (t.get("last_check") or {}).get("status")} for t in list_theses(user_id)]
     insiders = [c for c in insider_buying(30)["clusters"] if c["symbol"] in tickers]
     data = {
+        "as_of": datetime.now(ET).isoformat(), "next_week_start": start.isoformat(), "next_week_end": end.isoformat(),
         "portfolio_week_dollars": round(dollars, 2),
         "portfolio_week_pct": round(dollars / start_value * 100, 2) if start_value else None,
         "best": moves[:3], "worst": moves[-3:][::-1] if len(moves) > 3 else [],
@@ -295,7 +307,7 @@ def build_weekly_review(user_id: int, tickers: set[str]) -> dict:
 
 def get_or_create_weekly(user_id: int, tickers: set[str], force: bool = False) -> dict | None:
     y, w, _ = datetime.now(ET).isocalendar()
-    key = f"weekly:{y}-W{w:02d}"
+    key = f"weekly-v2:{y}-W{w:02d}"
     if force:
         delete_notification(user_id, key)
     else:

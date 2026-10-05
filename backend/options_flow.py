@@ -145,15 +145,15 @@ def _positioning(f: pd.DataFrame, chains: dict, S: float) -> dict:
 def _summary(pc_vol, pos, S) -> str:
     parts = []
     if pc_vol is not None:
-        parts.append("Traders are buying more puts than calls today (hedging or bearish bets)." if pc_vol > 1.0 else
-                     "Call volume dominates today — bullish tilt." if pc_vol < 0.6 else
+        parts.append("Put volume exceeds call volume; buyer intent cannot be inferred from volume alone." if pc_vol > 1.0 else
+                 "Call volume dominates; this includes purchases, sales and spread legs." if pc_vol < 0.6 else
                      "Put and call volume are fairly balanced.")
     if pos.get("gamma_regime") == "positive":
-        parts.append("Dealers are long gamma: they tend to sell rallies and buy dips, which dampens moves.")
+        parts.append("The assumed-positioning gamma proxy is positive; actual dealer inventory is unknown.")
     elif pos.get("gamma_regime") == "negative":
-        parts.append("Dealers are short gamma: their hedging can amplify moves in either direction.")
+        parts.append("The assumed-positioning gamma proxy is negative; actual dealer inventory is unknown.")
     if pos.get("call_wall") and pos.get("put_wall"):
-        parts.append(f"Biggest open-interest strikes: ${pos['put_wall']:g} (put support) and ${pos['call_wall']:g} (call resistance).")
+        parts.append(f"Biggest open-interest strikes: ${pos['put_wall']:g} puts and ${pos['call_wall']:g} calls; not established support/resistance.")
     return " ".join(parts)
 
 
