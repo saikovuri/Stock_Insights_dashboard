@@ -248,7 +248,8 @@ def build_weekly_review(user_id: int, tickers: set[str]) -> dict:
             dollars += shares[t] * (price - prev)
             start_value += shares[t] * prev
     moves.sort(key=lambda m: m["week_pct"], reverse=True)
-    scan = kv_get("scan:sp500")
+    from scanner import SCAN_KEY
+    scan = kv_get(SCAN_KEY)
     setups = [{"ticker": r["symbol"], "setups": r["setups"]} for r in (scan["data"]["rows"] if scan else [])
               if r["symbol"] in tickers and r["setups"]]
     from options_analytics import earnings_info

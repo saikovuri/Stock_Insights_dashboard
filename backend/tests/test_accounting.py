@@ -21,6 +21,46 @@ class AccountingTests(unittest.TestCase):
         conn.commit()
         conn.close()
 
+    def test_wheel_starts_missing_expanded_scan(self):
+        import wheel
+        with patch.object(wheel, "kv_get", return_value=None), \
+             patch.object(wheel, "get_scan") as start, \
+             patch.object(wheel, "_spots") as spots:
+            self.assertEqual(wheel.run_wheel_scan(), {"status": "building", "rows": []})
+            start.assert_called_once_with()
+            spots.assert_not_called()
+
+    def test_scan_universe_combines_indexes_without_duplicates(self):
+        import scanner
+        apple = dict(symbol="AAPL", name="Apple", sector="Information Technology")
+        nasdaq_only = dict(symbol="TEST", name="Nasdaq-only fixture", sector="Information Technology")
+        with patch.object(scanner, "_index_universe", side_effect=[[apple], [apple, nasdaq_only]]) as load:
+            self.assertEqual(scanner.universe(), [apple, nasdaq_only])
+        self.assertEqual(load.call_args_list[0].args[0], scanner.UNIVERSE_KEY)
+        self.assertEqual(load.call_args_list[1].args[0], scanner.NASDAQ_UNIVERSE_KEY)
+
+    def test_scan_universe_parses_nasdaq_constituents_and_caches(self):
+        import scanner
+        html = '<table><tr><th>Other</th></tr><tr><td>Ignored</td></tr></table>' + \
+            '<table><tr><th>Company</th><th>Ticker</th><th>ICB Industry[1]</th></tr>' + \
+            '<tr><td>Example</td><td>TEST.A</td><td>Technology</td></tr></table>'
+        with patch.object(scanner, "kv_get", return_value=None), \
+             patch.object(scanner.requests, "get") as fetch, \
+             patch.object(scanner, "kv_set") as cache, \
+             patch("research_universe.save_snapshot") as snapshot:
+            fetch.return_value.text = html
+            rows = scanner._index_universe(scanner.NASDAQ_UNIVERSE_KEY, "https://example.test", "Ticker", "Company", "nasdaq-fixture", [])
+            self.assertEqual(rows, [dict(symbol="TEST-A", name="Example", sector="Information Technology")])
+            cache.assert_called_once_with(scanner.NASDAQ_UNIVERSE_KEY, rows)
+            self.assertEqual(snapshot.call_args.args[0]["source"], "nasdaq-fixture")
+
+    def test_scan_universe_keeps_cached_index_when_fetch_fails(self):
+        import scanner
+        cached = [dict(symbol="TEST", name="Example", sector="Information Technology")]
+        with patch.object(scanner, "kv_get", return_value={"updated_at": "2020-01-01", "data": cached}), \
+             patch.object(scanner.requests, "get", side_effect=RuntimeError("offline")):
+            self.assertEqual(scanner._index_universe("test", "https://example.test", "Ticker", "Company", "test", []), cached)
+
     def test_accounting_queries_use_database_placeholders(self):
         import accounting
         for placeholder in ("?", "%s"):

@@ -106,7 +106,7 @@ The nine tabs are **In play**, **Setups**, **Wheel**, **Unusual options**, **Ins
 
 ### Setups: Universe and Trend
 
-The standard universe is the current S&P 500 constituent list, cached for seven days. If the list cannot be refreshed, the app uses the cached list; without a cache, it falls back to a small predefined set of ten large stocks. This fallback is not full index coverage. The scanner downloads roughly two years of adjusted daily prices and requires at least 210 usable bars per stock.
+The standard universe combines current S&P 500 and Nasdaq-100 constituents, deduplicated by ticker. Each index list is cached separately for seven days. If a list cannot be refreshed, the app uses that index's cached list; without a cache, the S&P portion falls back to ten predefined large stocks and the Nasdaq portion is unavailable. These fallbacks are not full index coverage. Nasdaq ICB industry labels are normalized to broad dashboard sector names, not an exact GICS classification; overlapping stocks retain S&P metadata. The scanner downloads roughly two years of adjusted daily prices and requires at least 210 usable bars per stock. Wheel uses this same expanded scan, retaining its existing quality, liquidity, and earnings filters.
 
 - **Uptrend:** close above the 200-day SMA and 50-day SMA above the 200-day SMA.
 - **Downtrend:** close below the 200-day SMA and 50-day SMA below the 200-day SMA.
@@ -233,7 +233,7 @@ Scans older than three hours trigger a background refresh when requested; cached
 - **Short-dated: 7-20 days:** changes which expiry is scanned; it is not just a filter over the default contracts. Also switches the planner's data/window and clears the previously displayed plan.
 - **Candidate count:** display the first 12 remaining ranked candidates.
 - **Capital planner defaults:** $50,000 entered account cash, 25% per name, two names per sector. These are editable starting inputs, not a claim about the user's real account.
-- **Ask about any ticker:** a separate single-stock Wheel assessment and delta ladder, not an expansion of the S&P scan. Its date-selection behavior is documented with the management rules below.
+- **Ask about any ticker:** a separate single-stock Wheel assessment and delta ladder, not an expansion of the index scan. Its date-selection behavior is documented with the management rules below.
 - **Manage a wheel position:** repair/roll an existing put or assess covered calls after assignment. Candidate shortcuts prefill this tool; they do not record a fill or perform assignment.
 
 The on-screen "take profit at about 50%" and covered-call guidance are management heuristics, not automated instructions or guarantees against a loss. An assignment-adjusted cost estimate does not include every tax, fee, or financing effect.

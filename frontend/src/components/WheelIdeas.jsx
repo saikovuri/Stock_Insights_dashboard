@@ -166,7 +166,7 @@ export default function WheelIdeas({ onSelect }) {
       </div>
       <p className="structures-intro">
         The wheel: sell a cash-secured put on a stock you'd happily own. If it expires, keep the premium and repeat; if
-        you're assigned, sell covered calls above your cost until the shares are called away. We screen the S&P 500 for
+        you're assigned, sell covered calls above your cost until the shares are called away. We screen the S&P 500 and Nasdaq-100 for
         steady uptrends near their highs with calm daily ranges{data?.screened != null && ` (${data.quality_pool} of ${data.screened} pass)`}, then pick a
         ~{Math.round((data?.target_delta ?? .15) * 100)}-delta put {shortDated ? '7–20' : '21–50'} days out on the most liquid strike — before earnings where
         possible — and rank by premium per unit of risk.

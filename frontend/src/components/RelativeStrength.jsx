@@ -23,7 +23,7 @@ export default function RelativeStrength({ ticker }) {
       </div>
       <p className="ivrank-verdict-desc">
         {label}
-        {rs != null && ` — outperformed ${rs}% of S&P 500 stocks over the past year (recent months weighted more).`}
+        {rs != null && ` — outperformed ${rs}% of scanned S&P 500 and Nasdaq-100 stocks over the past year (recent months weighted more).`}
         {data.sector && data.sector_rank && ` Sector: ${data.sector} (#${data.sector_rank} of ${data.sector_count}).`}
       </p>
       <div className="doctor-stats">

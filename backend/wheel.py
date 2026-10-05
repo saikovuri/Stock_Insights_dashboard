@@ -1,4 +1,4 @@
-"""Wheel-strategy candidate scanner: quality S&P 500 stocks in steady uptrends, ranked by the premium a
+"""Wheel-strategy candidate scanner: quality S&P 500 and Nasdaq-100 stocks in steady uptrends, ranked by the premium a
 conservative (~0.15 delta, 3-7 weeks out, liquid, pre-earnings) cash-secured put pays per unit of risk."""
 
 import logging
@@ -15,11 +15,11 @@ import track_record
 import yfinance as yf
 from cache import get_or_fetch
 from database import kv_get, kv_set
-from scanner import SCAN_KEY, _parse_ts
+from scanner import SCAN_KEY, _parse_ts, get_scan
 
 log = logging.getLogger(__name__)
 
-WHEEL_KEY = "wheel:candidates"
+WHEEL_KEY = "wheel:candidates:sp500-nasdaq100"
 TARGET_DELTA = 0.15  # roughly one expected move below the price
 MAX_CANDIDATES = 60
 MIN_ANNUALIZED = 7.0
@@ -129,7 +129,8 @@ def run_wheel_scan(short_dated: bool = False) -> dict:
     try:
         scan = kv_get(SCAN_KEY)
         if not scan:
-            raise RuntimeError("Setup scan not available yet")
+            get_scan()
+            return {"status": "building", "rows": []}
         pool = _quality_pool(scan["data"]["rows"])
         spots = _spots([r["symbol"] for r in pool])
 

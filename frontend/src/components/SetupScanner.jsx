@@ -49,7 +49,7 @@ function SetupExplainer({ k, record, label, pointInTime }) {
         )}
       </div>
       <p><b>What:</b> {e.what}</p>
-      {record && <p className="market-sub">{pointInTime ? `Dated membership source: ${pointInTime.source}. Provider and delisting coverage require review.` : 'Current S&P 500 constituents only: survivorship bias applies.'} Forward stock returns are not executable strategy P&L and exclude fees and slippage.</p>}
+      {record && <p className="market-sub">{pointInTime ? `Dated membership source: ${pointInTime.source}. Provider and delisting coverage require review.` : 'Current S&P 500 and Nasdaq-100 constituents only: survivorship bias applies.'} Forward stock returns are not executable strategy P&L and exclude fees and slippage.</p>}
       <p><b>Why it can work:</b> {e.why}</p>
       <p><b>How traders use it:</b> {e.how}</p>
     </div>
@@ -96,7 +96,7 @@ export default function SetupScanner({ onSelect }) {
     return (
       <div className="card">
         <h3>🎯 Setup Scanner</h3>
-        <p className="loading-text">Scanning all S&P 500 stocks for the first time — this takes about a minute…</p>
+        <p className="loading-text">Scanning S&P 500 and Nasdaq-100 stocks for the first time — this takes about a minute…</p>
       </div>
     );
   }
@@ -113,11 +113,11 @@ export default function SetupScanner({ onSelect }) {
     <div className="setup-scanner">
       <div className="card">
         <div className="ivrank-header">
-          <h3 style={{ margin: 0 }}>🎯 Setup Scanner · S&P 500</h3>
+          <h3 style={{ margin: 0 }}>🎯 Setup Scanner · S&P 500 + Nasdaq-100</h3>
           <span className="market-sub">Updated {new Date(data.updated_at).toLocaleString()}{data.status === 'running' ? ' · refreshing…' : ''}</span>
         </div>
         <p className="structures-intro">
-          Rescanned every weekday after the close. <b>RS rating</b> (1–99) ranks 12-month performance against every S&P 500 stock,
+          Rescanned every weekday after the close. <b>RS rating</b> (1–99) ranks 12-month performance across scanned S&P 500 and Nasdaq-100 stocks,
           weighted toward the last 3 months — 80+ means a market leader. Stops are 1.5 × ATR below price, targets 3 × ATR above (2:1 reward/risk).
         </p>
 
@@ -157,7 +157,7 @@ export default function SetupScanner({ onSelect }) {
         <div className="card">
           <h3>📈 Setup track record</h3>
           <p className="structures-intro">
-            Every time a setup fired on an S&P 500 stock over the past year, what happened next? Counted once per
+            Every time a setup fired on an S&P 500 or Nasdaq-100 stock over the past year, what happened next? Counted once per
             signal (not again within 10 days). This is a backtest, not a guarantee.
           </p>
           <div className="table-scroll">

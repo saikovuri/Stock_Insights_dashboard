@@ -1,4 +1,4 @@
-"""Nightly S&P 500 setup scanner with IBD-style relative strength ratings."""
+"""Nightly S&P 500 and Nasdaq-100 setup scanner with relative strength ratings."""
 
 import io
 import logging
@@ -17,8 +17,9 @@ from stock_data import compute_indicators, get_stock_data
 
 log = logging.getLogger(__name__)
 
-SCAN_KEY = "scan:sp500"
+SCAN_KEY = "scan:sp500-nasdaq100"
 UNIVERSE_KEY = "universe:sp500"
+NASDAQ_UNIVERSE_KEY = "universe:nasdaq100"
 BATCH = 100
 _lock = threading.Lock()
 _running = False
@@ -39,24 +40,47 @@ _FALLBACK = [("AAPL", "Apple", "Information Technology"), ("MSFT", "Microsoft", 
 
 
 def universe() -> list[dict]:
-    cached = kv_get(UNIVERSE_KEY)
+    sp500 = _index_universe(UNIVERSE_KEY, "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
+                           "Symbol", "Security", "observed-current-wikipedia",
+                           [{"symbol": symbol, "name": name, "sector": sector} for symbol, name, sector in _FALLBACK])
+    nasdaq100 = _index_universe(NASDAQ_UNIVERSE_KEY, "https://en.wikipedia.org/wiki/List_of_NASDAQ-100_companies",
+                              "Ticker", "Company", "observed-current-wikipedia-nasdaq100", [])
+    members = {member["symbol"]: member for member in sp500}
+    for member in nasdaq100:
+        members.setdefault(member["symbol"], member)
+    return list(members.values())
+
+
+def _index_universe(key, url, symbol_column, name_column, source, fallback):
+    cached = kv_get(key)
     if cached and (datetime.now(timezone.utc) - _parse_ts(cached["updated_at"])).days < 7:
         return cached["data"]
     try:
-        html = requests.get("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
-                            headers={"User-Agent": "Mozilla/5.0 StockInsights"}, timeout=20).text
-        t = pd.read_html(io.StringIO(html))[0]
-        data = [{"symbol": str(r["Symbol"]).replace(".", "-"), "name": r["Security"], "sector": r["GICS Sector"]}
-                for _, r in t.iterrows()]
+        response = requests.get(url, headers={"User-Agent": "Mozilla/5.0 StockInsights"}, timeout=20)
+        response.raise_for_status()
+        required = {symbol_column, name_column}
+        table = next(table for table in pd.read_html(io.StringIO(response.text)) if required.issubset(table.columns))
+        sector_column = next(column for column in table.columns
+                     if column == "GICS Sector" or str(column).startswith("ICB Industry"))
+        sectors = {"Technology": "Information Technology", "Telecommunications": "Communication Services",
+               "Basic Materials": "Materials"}
+        data = [{"symbol": str(row[symbol_column]).strip().replace(".", "-"),
+             "name": row[name_column], "sector": sectors.get(row[sector_column], row[sector_column])}
+            for _, row in table.iterrows()]
+        if not data:
+            raise ValueError("Empty constituent list")
         from research_universe import save_snapshot
         observed = datetime.now(timezone.utc)
-        save_snapshot({"as_of": observed.date().isoformat(), "known_at": observed.isoformat(),
-                   "source": "observed-current-wikipedia", "members": [member["symbol"] for member in data]})
-        kv_set(UNIVERSE_KEY, data)
+        try:
+            save_snapshot({"as_of": observed.date().isoformat(), "known_at": observed.isoformat(),
+                           "source": source, "members": [member["symbol"] for member in data]})
+        except Exception as error:
+            log.warning("Constituent snapshot %s unavailable: %s", source, error)
+        kv_set(key, data)
         return data
     except Exception as e:
-        log.warning("S&P 500 list unavailable: %s", e)
-        return cached["data"] if cached else [{"symbol": s, "name": n, "sector": sec} for s, n, sec in _FALLBACK]
+        log.warning("Constituent list %s unavailable: %s", key, e)
+        return cached["data"] if cached else fallback
 
 
 def _parse_ts(s: str) -> datetime:
@@ -253,7 +277,7 @@ def run_scan() -> dict:
         if point_in_time is not None:
             track = point_in_time["track_record"]
 
-        result = {"rows": rows, "sectors": sector_rows, "universe": "S&P 500", "rs_dist": rs_dist,
+        result = {"rows": rows, "sectors": sector_rows, "universe": "S&P 500 + Nasdaq-100", "rs_dist": rs_dist,
                   "research_status": "Current-constituent exploratory returns; not point-in-time validated. Historical membership and delisted price coverage are required.",
                   "point_in_time": point_in_time,
                   "track_record": track, "track_period_days": BACKTEST_BARS,
