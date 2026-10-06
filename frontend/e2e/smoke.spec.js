@@ -212,13 +212,134 @@ test('option close accepts a typed buy-back price', async ({ page }, testInfo) =
   expect(submitted).toMatchObject({ ticker: 'WDC', option_type: 'put', position: 'short', option_id: 42, premium: 0.35, contracts: 1 });
 });
 
+test('account transfer downloads, previews and confirms without duplicate retries', async ({ page }, testInfo) => {
+  const bundle = { payload: '{"source_user_id":2,"shares":1.0}', signature: 'synthetic-fixture', exported_at: '2026-10-06T12:00:00Z' };
+  const submitted = [];
+  let previews = 0;
+  let alreadyImported = false;
+  await page.route('**/api/account-transfer/export', route => route.fulfill({ json: bundle }));
+  await page.route('**/api/account-transfer/preview', route => {
+    previews += 1;
+    expect(route.request().postDataJSON()).toEqual(bundle);
+    return route.fulfill({ json: { source_name: 'Source fixture', source_user_id: 2,
+      counts: { holdings: 2, options: 1, closed_options: 3, journal: 4, watchlist: 2, transactions: 5 },
+      destination_counts: { holdings: 1, closed_trades: 1 }, ledger_events: 15, already_imported: alreadyImported } });
+  });
+  await page.route('**/api/account-transfer/import', route => {
+    submitted.push(route.request().postDataJSON());
+    alreadyImported = true;
+    if (submitted.length === 1) return route.fulfill({ status: 503, json: { detail: 'Temporary response failure; retry unchanged' } });
+    return route.fulfill({ json: { already_imported: true, counts: {} } });
+  });
+  await page.goto('/#portfolio');
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export to another account' }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(/^stockpilot-account-transfer-.*\.json$/);
+  expect(await download.failure()).toBeNull();
+  await expect(page.getByText(/Export downloaded/)).toBeVisible();
+  await page.getByRole('button', { name: 'Import from another account' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Import from another account' });
+  await dialog.getByLabel('Transfer file (.json)').setInputFiles({ name: 'wrong.json', mimeType: 'application/json', buffer: Buffer.from('not json') });
+  await expect(dialog.getByRole('alert')).toHaveText('Choose a valid StockPilot transfer JSON file.');
+  expect(previews).toBe(0);
+  await dialog.getByLabel('Transfer file (.json)').setInputFiles({ name: 'transfer.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(bundle)) });
+  await expect(dialog.getByText('Source fixture', { exact: true })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Confirm import' })).toBeDisabled();
+  expect(submitted).toHaveLength(0);
+  await dialog.getByRole('checkbox', { name: /I confirm adding these records to Test User/ }).check();
+  expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+  await dialog.screenshot({ path: testInfo.outputPath('account-transfer-preview.png') });
+  await dialog.getByRole('button', { name: 'Confirm import' }).click();
+  await expect(dialog.getByRole('alert')).toHaveText('Temporary response failure; retry unchanged');
+  await dialog.getByRole('button', { name: 'Confirm import' }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(submitted).toEqual([{ package: bundle, confirm: true }, { package: bundle, confirm: true }]);
+  await expect(page.getByText('This export was already imported. No duplicate records were added.')).toBeVisible();
+  await page.goto('/#journal');
+  await page.getByRole('button', { name: 'Import from another account' }).click();
+  await dialog.getByLabel('Transfer file (.json)').setInputFiles({ name: 'transfer.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(bundle)) });
+  await expect(dialog.getByText('This export was already imported. No duplicate records will be added.')).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Confirm import' })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+});
+
+test('journal review and explicit wheel cycles work on desktop and mobile', async ({ page }, testInfo) => {
+  const trade = { id: 12, ledger_event_id: 42, ticker: 'AAPL', position: 'short', option_type: 'put', strike: 100,
+    contracts: 2, open_premium: 2, close_premium: .5, pnl: 300, net_pnl: 296, fees: 4,
+    opened_at: '2025-09-01', closed_at: '2025-09-10', expiry: '2025-09-19' };
+  const submissions = [];
+  let linked = false;
+  await page.route('**/api/portfolio/closed', route => route.fulfill({ json: { trades: [] } }));
+  await page.route('**/api/portfolio/options/closed', route => route.fulfill({ json: { trades: [trade] } }));
+  await page.route('**/api/accounting/report', route => route.fulfill({ json: {
+    tax_lots: [{ opening_event_id: 42, source_id: 12, source: 'closed_options', ticker: 'AAPL', position: 'short', option_type: 'put', quantity: 2, closed_at: '2025-09-10' }],
+    manual_entries: linked ? [{ kind: 'link', event_id: 42, quantity: '1' }] : [],
+    cycles: [{ name: 'AAPL wheel', put_pnl: linked ? 150 : 0, call_pnl: 300, stock_pnl: -1000,
+      fees: linked ? 13 : 11, realized_pnl: linked ? -563 : -711, open_links: 0, unresolved_links: 0,
+      links: [{ link_id: 61, source: 'closed_options', ticker: 'AAPL', quantity: '2', status: 'realized' },
+        { link_id: 62, source: 'closed_trades', ticker: 'AAPL', quantity: '100', status: 'realized' },
+        ...(linked ? [{ link_id: 63, source: 'closed_options', ticker: 'AAPL', quantity: '1', status: 'realized' }] : [])] }],
+  } }));
+  await page.route('**/api/accounting/entries', route => {
+    const payload = route.request().postDataJSON();
+    submissions.push(payload);
+    if (submissions.length === 1) return route.fulfill({ status: 503, json: { detail: 'Temporary review failure' } });
+    if (payload.kind === 'review') trade.review = { ...payload, review_id: 51, review_note: payload.note, review_recorded_at: '2026-10-06T12:00:00Z' };
+    if (payload.kind === 'link') linked = true;
+    if (payload.kind === 'reverse') linked = false;
+    return route.fulfill({ json: { id: 63 } });
+  });
+  await page.goto('/#journal');
+  await expect(page.getByRole('cell', { name: 'Captured: 75.0%' })).toBeAttached();
+  await page.getByRole('button', { name: 'Review AAPL trade 12' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Review AAPL closed trade' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('combobox', { name: 'Exit reason' }).selectOption('profit_target');
+  await dialog.getByLabel('Target capture (%)').fill('50');
+  await dialog.getByLabel('Review notes').fill('Synthetic review fixture.');
+  await dialog.getByRole('button', { name: 'Save review' }).click();
+  await expect(dialog.getByRole('alert')).toHaveText('Temporary review failure');
+  expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+  await dialog.screenshot({ path: testInfo.outputPath('journal-trade-review.png') });
+  await dialog.getByRole('button', { name: 'Save review' }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(submissions[1]).toEqual(submissions[0]);
+  await expect(page.getByRole('cell', { name: '+25.0 pp' })).toBeAttached();
+  await expect(page.getByRole('cell', { name: 'Profit target' })).toBeAttached();
+  await page.getByRole('button', { name: 'Review AAPL trade 12' }).click();
+  await expect(dialog.getByLabel('Target capture (%)')).toHaveValue('50');
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  const table = page.locator('.journal-workspace .table-scroll');
+  expect(await table.evaluate(element => element.scrollWidth >= element.clientWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('journal-capture-history.png'), fullPage: true });
+  await page.getByRole('button', { name: 'Wheel cycles', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Closed trade' }).selectOption('42');
+  await page.getByLabel('Cycle name').fill('AAPL wheel');
+  await page.getByLabel('Contracts to link').fill('1');
+  await page.getByRole('button', { name: 'Link to cycle' }).click();
+  await expect(page.getByText('-$563.00', { exact: true })).toBeVisible();
+  await expect(page.getByText('-$1,000.00', { exact: true })).toHaveClass('negative');
+  const cycles = page.locator('.wheel-cycles');
+  expect(await cycles.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+  await cycles.screenshot({ path: testInfo.outputPath('journal-wheel-cycle.png') });
+  page.once('dialog', prompt => prompt.accept());
+  await page.getByRole('button', { name: 'Remove allocation 63' }).click();
+  await expect(page.getByText('-$711.00', { exact: true })).toBeVisible();
+  expect(submissions.at(-1)).toMatchObject({ kind: 'reverse', event_id: 63 });
+});
+
 test('journal keeps planning in one on-demand dialog across review tabs', async ({ page }, testInfo) => {
   await page.goto('/#journal');
   await expect(page.getByRole('button', { name: 'Trade history', exact: true })).toBeVisible();
   await expect(page.getByRole('cell', { name: 'MSFT', exact: true })).toBeVisible();
   const planner = page.getByRole('dialog', { name: 'Plan a trade', exact: true });
   const launch = page.getByRole('button', { name: 'Plan a trade', exact: true });
-  for (const tab of ['Trade history', 'Manual journal', 'Options review']) {
+  for (const tab of ['Trade history', 'Manual journal', 'Options review', 'Wheel cycles']) {
     await page.getByRole('button', { name: tab, exact: true }).click();
     await expect(launch).toHaveCount(1);
     await expect(planner).not.toBeVisible();

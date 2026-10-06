@@ -536,6 +536,234 @@ class ManualAccountingTests(unittest.TestCase):
         self.entry("link", event_id=opening["id"], cycle="Wheel 2", quantity=2)
         self.assertEqual(self.accounting.report(self.user)["cycles"][0]["name"], "Wheel 2")
 
+    def closed_option(self, option_type="put", position="short"):
+        option = database.add_user_option(self.user, "AAPL", option_type, 100, "2027-01-15", 2, 2, position)
+        database.close_user_option(self.user, "AAPL", option_type, 100, "2027-01-15", 0.5, 2, position,
+                                   option_id=option["id"])
+        return next(row for row in database.get_closed_options(self.user) if row["source_lot_id"] == option["id"])
+
+    def test_journal_review_is_owned_audited_and_reversible(self):
+        trade = self.closed_option()
+        event_id = trade["ledger_event_id"]
+        first = self.entry("review", event_id=event_id, exit_reason="profit_target", target_capture_pct="50", note="Original target")
+        row = database.get_closed_options(self.user)[0]
+        self.assertEqual(row["review"]["target_capture_pct"], 50)
+        self.assertEqual(row["review"]["exit_reason"], "profit_target")
+        self.assertEqual(row["net_pnl"], 300)
+        second = self.entry("review", event_id=event_id, exit_reason="discretionary", target_capture_pct="75")
+        self.assertEqual(database.get_closed_options(self.user)[0]["review"]["review_id"], second["id"])
+        self.entry("reverse", event_id=second["id"])
+        self.assertEqual(database.get_closed_options(self.user)[0]["review"]["review_id"], first["id"])
+        from uuid import uuid4
+        with self.assertRaises(ValueError):
+            self.accounting.record_entry(1, dict(kind="review", event_id=event_id, exit_reason="stop",
+                occurred_at="2026-01-01T00:00:00Z", idempotency_key=uuid4().hex))
+        for changes in ({"target_capture_pct": 101}, {"target_capture_pct": -1}, {"exit_reason": "guessed"}, {"amount": 10}):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                self.entry("review", event_id=event_id, **changes)
+        database.delete_closed_option(self.user, trade["id"])
+        with self.assertRaises(ValueError):
+            self.entry("review", event_id=event_id, exit_reason="other")
+
+    def test_journal_review_rejects_capture_target_on_long_option(self):
+        trade = self.closed_option(position="long")
+        with self.assertRaisesRegex(ValueError, "short options"):
+            self.entry("review", event_id=trade["ledger_event_id"], target_capture_pct=50)
+        self.entry("review", event_id=trade["ledger_event_id"], exit_reason="stop")
+        self.assertEqual(database.get_closed_options(self.user)[0]["review"]["exit_reason"], "stop")
+
+    def test_journal_cycle_components_reconcile_allocations_and_fees(self):
+        put = self.closed_option()
+        call = self.closed_option(option_type="call")
+        stock = database.add_user_holding(self.user, "AAPL", 100, 100)
+        database.sell_user_holding_by_lot(self.user, stock["id"], 100, 90)
+        sold = database.get_closed_trades(self.user)[0]
+        for trade, quantity, fee in ((put, 1, 4), (call, 2, 6), (sold, 100, 5)):
+            self.entry("fee", event_id=trade["ledger_event_id"], amount=fee)
+            self.entry("link", event_id=trade["ledger_event_id"], cycle="AAPL cycle", quantity=quantity)
+        cycle = self.accounting.report(self.user)["cycles"][0]
+        self.assertEqual((cycle["put_pnl"], cycle["call_pnl"], cycle["stock_pnl"], cycle["fees"], cycle["realized_pnl"]),
+                         (150, 300, -1000, 13, -563))
+        self.assertEqual(cycle["unresolved_links"], 0)
+        self.assertTrue(all(link["status"] == "realized" for link in cycle["links"]))
+        with self.assertRaises(ValueError):
+            self.entry("link", event_id=call["ledger_event_id"], cycle="Duplicate", quantity=1)
+        database.delete_closed_trade(self.user, sold["id"])
+        cycle = self.accounting.report(self.user)["cycles"][0]
+        self.assertEqual(cycle["unresolved_links"], 1)
+        self.assertEqual(cycle["realized_pnl"], 442)
+
+    def test_journal_review_api_validation_and_idempotency(self):
+        import main
+        from fastapi.testclient import TestClient
+        from uuid import uuid4
+        client = TestClient(main.app)
+        trade = self.closed_option()
+        payload = dict(kind="review", event_id=trade["ledger_event_id"], target_capture_pct=50,
+                       exit_reason="roll", occurred_at="2026-01-01T00:00:00Z", idempotency_key=uuid4().hex)
+        with patch.dict(main.app.dependency_overrides, {main.get_current_user: lambda: {"user_id": self.user}}):
+            first = client.post("/api/accounting/entries", json=payload)
+            self.assertEqual(first.status_code, 200)
+            self.assertEqual(client.post("/api/accounting/entries", json=payload).json(), first.json())
+            self.assertEqual(client.post("/api/accounting/entries", json=payload | {"target_capture_pct": 101}).status_code, 422)
+            self.assertEqual(client.get("/api/portfolio/options/closed").json()["trades"][0]["review"]["exit_reason"], "roll")
+
+    def test_journal_fields_preserve_older_ledger_retry_keys(self):
+        import json
+        from uuid import uuid4
+        from portfolio_models import AccountingEntryRequest
+        payload = AccountingEntryRequest(kind="fee", amount="2.50", occurred_at="2026-01-01T00:00:00Z",
+                                         idempotency_key=uuid4().hex).model_dump(mode="json")
+        previous = {key: value for key, value in payload.items() if key not in {"exit_reason", "target_capture_pct"}}
+        database._run(f"""INSERT INTO accounting_events(user_id, source, source_id, operation, after_json, idempotency_key)
+            VALUES ({database.PH}, 'manual', 0, 'FEE', {database.PH}, {database.PH})""",
+                      (self.user, json.dumps(previous), payload["idempotency_key"]))
+        first = self.accounting.record_entry(self.user, payload)
+        self.assertEqual(self.accounting.record_entry(self.user, payload), first)
+        self.assertEqual(self.accounting.report(self.user)["fees"], 2.5)
+        with self.assertRaises(ValueError):
+            self.accounting.record_entry(self.user, payload | {"amount": "3.00"})
+
+    def test_transfer_export_is_owned_signed_and_excludes_credentials(self):
+        import account_transfer
+        import json
+        trade = self.closed_option()
+        self.entry("review", event_id=trade["ledger_event_id"], exit_reason="roll")
+        package = account_transfer.export_account(self.user)
+        payload = json.loads(package["payload"])
+        self.assertEqual(payload["counts"]["closed_options"], 1)
+        self.assertEqual(payload["counts"]["options"], 0)
+        self.assertNotIn("password", str(package))
+        self.assertNotIn("idempotency_key", str(package))
+        self.assertTrue(account_transfer.verify_package(package, self.user + 1)["events"])
+        with self.assertRaisesRegex(ValueError, "different account"):
+            account_transfer.verify_package(package, self.user)
+        payload["source_user_id"] = 999999
+        package["payload"] = json.dumps(payload)
+        with self.assertRaisesRegex(ValueError, "signature"):
+            account_transfer.verify_package(package, 1)
+
+    def test_transfer_preserves_lots_fees_reviews_journal_and_retries(self):
+        import account_transfer
+        from uuid import uuid4
+        destination = database.create_user(uuid4().hex, "unused", "Destination")["id"]
+        untouched = database.add_user_holding(destination, "MSFT", 3, 20)
+        option = database.add_user_option(self.user, "AAPL", "put", 100, "2027-01-15", 2, 2, "short")
+        opening = next(row for row in self.accounting.list_events(self.user) if row["source"] == "options")
+        self.entry("fee", event_id=opening["id"], amount=4)
+        database.close_user_option(self.user, "AAPL", "put", 100, "2027-01-15", .5, 1, "short", option_id=option["id"])
+        closed = database.get_closed_options(self.user)[0]
+        self.entry("review", event_id=closed["ledger_event_id"], target_capture_pct=50, exit_reason="profit_target")
+        self.entry("link", event_id=closed["ledger_event_id"], cycle="My wheel", quantity=1)
+        fee = self.entry("fee", amount=30)
+        self.entry("reverse", event_id=fee["id"])
+        self.entry("valuation", amount=1000)
+        self.entry("valuation", amount=1100)
+        self.assertEqual(self.accounting.report(self.user)["twr"]["pct"], 10)
+        database.add_journal(self.user, {"ticker": "AAPL", "side": "long", "shares": 1, "entry_date": "2025-09-01",
+            "entry_price": 100, "exit_date": "2025-09-10", "exit_price": 110, "notes": "Original journal"})
+        package = account_transfer.export_account(self.user)
+        before = len(self.accounting.list_events(destination))
+        preview = account_transfer.preview_import(destination, package)
+        self.assertEqual(preview["counts"]["journal"], 1)
+        self.assertEqual(len(self.accounting.list_events(destination)), before)
+        result = account_transfer.import_account(destination, package)
+        self.assertFalse(result["already_imported"])
+        imported = database.get_closed_options(destination)[0]
+        self.assertNotEqual(imported["ledger_event_id"], closed["ledger_event_id"])
+        self.assertEqual(imported["net_pnl"], 148)
+        self.assertEqual(imported["review"]["target_capture_pct"], 50)
+        self.assertEqual(database.list_journal(destination)[0]["notes"], "Original journal")
+        report = self.accounting.report(destination)
+        self.assertEqual(report["fees"], 4)
+        self.assertEqual(report["cycles"][0]["realized_pnl"], 148)
+        self.assertIsNone(report["twr"]["pct"])
+        self.assertIn("not consolidated", report["twr"]["reason"])
+        self.assertEqual(database._run(f"SELECT shares FROM holdings WHERE id={database.PH}", (untouched["id"],), fetch="one")["shares"], 3)
+        event_count = len(self.accounting.list_events(destination))
+        self.assertTrue(account_transfer.import_account(destination, package)["already_imported"])
+        self.assertEqual(len(self.accounting.list_events(destination)), event_count)
+        self.assertEqual(account_transfer.export_account(self.user)["payload"], package["payload"])
+        self.entry("fee", amount=1)
+        with self.assertRaisesRegex(ValueError, "already imported"):
+            account_transfer.import_account(destination, account_transfer.export_account(self.user))
+
+    def test_transfer_rolls_back_and_api_requires_confirmation_and_auth(self):
+        import account_transfer
+        import main
+        from uuid import uuid4
+        from fastapi.testclient import TestClient
+        destination = database.create_user(uuid4().hex, "unused", "Destination")["id"]
+        self.closed_option()
+        package = account_transfer.export_account(self.user)
+        insert = account_transfer._insert
+        def fail_marker(cursor, table, values):
+            if values.get("source") == "account_transfer":
+                raise ValueError("Injected failure")
+            return insert(cursor, table, values)
+        with patch.object(account_transfer, "_insert", side_effect=fail_marker), self.assertRaisesRegex(ValueError, "Injected"):
+            account_transfer.import_account(destination, package)
+        self.assertEqual(database.get_closed_options(destination), [])
+        self.assertEqual(self.accounting.list_events(destination), [])
+        client = TestClient(main.app)
+        self.assertEqual(client.get("/api/account-transfer/export").status_code, 401)
+        with patch.dict(main.app.dependency_overrides, {main.get_current_user: lambda: {"user_id": destination}}):
+            self.assertEqual(client.post("/api/account-transfer/import", json={"package": package}).status_code, 400)
+            self.assertEqual(client.post("/api/account-transfer/preview", json=package).status_code, 200)
+            response = client.post("/api/account-transfer/import", json={"package": package, "confirm": True})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.headers["cache-control"], "no-store")
+
+    def test_transfer_historical_edits_stocks_watchlist_and_cycle_name_conflicts(self):
+        import account_transfer
+        from uuid import uuid4
+        destination = database.create_user(uuid4().hex, "unused", "Destination")["id"]
+        holding = database.add_user_holding(self.user, "AAPL", 5, 100)
+        database.sell_user_holding_by_lot(self.user, holding["id"], 2, 110)
+        historic = dict(ticker="WDC", option_type="put", position="short", strike="65", expiry="2025-09-19",
+            contracts=1, open_premium="1.20", close_premium="0.35", opened_at="2025-09-01", closed_at="2025-09-10",
+            fees="1.30", notes="Original", idempotency_key=uuid4().hex)
+        old = database.record_closed_option(self.user, historic)
+        database.record_closed_option(self.user, historic | {"close_premium": "0.25", "fees": "2.50", "idempotency_key": uuid4().hex}, trade_id=old["id"])
+        closed = database.get_closed_options(self.user)[0]
+        self.entry("link", event_id=closed["ledger_event_id"], cycle="Shared name", quantity=1)
+        target = database.add_user_holding(destination, "MSFT", 1, 10)
+        event = next(row for row in self.accounting.list_events(destination) if row["source"] == "holdings")
+        self.accounting.record_entry(destination, dict(kind="link", event_id=event["id"], cycle="Shared name", quantity=1,
+            occurred_at="2026-01-01T00:00:00Z", idempotency_key=uuid4().hex))
+        for owner in (self.user, destination):
+            database._run(f"INSERT INTO watchlist (user_id, ticker) VALUES ({database.PH}, 'AAPL')", (owner,))
+        account_transfer.import_account(destination, account_transfer.export_account(self.user))
+        imported = database.get_closed_options(destination)[0]
+        self.assertTrue(imported["is_manual"])
+        self.assertEqual(imported["net_pnl"], 92.5)
+        self.assertEqual(database.get_closed_trades(destination)[0]["pnl"], 20)
+        self.assertEqual(len(database._run(f"SELECT * FROM watchlist WHERE user_id={database.PH}", (destination,), fetch="all")), 1)
+        self.assertEqual(len({cycle["name"] for cycle in self.accounting.report(destination)["cycles"]}), 2)
+        self.assertEqual(len(database.get_user_holdings(destination)), 2)
+        self.assertNotEqual(imported["id"], old["id"])
+        self.assertTrue(database.delete_closed_option(destination, imported["id"]))
+        self.assertEqual(self.accounting.report(destination)["fees"], 0)
+        self.assertEqual(database.get_closed_options(self.user)[0]["net_pnl"], 92.5)
+
+    def test_journal_cycle_open_lot_becomes_unresolved_after_close(self):
+        lot = database.add_user_option(self.user, "AAPL", "put", 100, "2027-01-15", 2, 2, "short")
+        event = next(row for row in self.accounting.list_events(self.user)
+                     if row["source"] == "options" and row["source_id"] == lot["id"] and row["operation"] == "INSERT")
+        allocation = self.entry("link", event_id=event["id"], cycle="Open wheel", quantity=2)
+        cycle = self.accounting.report(self.user)["cycles"][0]
+        self.assertEqual((cycle["open_links"], cycle["unresolved_links"], cycle["realized_pnl"]), (1, 0, 0))
+        database.close_user_option(self.user, "AAPL", "put", 100, "2027-01-15", 0.5, 2, "short", option_id=lot["id"])
+        cycle = self.accounting.report(self.user)["cycles"][0]
+        self.assertEqual((cycle["open_links"], cycle["unresolved_links"], cycle["realized_pnl"]), (0, 1, 0))
+        with self.assertRaises(ValueError):
+            self.entry("link", event_id=event["id"], cycle="Open wheel", quantity=1)
+        self.entry("reverse", event_id=allocation["id"])
+        closed = database.get_closed_options(self.user)[0]
+        self.entry("link", event_id=closed["ledger_event_id"], cycle="Open wheel", quantity=2)
+        cycle = self.accounting.report(self.user)["cycles"][0]
+        self.assertEqual((cycle["open_links"], cycle["unresolved_links"], cycle["realized_pnl"]), (0, 0, 300))
+
     def test_time_weighted_return_uses_pre_flow_nav(self):
         entries = [{"id": 1, "kind": "valuation", "amount": 100, "occurred_at": "2026-01-01T00:00:00Z"},
                    {"id": 2, "kind": "deposit", "amount": 50, "nav_before": 110, "occurred_at": "2026-01-02T00:00:00Z"},

@@ -4,8 +4,11 @@ import { useAuth } from '../AuthContext';
 import PreTradeChecklist from './PreTradeChecklist';
 import PositionCalculator from './PositionCalculator';
 import { Review } from './OptionsDesk';
+import WheelCycles from './WheelCycles';
+import AccountTransfer from './AccountTransfer';
 import {
   fetchJournal, addJournalEntry, updateJournalEntry, deleteJournalEntry, fetchJournalCoach, fetchClosedTrades, fetchClosedOptions, logClosedOption, updateClosedOption, deleteClosedOption,
+  recordAccountingEntry,
 } from '../api/stockApi';
 
 const SETUP_TAGS = ['Breakout', 'Pullback', 'Gap and go', 'Opening range', 'Reversal', 'Earnings', 'Trend follow', 'Squeeze', 'Long-term buy'];
@@ -15,6 +18,49 @@ const EMPTY = { ticker: '', side: 'long', shares: '', entry_date: today(), entry
 function money(v) {
   if (v == null) return '—';
   return `${v < 0 ? '-' : ''}$${Math.abs(v).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+}
+
+const finiteNumber = value => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value));
+const percent = value => value == null ? 'Unavailable' : `${value.toFixed(1)}%`;
+const pnlClass = value => value > 0 ? 'positive' : value < 0 ? 'negative' : '';
+const EXIT_REASONS = { profit_target: 'Profit target', stop: 'Stop / risk limit', expiry: 'Expiry', assignment: 'Assignment',
+  roll: 'Roll', discretionary: 'Discretionary exit', other: 'Other' };
+
+function calendarDays(start, end) {
+  const parse = value => {
+    const text = String(value ?? '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
+    const timestamp = Date.parse(`${text}T00:00:00Z`);
+    return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === text ? timestamp : null;
+  };
+  const first = parse(start), last = parse(end);
+  return first == null || last == null || last < first ? null : (last - first) / 86400000;
+}
+
+export function recordedTradeMetrics(trade) {
+  const option = ['short', 'long'].includes(trade.position) && ['put', 'call'].includes(trade.option_type);
+  const validPremiums = option && finiteNumber(trade.open_premium) && Number(trade.open_premium) > 0
+    && finiteNumber(trade.close_premium) && Number(trade.close_premium) >= 0;
+  const capture = validPremiums ? (Number(trade.close_premium) - Number(trade.open_premium))
+    / Number(trade.open_premium) * 100 * (trade.position === 'short' ? -1 : 1) : null;
+  const target = option && trade.position === 'short' && finiteNumber(trade.review?.target_capture_pct)
+    ? Number(trade.review.target_capture_pct) : null;
+  return { option, capture, label: trade.position === 'short' ? 'Captured' : 'Return',
+    target, targetGap: target == null || capture == null ? null : capture - target,
+    daysHeld: calendarDays(trade.opened_at || trade.acquired_at, trade.closed_at),
+    dteAtClose: option ? calendarDays(trade.closed_at, trade.expiry) : null };
+}
+
+export function recordedOptionStats(rows) {
+  const values = rows.filter(row => recordedTradeMetrics(row).option && finiteNumber(row.net_pnl)).map(row => Number(row.net_pnl));
+  const wins = values.filter(value => value > 0);
+  const losses = values.filter(value => value < 0);
+  const gain = wins.reduce((sum, value) => sum + value, 0);
+  const loss = -losses.reduce((sum, value) => sum + value, 0);
+  return { count: values.length, net: values.reduce((sum, value) => sum + value, 0),
+    expectancy: values.length ? (gain - loss) / values.length : null,
+    winRate: values.length ? wins.length / values.length * 100 : null,
+    profitFactor: loss ? (gain / loss).toFixed(2) : values.length ? 'No losses' : 'Unavailable' };
 }
 
 function Breakdown({ title, rows }) {
@@ -57,9 +103,60 @@ function PlanTrade() {
   );
 }
 
+function TradeReview({ trade, onClose, onSaved }) {
+  const dialog = useRef(null);
+  const pending = useRef(false);
+  const attempt = useRef(null);
+  const [reason, setReason] = useState(trade.review?.exit_reason || '');
+  const [target, setTarget] = useState(trade.review?.target_capture_pct ?? '');
+  const [note, setNote] = useState(trade.review?.review_note || '');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const metrics = recordedTradeMetrics(trade);
+  useEffect(() => { dialog.current.showModal(); }, []);
+  const valid = target === '' || (Number.isFinite(Number(target)) && Number(target) >= 0 && Number(target) <= 100);
+  const submit = async event => {
+    event.preventDefault();
+    if (pending.current || !valid) return;
+    const body = { kind: 'review', event_id: trade.ledger_event_id, exit_reason: reason || null,
+      target_capture_pct: metrics.option && trade.position === 'short' && target !== '' ? Number(target) : null, note };
+    const signature = JSON.stringify(body);
+    if (attempt.current?.signature !== signature) attempt.current = { signature,
+      payload: { ...body, occurred_at: new Date().toISOString(), idempotency_key: crypto.randomUUID() } };
+    pending.current = true; setBusy(true); setError(null);
+    try { await recordAccountingEntry(attempt.current.payload); onSaved(); }
+    catch (failure) { setError(failure.message); }
+    finally { pending.current = false; setBusy(false); }
+  };
+  return <dialog ref={dialog} className="journal-plan-dialog" aria-labelledby="trade-review-title"
+    onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}>
+    <div className="journal-plan-header"><h3 id="trade-review-title">Review {trade.ticker} closed trade</h3>
+      <button className="btn-secondary btn-sm" disabled={busy} onClick={onClose}>Close</button></div>
+    <form onSubmit={submit} className="closed-option-form" aria-label="Trade review">
+      <fieldset disabled={busy}>
+        <label>Exit reason<select className="tool-input" value={reason} onChange={event => setReason(event.target.value)}>
+          <option value="">Not recorded</option>{Object.entries(EXIT_REASONS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+        </select></label>
+        {metrics.option && trade.position === 'short' && <label>Target capture (%)<input className="tool-input" type="number"
+          min="0" max="100" step="0.01" value={target} onChange={event => setTarget(event.target.value)} /></label>}
+        <div className="closed-option-wide closed-option-notes-field"><label htmlFor="trade-review-note">Review notes</label>
+          <textarea id="trade-review-note" className="tool-input" maxLength={500} rows={3} value={note} onChange={event => setNote(event.target.value)} /></div>
+        {metrics.option && <p className="closed-option-wide">Actual {metrics.label.toLowerCase()}: {percent(metrics.capture)} before fees.</p>}
+        <p className="closed-option-wide market-sub">Retrospective review. Targets entered here are not verified pre-trade plans.
+          Exit reasons are user-reported; they do not execute assignment, expiry or a roll. Saving preserves prior reviews and does not change fills or P&L.</p>
+        {error && <p className="closed-option-wide error-text" role="alert">{error}</p>}
+        <button type="submit" className="btn-primary btn-sm" disabled={busy || !valid}>{busy ? 'Saving...' : 'Save review'}</button>
+      </fieldset>
+    </form>
+  </dialog>;
+}
+
 function RecordedHistory({ optionsOnly = false, version = 0, onEdit, onDelete, busy = false }) {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState(null);
+  const [reviewTrade, setReviewTrade] = useState(null);
+  const [revision, setRevision] = useState(0);
+  const [saved, setSaved] = useState(null);
   useEffect(() => {
     let active = true;
     setError(null);
@@ -70,25 +167,47 @@ function RecordedHistory({ optionsOnly = false, version = 0, onEdit, onDelete, b
         .sort((first, second) => String(second.closed_at).localeCompare(String(first.closed_at))));
     }).catch(reason => { if (active) setError(reason.message); });
     return () => { active = false; };
-  }, [optionsOnly, version]);
+  }, [optionsOnly, version, revision]);
   if (error) return <p className="error-text">{error}</p>;
   if (!rows) return <p className="loading-text">Loading recorded trades...</p>;
   if (!rows.length) return <p className="empty-state">{optionsOnly ? 'No closed options recorded.' : 'No closed stock or option trades recorded.'}</p>;
   const grossTotal = rows.reduce((total, row) => total + row.pnl, 0);
+  const stats = recordedOptionStats(rows);
   return <section className="portfolio-section">
     <h3>{optionsOnly ? 'Recorded closed options' : 'Recorded stock and option trades'}</h3>
+    {saved && <p className="positive" role="status">{saved}</p>}
+    {reviewTrade && <TradeReview key={reviewTrade.key} trade={reviewTrade} onClose={() => setReviewTrade(null)}
+      onSaved={() => { setSaved(`${reviewTrade.ticker} review saved.`); setReviewTrade(null); setRevision(value => value + 1); }} />}
     <p>Gross realized P&L: <span className={grossTotal > 0 ? 'positive' : grossTotal < 0 ? 'negative' : ''}>{money(grossTotal)}</span></p>
+    <div className="doctor-stats" aria-label="Recorded option performance">
+      <div><span>Options with net results</span><strong>{stats.count}</strong></div>
+      <div><span>Recorded net option P&L</span><strong className={pnlClass(stats.net)}>{stats.count ? money(stats.net) : 'Unavailable'}</strong></div>
+      <div><span>Net expectancy / close</span><strong className={pnlClass(stats.expectancy)}>{stats.expectancy == null ? 'Unavailable' : money(stats.expectancy)}</strong></div>
+      <div><span>Net win rate</span><strong>{percent(stats.winRate)}</strong></div>
+      <div><span>Net profit factor</span><strong>{stats.profitFactor}</strong></div>
+    </div>
+    <p className="market-sub">Capture and return percentages are before fees and measure the option only, not return on collateral or a full wheel cycle.
+      Net statistics include recorded fees only; each closing record counts once, including partial closes. Past averages are not forecasts.</p>
     <div className="table-scroll"><table className="market-table">
-      <thead><tr>{onEdit && <th>Actions</th>}<th>Opened</th><th>Closed</th><th>Ticker</th><th>Position</th><th>Quantity</th><th>Open / close premium</th><th>Gross P&L</th><th>Recorded option fees</th><th>Net option P&L</th><th>Notes</th></tr></thead>
-      <tbody>{rows.map(row => <tr key={row.key}>
-        {onEdit && <td className="closed-option-actions">{row.is_manual ? <>
+      <thead><tr><th>Actions</th><th>Opened</th><th>Closed</th><th>Ticker</th><th>Position</th><th>Quantity</th><th>Open / close premium</th><th>Captured / return %</th><th>Target capture</th><th>Actual vs target</th><th>Exit reason</th><th>Days held</th><th>DTE at close</th><th>Gross P&L</th><th>Recorded fees</th><th>Net P&L</th><th>Notes</th></tr></thead>
+      <tbody>{rows.map(row => { const metrics = recordedTradeMetrics(row); return <tr key={row.key}>
+        <td className="closed-option-actions">
+          <button className="btn-icon" type="button" title="Review trade" aria-label={`Review ${row.ticker} trade ${row.id}`}
+            disabled={busy || !row.ledger_event_id} onClick={() => { setSaved(null); setReviewTrade(row); }}>✎</button>
+          {onEdit && row.is_manual && <>
           <button className="btn-icon" type="button" title="Edit manual option" aria-label={`Edit ${row.ticker} option`} disabled={busy} onClick={() => onEdit(row)}>✎</button>
           <button className="btn-icon" type="button" title="Delete manual option" aria-label={`Delete ${row.ticker} option`} disabled={busy} onClick={() => onDelete(row)}>🗑</button>
-        </> : '—'}</td>}
+        </>}</td>
         <td>{row.opened_at || row.acquired_at || '—'}</td><td>{String(row.closed_at).slice(0, 10)}</td><td>{row.ticker}</td><td>{row.kind}</td><td>{row.quantity}</td>
         <td>{row.open_premium == null ? '—' : `${money(row.open_premium)} / ${money(row.close_premium)}`}</td>
-        <td className={row.pnl > 0 ? 'positive' : row.pnl < 0 ? 'negative' : ''}>{money(row.pnl)}</td><td>{money(row.fees)}</td><td>{money(row.net_pnl)}</td>
-        <td>{row.notes && <details className="closed-option-notes"><summary>Notes</summary><p>{row.notes}</p></details>}</td></tr>)}</tbody>
+        <td className={pnlClass(metrics.capture)}>{metrics.option ? `${metrics.label}: ${percent(metrics.capture)}` : 'Not applicable'}</td>
+        <td>{metrics.target == null ? 'Unavailable' : <>{percent(metrics.target)}<small className="journal-review-meta">Retrospective</small></>}</td>
+        <td>{metrics.targetGap == null ? 'Unavailable' : `${metrics.targetGap > 0 ? '+' : ''}${metrics.targetGap.toFixed(1)} pp`}</td>
+        <td>{EXIT_REASONS[row.review?.exit_reason] || 'Not recorded'}</td>
+        <td>{metrics.daysHeld ?? 'Unavailable'}</td><td>{metrics.option ? metrics.dteAtClose ?? 'Unavailable' : 'Not applicable'}</td>
+        <td className={row.pnl > 0 ? 'positive' : row.pnl < 0 ? 'negative' : ''}>{money(row.pnl)}</td><td>{money(row.fees)}</td><td className={pnlClass(row.net_pnl)}>{money(row.net_pnl)}</td>
+        <td>{(row.notes || row.review) && <details className="closed-option-notes"><summary>Notes</summary>{row.notes && <p>{row.notes}</p>}
+          {row.review && <><p>{row.review.review_note || 'No review notes.'}</p><small>Review recorded {row.review.review_recorded_at}</small></>}</details>}</td></tr>; })}</tbody>
     </table></div>
   </section>;
 }
@@ -208,9 +327,11 @@ function ClosedOptionJournal() {
 
 export default function Journal(props) {
   const { user } = useAuth();
+  const [revision, setRevision] = useState(0);
   return <div className="journal-workspace" key={user?.id ?? user?.username ?? 'guest'}>
     <header className="journal-plan-header"><h2>Journal</h2><PlanTrade /></header>
-    <JournalViews {...props} />
+    <AccountTransfer onImported={() => setRevision(value => value + 1)} />
+    <JournalViews key={revision} {...props} />
   </div>;
 }
 
@@ -245,11 +366,11 @@ function JournalViews({ onSignIn, onSelect }) {
 
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
   const navigation = <nav className="sub-tabs" aria-label="Journal views">
-    {[['history', 'Trade history'], ['journal', 'Manual journal'], ['options', 'Options review']].map(([id, label]) =>
+    {[['history', 'Trade history'], ['journal', 'Manual journal'], ['options', 'Options review'], ['cycles', 'Wheel cycles']].map(([id, label]) =>
       <button key={id} className={`sub-tab ${view === id ? 'active' : ''}`} onClick={() => setView(id)}>{label}</button>)}
   </nav>;
   if (view !== 'journal') return <div className="journal portfolio-workspace">{navigation}
-    {view === 'history' ? <RecordedHistory /> : <Review version={user.id} />}
+    {view === 'history' ? <RecordedHistory /> : view === 'cycles' ? <WheelCycles /> : <Review version={user.id} />}
   </div>;
 
   const save = async () => {

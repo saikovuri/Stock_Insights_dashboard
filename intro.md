@@ -670,7 +670,7 @@ Groups stock and option results by ticker: realized option P&L plus marked open 
 
 Capital shown is current stock purchase cost plus conservatively allocated gross option collateral, not historical capital invested or broker margin. Protective put wings must match ticker, type and expiry and have a lower strike. Each protective contract and each 100-share call-cover block can be allocated only once. Unmatched short puts reserve full strike cash; uncovered calls remain unbounded-risk flags. Credits are not automatically deducted from these gross reserves.
 
-This view is **not a reconstructed Wheel-cycle ledger**. It deliberately omits adjusted tax basis, return percentages and annualized cycle performance where cash flows and strategy links are insufficient. Explicit cycle allocations belong in Account ledger.
+This view is **not a reconstructed Wheel-cycle ledger**. It deliberately omits adjusted tax basis, return percentages and annualized cycle performance where cash flows and strategy links are insufficient. Explicit cycle allocations are available in Account ledger and Journal's **Wheel cycles** tab.
 
 ### Account Ledger
 
@@ -680,6 +680,7 @@ This view is **not a reconstructed Wheel-cycle ledger**. It deliberately omits a
 | Occurred-at | Real timestamp, converted to UTC; future/invalid timestamps are rejected by validation. This differs from when the server recorded the event. |
 | Fee reference | Optionally link a fee to a supported owned ledger event. Fees are not invented for historical fills. |
 | Cycle allocation | Explicitly link shares/contracts from a source event to a named strategy/Wheel cycle. Ownership and remaining allocatable quantity are checked; the same quantity cannot be allocated repeatedly. |
+| Trade review | Journal saves exit reasons, retrospective short-option capture targets and review notes as nonfinancial, reversible manual events. Latest active review wins; prior revisions remain audited. |
 | Corrections | Reverse supported manual entries by appending a reversal. Do not edit or delete the immutable audit trail. |
 | US informational tax lots | Basis, proceeds, allocated recorded fees and gain for recorded closed lots. FIFO ticker sales and specific-lot sales retain provenance where recorded; legacy unknown acquisitions remain flagged. |
 | Time-weighted return | Requires opening/ending total-account valuations and accurate NAV immediately before external flows. Missing necessary boundaries keep TWR unavailable. |
@@ -689,6 +690,32 @@ This view is **not a reconstructed Wheel-cycle ledger**. It deliberately omits a
 Only recorded fees/dividends/flows are included. Partial closes allocate opening fees proportionally, with cent-rounding remainder retained for the final quantity. Manual requests use idempotency keys so retrying a failed response need not duplicate an entry.
 
 TWR links subperiod returns around external flows; it is not cash-flow-adjusted P&L divided by starting cash. Enter total NAV including cash, stock and long-option assets and short-option liabilities. Wash-sale adjustments, option-specific tax rules, assignment/exercise tax treatment, corporate actions and cross-account reconciliation are not a complete automated tax engine. The report is US informational accounting only.
+
+### Export and Import Between Accounts
+
+Signed-in users have **Export to another account** and **Import from another account** controls in both Portfolio and Journal. These copy data between StockPilot accounts on the same installation; they do not move broker assets, place orders, or delete the source account.
+
+1. In the source account, choose **Export to another account** to download a signed JSON transfer file.
+2. Sign out and sign in to the destination account.
+3. Choose **Import from another account** and select the file.
+4. Check the destination account name/ID and preview of incoming versus existing records. No records are changed by previewing.
+5. Confirm that you have checked for overlapping trades, then choose **Confirm import**. Portfolio/Journal data refreshes after success.
+
+The file includes current stock and option lots, closed stock/options history, recorded transaction history, manual stock Journal entries, watchlist symbols, and the accounting history needed to preserve recorded fees, cash flows, valuations, reviews, reversals and wheel allocations. Trade dates, notes, quantities and lot relationships are retained. Imported historical manual options remain editable through their existing workflow. Financial record and event IDs are regenerated for the destination and references remapped; original source event IDs/timestamps are retained in an import-provenance event. Financial replay events carry their new import time; imported manual entries retain their original recorded time. Legacy unknown opening-lot references remain unknown, not invented.
+
+Import is an atomic **append**, not replacement: existing destination records and all source data remain unchanged. Any failure rolls back the new records and ledger writes together. Matching watchlist symbols are kept once. Cycle-name collisions receive an import suffix rather than silently merging cycles. Trades are **not** economically deduplicated across accounts: independently recorded copies of the same trade will both remain, so importing into an empty destination is preferable when moving a complete history.
+
+Repeating the same export into the same destination adds nothing, including after a lost response or simultaneous requests. Once a source has been imported into a destination, a changed export from that source is rejected instead of guessing at incremental updates or duplicating its history. This is a one-time copy workflow, not ongoing synchronization. Imports into the source account itself are rejected.
+
+When a destination already has financial ledger history, the merged report leaves TWR unavailable because the original accounts' NAV observations do not establish consolidated total-account NAV. This limitation persists through subsequent exports. An otherwise empty destination retains the source's valuation history and ordinary TWR rules. Recorded dollar results still include the copied trades and fees.
+
+Files are authenticated with a domain-separated HMAC derived from the installation's `JWT_SECRET`, versioned, and limited to 10 MB. The signed payload is opaque JSON text within the outer JSON document to preserve exact numeric serialization across browsers. Edited files, accounting-report exports and unsupported formats are rejected. Imports require authentication and explicit confirmation; endpoints use the authenticated destination ID, never a client-selected destination. Export and preview/import responses are marked `Cache-Control: no-store`.
+
+The file is **not encrypted** and contains private financial information. Keep it private; do not edit it. Exports contain no account passwords, authentication tokens or session data. Alerts, push subscriptions, account settings, local planning drafts and shared paper-idea logs are outside this transfer. Files require the same installation/signing secret; rotating `JWT_SECRET` invalidates earlier transfer signatures. No signing secret is included in the file.
+
+The existing **Export report** in Account ledger is a read-only accounting summary, not an importable transfer file. Existing stock CSV import is also separate and does not restore a complete account.
+
+Sources: [backend/account_transfer.py](backend/account_transfer.py), [backend/main.py](backend/main.py), [frontend/src/components/AccountTransfer.jsx](frontend/src/components/AccountTransfer.jsx).
 
 ### Premium Cash Flow
 
@@ -760,13 +787,38 @@ Source: [backend/fundamentals.py](backend/fundamentals.py).
 
 ## Journal and Trade Planning
 
-The Journal workspace has **Trade history**, **Manual journal**, and **Options review**. One **Plan a trade** action in the shared Journal header opens a dialog containing the Pre-Trade Checklist and Position Size Calculator. Planning tools are not repeated inline on each tab. Close or Escape dismisses the dialog; the draft remains while switching Journal tabs, but is not saved across leaving the workspace or changing accounts. Guests can use these tools but need sign-in for saved journal/review data.
+The Journal workspace has **Trade history**, **Manual journal**, **Options review**, and **Wheel cycles**. One **Plan a trade** action in the shared Journal header opens a dialog containing the Pre-Trade Checklist and Position Size Calculator. Planning tools are not repeated inline on each tab. Close or Escape dismisses the dialog; the draft remains while switching Journal tabs, but is not saved across leaving the workspace or changing accounts. Guests can use these tools but need sign-in for saved journal/review data.
 
 ### Trade History
 
-Combines recorded closed stock and option records, sorted by closing timestamp descending. It reports gross realized P&L, with recorded fees and net P&L shown separately for options. Historical option entries share these same records, including their actual dates and notes. It does not infer manual stock-journal entries or paper-track-record ideas to be actual trades, and it does not merge them into account results.
+Combines recorded closed stock and option records, sorted by closing timestamp descending. It reports gross realized P&L, with recorded fees and net P&L shown separately for both asset types. Historical option entries share these same records, including their actual dates and notes. It does not infer manual stock-journal entries or paper-track-record ideas to be actual trades, and it does not merge them into account results.
 
-Gross P&L values and the gross realized total are green for profit, red for loss, and neutral for zero. The same value coloring applies to the recorded closed-options table in Manual journal. These colors do not change calculations or deduct fees from gross P&L.
+Gross/net P&L values, capture/return percentages and the gross realized total are green for profit, red for loss, and neutral for zero. The same value coloring applies to the recorded closed-options table in Manual journal. These colors do not change calculations or deduct fees from gross P&L.
+
+| Recorded metric | Rule |
+| --- | --- |
+| Short-option premium captured | `(opening premium - closing premium) / opening premium * 100`, before fees. $2 opened and $0.50 closed is 75%; $3 closed is -50%. |
+| Long-option return | `(closing premium - opening premium) / opening premium * 100`, before fees. |
+| Days held | Calendar-date difference between recorded opening/acquisition and closing dates, ignoring time of day. Same-day closes are zero. |
+| DTE at close | Calendar-date difference from close to expiry. Not trading days; unavailable for stocks. |
+| Target capture | Optional 0-100% short-option target, explicitly labeled retrospective. |
+| Actual vs target | Actual captured percentage minus recorded target, in percentage points, not percentage change. |
+
+Missing/invalid premiums, nonpositive opening premium, invalid dates or reversed chronology leave the corresponding metric unavailable. Percentages measure only the option: not collateral return, buying-power return or whole-cycle profit. A zero closing premium produces 100% short-premium capture but does **not** establish expiry, assignment or profitability of resulting stock exposure.
+
+The recorded-option summary shows sample count, net P&L, net expectancy per close (mean net dollars), positive-net-result win rate, and profit factor (sum of positive net results / absolute sum of negative net results). Only options with a known net result are included; each close record counts once, including partial closes and breakevens. No losses displays **No losses**, not an infinite verified edge; an empty sample has unavailable expectancy, win rate and profit factor. These are historical statistics using recorded fees only, not forecasts or complete account returns.
+
+**Review trade** in the Actions column opens a nonfinancial review dialog for an owned closed stock or option record with a ledger reference. Choose profit target, stop/risk limit, expiry, assignment, roll, discretionary exit, other, or leave the reason unrecorded. Short options additionally accept an optional capture target. Review notes are limited to 500 characters. Targets and exit reasons are self-reported after the trade; they are not verified pre-trade plans and do not execute any trade workflow.
+
+Saving appends an audited review and records the server timestamp, without changing fills, fees or P&L. The latest active review is shown; revisions remain in Account ledger and can be reversed there. Clearing a field saves it as unrecorded. Unchanged retries reuse the same request key. Close/Escape discards the unsaved review draft; dismissal is disabled during save. Notes expose the latest review and its recorded-at timestamp.
+
+### Wheel Cycles
+
+Select an unallocated **closed trade**, enter a cycle name (existing names are suggested) and the shares/contracts to link. Whole contracts are required for options; fractional shares are supported. Only the remaining quantity can be allocated, with ownership and quantity rechecked on the server. Ticker matches never create automatic links. Removing an allocation requires confirmation and appends a reversal, preserving both the trade and audit trail.
+
+Each named cycle shows proportionally allocated put P&L, call P&L and stock P&L before fees, allocated recorded fees, and the net realized subtotal: `put P&L + call P&L + stock P&L - fees`. Option components are opening/closing premium P&L, not opening premium cash receipts alone. Stock losses remain visible even when option components are profitable. Long options can be explicitly linked too; names do not certify a valid wheel strategy.
+
+The subtotal excludes unlinked records, open-position marks, dividends, taxes and unrecorded costs. It is not complete cycle profitability, a tax basis adjustment, or a return on collateral. Existing open-lot allocations from Account ledger are displayed as **open**, without realized P&L. Links to deleted or overallocated/resized lots are **unresolved** and excluded. Links do not automatically transfer from an opening lot to its closing records: reverse an obsolete opening allocation and explicitly link the closes. Partial allocations prorate P&L and fees; displayed cycle components are rounded to cents.
 
 ### Manual Journal
 
@@ -776,7 +828,7 @@ Gross P&L is `(opening premium - closing premium) * contracts * 100` for shorts,
 
 The record, audit trail and fee entry save atomically, without creating an open position or a second manual stock-journal entry. Retrying an unchanged submission in the form reuses its request key. A new submission is not automatically matched against existing trades, so do not re-enter a position already recorded in Portfolio. The saved record appears in Manual journal, Trade history, Portfolio closed options and Options review. Fee corrections made through the account ledger update net results; gross trade P&L remains unchanged. Combined fees are recorded on the closing date, not separately allocated to opening/closing cash-flow dates. Broker import, multi-leg grouping and explicit assignment/exercise tax treatment are not provided by this form.
 
-The left-hand **Actions** column provides pencil/edit and trash/delete controls for manually recorded options. Edit pre-fills the form; **Save option changes** updates the same record, recalculates P&L and reverses/replaces its recorded fees atomically. Cancel leaves the saved record unchanged. Delete requires confirmation, removes the manual trade from results and reverses its active fees and cycle allocations while retaining immutable audit history. Editing cannot reduce contracts below an existing cycle allocation; reverse that allocation in the account ledger first. Trades closed from live Portfolio lots cannot be edited through this manual-entry workflow.
+The left-hand **Actions** column provides Review trade plus edit and delete controls for manually recorded options. Edit pre-fills the form; **Save option changes** updates the same record, recalculates P&L and reverses/replaces its recorded fees atomically. Cancel leaves the saved record unchanged. Delete requires confirmation, removes the manual trade from results and reverses its active fees and cycle allocations while retaining immutable audit history. Editing cannot reduce contracts below an existing cycle allocation; reverse that allocation in Account ledger or Wheel cycles first. Trades closed from live Portfolio lots cannot be edited through this manual-entry workflow, but support nonfinancial reviews.
 
 **Expiry**, **Opened on** and **Closed on** have visible calendar buttons that open the browser's native date picker, with dark/light theme support. Direct date entry remains available when the browser does not support programmatic picker opening.
 
@@ -802,7 +854,7 @@ Manual statistics do not automatically include broker fees, financing, tax adjus
 
 Analyzes recorded closed options, including historical entries, separately from manual stock-journal entries. Shows count, positive-net-P&L win rate, net P&L after recorded fees, average win/loss, profit factor and worst recorded outcome. Unrecorded costs are not inferred. Realized option results in Combined P&L and Premium income also include recorded fees; premium cash-flow totals still exclude fees. Breakdowns are long/short call/put, ticker, exit type, and DTE at opening: <=0, 1-7, 8-30, 31-60, over 60, or unknown.
 
-A zero close price is labeled "zero-price close (reason unrecorded)" rather than assumed to be expiry or assignment. Multi-leg records are not automatically reconstructed into fully linked strategy trades. Options AI coaching requires at least five closed option records and AI access. Its conclusions are separate from the manual-journal coach.
+A zero close price is labeled "zero-price close (reason unrecorded)" rather than assumed to be expiry or assignment. This existing exit-type breakdown is derived from fills and does not use the separately recorded Journal review reason. Multi-leg records are not automatically reconstructed into fully linked strategy trades. Options AI coaching requires at least five closed option records and AI access. Its conclusions are separate from the manual-journal coach.
 
 ### Pre-Trade Checklist
 
@@ -825,7 +877,7 @@ This is a **long-stock allocation calculator**, not a fixed-risk stop-distance s
 
 The stop estimates loss **after allocation**; moving it does not resize shares to a fixed risk percentage. A price gap can exceed the stop scenario. No position or order is created by calculating.
 
-Sources: [frontend/src/components/Journal.jsx](frontend/src/components/Journal.jsx), [backend/journal.py](backend/journal.py), [frontend/src/components/PreTradeChecklist.jsx](frontend/src/components/PreTradeChecklist.jsx), [frontend/src/components/PositionCalculator.jsx](frontend/src/components/PositionCalculator.jsx).
+Sources: [frontend/src/components/Journal.jsx](frontend/src/components/Journal.jsx), [frontend/src/components/WheelCycles.jsx](frontend/src/components/WheelCycles.jsx), [backend/journal.py](backend/journal.py), [backend/accounting.py](backend/accounting.py), [backend/portfolio_models.py](backend/portfolio_models.py), [frontend/src/components/PreTradeChecklist.jsx](frontend/src/components/PreTradeChecklist.jsx), [frontend/src/components/PositionCalculator.jsx](frontend/src/components/PositionCalculator.jsx).
 
 ## Chart and Panel Controls
 

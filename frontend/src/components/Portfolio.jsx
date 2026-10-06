@@ -15,6 +15,7 @@ import RollRepair from './RollRepair';
 import { Today, Earnings, WhatIf } from './OptionsDesk';
 import { ImportCsv } from './PortfolioInsights';
 import CorrelationHeatmap from './CorrelationHeatmap';
+import AccountTransfer from './AccountTransfer';
 
 const GUEST_HOLDINGS_KEY = 'guest_holdings';
 
@@ -33,6 +34,7 @@ export default function Portfolio() {
   const [tab, setTab] = useState('stocks');
   const [section, setSection] = useState('holdings');
   const [loadError, setLoadError] = useState(null);
+  const [transferRevision, setTransferRevision] = useState(0);
   const [view, setView] = useState('current');   // 'current' | 'sold'
   const [portfolio, setPortfolio] = useState(null);
   const [optionsSummary, setOptionsSummary] = useState(null);
@@ -337,7 +339,7 @@ export default function Portfolio() {
   const totalRealizedPnl = realizedStockPnl + realizedOptPnl;
   const holdings = portfolio?.holdings || [];
   const options = optionsSummary?.options || [];
-  const version = JSON.stringify([holdings, options, closedStocks, closedOpts]);
+  const version = JSON.stringify([holdings, options, closedStocks, closedOpts, transferRevision]);
   const repair = id => {
     const option = options.find(item => item.id === id);
     if (option) { setSection('holdings'); setTab('options'); setView('current'); setRepairOpt(option); }
@@ -349,6 +351,7 @@ export default function Portfolio() {
         {[['holdings', 'Holdings'], ['risk', 'Portfolio Risk'], ['performance', 'Income & Performance']].map(([id, label]) =>
           <button key={id} className={`sub-tab ${section === id ? 'active' : ''}`} onClick={() => setSection(id)}>{label}</button>)}
       </nav>
+      <AccountTransfer onImported={() => { loadStocks(); loadOptions(); loadClosed(); setTransferRevision(value => value + 1); }} />
       {loadError && <p className="error-text" role="alert">{loadError} <button className="link-btn" onClick={() => { setLoadError(null); loadStocks(); loadOptions(); loadClosed(); }}>Retry</button></p>}
       {portfolio?.incomplete && <p className="error-text">Some stock quotes are unavailable. Current value and P&L totals are incomplete.</p>}
       {!portfolio && !loadError && <p className="loading-text">Loading holdings...</p>}

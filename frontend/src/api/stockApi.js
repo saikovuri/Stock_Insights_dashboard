@@ -228,6 +228,36 @@ export async function fetchClosedTrades() {
   return res.json();
 }
 
+export async function fetchAccountingReport() {
+  const res = await authFetch(`${BASE}/accounting/report`);
+  if (!res.ok) throw new Error(await readError(res, 'Failed to load accounting report'));
+  return res.json();
+}
+
+export async function exportAccountData() {
+  const res = await authFetch(`${BASE}/account-transfer/export`);
+  if (!res.ok) throw new Error(await readError(res, 'Failed to export account'));
+  return res.json();
+}
+
+export async function previewAccountImport(bundle) {
+  const res = await authFetch(`${BASE}/account-transfer/preview`, { method: 'POST', body: JSON.stringify(bundle) });
+  if (!res.ok) throw new Error(await readError(res, 'Failed to preview import'));
+  return res.json();
+}
+
+export async function importAccountData(bundle) {
+  const res = await authFetch(`${BASE}/account-transfer/import`, { method: 'POST', body: JSON.stringify({ package: bundle, confirm: true }) });
+  if (!res.ok) throw new Error(await readError(res, 'Failed to import account'));
+  return res.json();
+}
+
+export async function recordAccountingEntry(payload) {
+  const res = await authFetch(`${BASE}/accounting/entries`, { method: 'POST', body: JSON.stringify(payload) });
+  if (!res.ok) throw new Error(await readError(res, 'Failed to save accounting entry'));
+  return res.json();
+}
+
 export async function fetchClosedOptions() {
   const res = await authFetch(`${BASE}/portfolio/options/closed`, { headers: authHeaders() });
   if (!res.ok) throw new Error('Failed to fetch closed options');

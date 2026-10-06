@@ -137,7 +137,8 @@ def record_entry(user_id, request):
                        (user_id, request.idempotency_key))
         existing = database._fetchone(cursor)
         if existing:
-            if json.loads(existing["after_json"]) != payload:
+            previous = {"exit_reason": None, "target_capture_pct": None, **json.loads(existing["after_json"])}
+            if previous != payload:
                 raise ValueError("Request key already used for a different entry")
             return {"id": existing["id"]}
         target = None
@@ -146,7 +147,7 @@ def record_entry(user_id, request):
             target = database._fetchone(cursor)
             if not target:
                 raise ValueError("Referenced ledger event not found")
-        if request.kind in {"link", "reverse"} and target is None:
+        if request.kind in {"link", "reverse", "review"} and target is None:
             raise ValueError("Select a ledger event")
         if request.kind == "reverse":
             if target["source"] != "manual" or target["operation"] == "REVERSE":
@@ -154,12 +155,26 @@ def record_entry(user_id, request):
             cursor.execute(f"SELECT id FROM accounting_events WHERE user_id={database.PH} AND source='manual' AND operation='REVERSE' AND source_id={database.PH}", (user_id, request.event_id))
             if database._fetchone(cursor):
                 raise ValueError("Entry already reversed")
+        elif request.kind == "review":
+            if target["source"] not in {"closed_trades", "closed_options"} or target["operation"] not in {"INSERT", "SNAPSHOT"}:
+                raise ValueError("Review a recorded closed trade")
+            cursor.execute(f"SELECT * FROM {target['source']} WHERE user_id={database.PH} AND id={database.PH}",
+                           (user_id, target["source_id"]))
+            trade = database._fetchone(cursor)
+            if not trade:
+                raise ValueError("Closed trade no longer exists")
+            if request.target_capture_pct is not None and (target["source"] != "closed_options" or trade["position"] != "short"):
+                raise ValueError("Capture targets apply only to short options")
         elif request.kind == "link":
             if target["source"] not in {"holdings", "options", "closed_trades", "closed_options"} or target["operation"] not in {"INSERT", "SNAPSHOT"}:
                 raise ValueError("Link an opening lot or a closed trade")
             if not request.cycle or not request.cycle.strip() or request.quantity is None:
                 raise ValueError("A cycle name and allocated quantity are required")
-            target_data = json.loads(target["after_json"])
+            cursor.execute(f"SELECT * FROM {target['source']} WHERE user_id={database.PH} AND id={database.PH}",
+                           (user_id, target["source_id"]))
+            target_data = database._fetchone(cursor)
+            if not target_data:
+                raise ValueError("The linked lot or trade no longer exists")
             quantity = Decimal(str(target_data.get("shares", target_data.get("contracts"))))
             if target["source"] in {"options", "closed_options"} and request.quantity != request.quantity.to_integral_value():
                 raise ValueError("Option allocations must be whole contracts")
@@ -231,6 +246,16 @@ def report(user_id):
     rows = database._run(f"SELECT * FROM accounting_events WHERE user_id={database.PH} ORDER BY id", (user_id,), fetch="all")
     events = {row["id"]: row for row in rows}
     manual = [{**json.loads(row["after_json"]), "id": row["id"]} for row in _active_manual(rows)]
+    reviews = {}
+    for entry in manual:
+        if entry["kind"] == "review":
+            target = events.get(entry["event_id"])
+            if target:
+                reviews[(target["source"], target["source_id"])] = {
+                    "review_id": entry["id"], "exit_reason": entry.get("exit_reason"),
+                    "target_capture_pct": float(entry["target_capture_pct"]) if entry.get("target_capture_pct") is not None else None,
+                    "review_note": entry["note"], "review_recorded_at": events[entry["id"]]["recorded_at"],
+                }
     fees = {}
     for entry in manual:
         if entry["kind"] == "fee":
@@ -279,7 +304,11 @@ def report(user_id):
             closed = Decimal(str(trade["close_premium"])) * quantity * 100
             basis, proceeds = (opened + opening_fees, closed - closing_fees) if trade["position"] == "long" else (closed + closing_fees, opened - opening_fees)
             term = "review"
-        tax_rows.append({"event_id": event["id"], "source": source, "source_id": source_id, "ticker": trade["ticker"], "quantity": float(quantity),
+        opening_event = next((row["id"] for row in source_events if row["operation"] in {"INSERT", "SNAPSHOT"}), None)
+        tax_rows.append({"event_id": event["id"], "opening_event_id": opening_event,
+                 "source": source, "source_id": source_id, "ticker": trade["ticker"], "quantity": float(quantity),
+                 "option_type": trade.get("option_type"), "position": trade.get("position"),
+                 "gross_pnl": trade["pnl"], "review": reviews.get((source, source_id)),
                          "acquired_at": acquired, "closed_at": sold, "term": term,
                          "basis": round(float(basis), 2), "proceeds": round(float(proceeds), 2),
                          "fees": round(float(total_fees), 2), "gain": round(float(proceeds - basis), 2)})
@@ -290,18 +319,45 @@ def report(user_id):
         target = events.get(entry["event_id"])
         if not target:
             continue
-        cycle = cycles.setdefault(entry["cycle"], {"name": entry["cycle"], "links": [], "realized_pnl": 0.0})
+        cycle = cycles.setdefault(entry["cycle"], {"name": entry["cycle"], "links": [], "realized_pnl": 0.0,
+            "put_pnl": Decimal("0"), "call_pnl": Decimal("0"), "stock_pnl": Decimal("0"), "fees": Decimal("0"),
+            "unresolved_links": 0, "open_links": 0})
         target_data = json.loads(target["after_json"])
-        cycle["links"].append({"link_id": entry["id"], "event_id": target["id"], "source": target["source"], "ticker": target_data["ticker"], "quantity": entry["quantity"]})
-        for trade in tax_rows:
-            if trade["source"] == target["source"] and events[trade["event_id"]]["source_id"] == target["source_id"]:
-                cycle["realized_pnl"] += trade["gain"] * float(entry["quantity"]) / trade["quantity"]
+        current = latest.get((target["source"], target["source_id"]))
+        link = {"link_id": entry["id"], "event_id": target["id"], "source": target["source"],
+                "ticker": target_data["ticker"], "quantity": entry["quantity"], "status": "unresolved"}
+        cycle["links"].append(link)
+        if current and current["operation"] != "DELETE":
+            current_data = json.loads(current["after_json"])
+            link["ticker"] = current_data["ticker"]
+            allocated = sum((Decimal(other["quantity"]) for other in manual if other["kind"] == "link"
+                             and other["event_id"] == entry["event_id"]), Decimal("0"))
+            available = Decimal(str(current_data.get("shares", current_data.get("contracts"))))
+            if allocated <= available and target["source"] in {"holdings", "options"}:
+                link["status"] = "open"
+                cycle["open_links"] += 1
+            elif allocated <= available:
+                trade = next((trade for trade in tax_rows if trade["source"] == target["source"] and trade["source_id"] == target["source_id"]), None)
+                if trade:
+                    portion = Decimal(entry["quantity"]) / Decimal(str(trade["quantity"]))
+                    component = "stock_pnl" if trade["source"] == "closed_trades" else "put_pnl" if trade["option_type"] == "put" else "call_pnl"
+                    cycle[component] += Decimal(str(trade["gross_pnl"])) * portion
+                    cycle["fees"] += Decimal(str(trade["fees"])) * portion
+                    link["status"] = "realized"
+        if link["status"] == "unresolved":
+            cycle["unresolved_links"] += 1
+    for cycle in cycles.values():
+        for component in ("put_pnl", "call_pnl", "stock_pnl", "fees"):
+            cycle[component] = round(float(cycle[component]), 2)
+        cycle["realized_pnl"] = round(cycle["put_pnl"] + cycle["call_pnl"] + cycle["stock_pnl"] - cycle["fees"], 2)
+    combined_histories = any(row["source"] == "account_transfer" and json.loads(row["after_json"]).get("combined_histories") for row in rows)
+    twr = {"pct": None, "reason": "Transferred account histories are combined; valuations are not consolidated total-account NAV"} if combined_histories else time_weighted_return(manual)
     return {"manual_entries": manual, "tax_lots": tax_rows, "cycles": list(cycles.values()),
             "fees": round(float(sum(fees.values(), Decimal("0"))), 2),
             "external_cash_flow": round(sum(float(entry["amount"]) * (1 if entry["kind"] == "deposit" else -1)
                                              for entry in manual if entry["kind"] in {"deposit", "withdrawal"}), 2),
             "dividends": round(sum(float(entry["amount"]) for entry in manual if entry["kind"] == "dividend"), 2),
-            "twr": time_weighted_return(manual), "last_event_id": rows[-1]["id"] if rows else 0,
+            "twr": twr, "last_event_id": rows[-1]["id"] if rows else 0,
             "has_legacy_snapshots": any(row["operation"] == "SNAPSHOT" for row in rows),
             "notes": ["US informational lot report, not a filing-ready tax return. Recorded lot selections are retained; ticker sales use FIFO.",
                       "Wash sales, corporate actions, assignment/exercise basis adjustments and option tax treatment require review.",

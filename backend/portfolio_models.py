@@ -74,7 +74,7 @@ class ClosedOptionRequest(BaseModel):
 
 class AccountingEntryRequest(BaseModel):
     model_config = ConfigDict(allow_inf_nan=False, extra="forbid")
-    kind: Literal["deposit", "withdrawal", "dividend", "fee", "valuation", "link", "reverse"]
+    kind: Literal["deposit", "withdrawal", "dividend", "fee", "valuation", "link", "reverse", "review"]
     amount: Decimal = Field(default=Decimal("0"), ge=0, max_digits=14, decimal_places=2)
     occurred_at: datetime
     nav_before: Decimal | None = Field(default=None, ge=0, max_digits=14, decimal_places=2)
@@ -83,6 +83,16 @@ class AccountingEntryRequest(BaseModel):
     quantity: Decimal | None = Field(default=None, gt=0, max_digits=16, decimal_places=6)
     note: str = Field(default="", max_length=500)
     idempotency_key: str = Field(min_length=8, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
+    exit_reason: Literal["profit_target", "stop", "expiry", "assignment", "roll", "discretionary", "other"] | None = None
+    target_capture_pct: Decimal | None = Field(default=None, ge=0, le=100, max_digits=5, decimal_places=2)
+
+    @model_validator(mode="after")
+    def review_fields(self):
+        if self.kind != "review" and (self.exit_reason is not None or self.target_capture_pct is not None):
+            raise ValueError("Review fields require a review entry")
+        if self.kind == "review" and (self.event_id is None or self.amount != 0):
+            raise ValueError("A review requires a trade event and no cash amount")
+        return self
 
     @field_validator("occurred_at")
     @classmethod

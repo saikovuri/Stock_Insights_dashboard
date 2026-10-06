@@ -611,6 +611,58 @@ def accounting_report(user: dict = Depends(get_current_user)):
     return accounting.report(user["user_id"])
 
 
+@app.get("/api/account-transfer/export")
+def export_account_data(user: dict = Depends(get_current_user)):
+    import account_transfer
+    from fastapi.responses import JSONResponse
+    try:
+        return JSONResponse(account_transfer.export_account(user["user_id"]), headers={"Cache-Control": "no-store"})
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+
+
+async def _transfer_body(request):
+    import account_transfer
+    import json
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > account_transfer.MAX_BYTES:
+            raise HTTPException(status_code=413, detail="Transfer file exceeds 10 MB")
+    try:
+        return json.loads(body)
+    except (ValueError, RecursionError):
+        raise HTTPException(status_code=400, detail="Invalid transfer JSON file")
+
+
+@app.post("/api/account-transfer/preview")
+async def preview_account_data(request: Request, user: dict = Depends(get_current_user)):
+    import account_transfer
+    from starlette.concurrency import run_in_threadpool
+    from fastapi.responses import JSONResponse
+    body = await _transfer_body(request)
+    try:
+        result = await run_in_threadpool(account_transfer.preview_import, user["user_id"], body)
+        return JSONResponse(result, headers={"Cache-Control": "no-store"})
+    except (ValueError, RecursionError) as error:
+        raise HTTPException(status_code=400, detail=str(error))
+
+
+@app.post("/api/account-transfer/import")
+async def import_account_data(request: Request, user: dict = Depends(get_current_user)):
+    import account_transfer
+    from starlette.concurrency import run_in_threadpool
+    from fastapi.responses import JSONResponse
+    body = await _transfer_body(request)
+    if not isinstance(body, dict) or body.get("confirm") is not True:
+        raise HTTPException(status_code=400, detail="Confirm import into the currently signed-in account")
+    try:
+        result = await run_in_threadpool(account_transfer.import_account, user["user_id"], body.get("package"))
+        return JSONResponse(result, headers={"Cache-Control": "no-store"})
+    except (ValueError, KeyError, RecursionError) as error:
+        raise HTTPException(status_code=400, detail=str(error))
+
+
 @app.post("/api/accounting/entries")
 def accounting_entry(req: AccountingEntryRequest, user: dict = Depends(get_current_user)):
     import accounting

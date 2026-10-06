@@ -70,6 +70,32 @@ def main():
         assert updated["id"] == recorded[0]["id"]
     corrected = next(row for row in database.get_closed_options(user) if row["id"] == updated["id"])
     assert corrected["is_manual"] and corrected["net_pnl"] == 92.5
+    review = dict(kind="review", event_id=corrected["ledger_event_id"], exit_reason="profit_target", target_capture_pct="50",
+                  occurred_at="2025-09-10T00:00:00Z", idempotency_key=uuid4().hex)
+    reviewed = accounting.record_entry(user, review)
+    assert accounting.record_entry(user, review) == reviewed
+    assert next(row for row in database.get_closed_options(user) if row["id"] == updated["id"])["review"]["target_capture_pct"] == 50
+    accounting.record_entry(user, dict(kind="link", event_id=corrected["ledger_event_id"], cycle="PG wheel fixture", quantity=1,
+                                      occurred_at="2025-09-10T00:00:00Z", idempotency_key=uuid4().hex))
+    cycle = next(cycle for cycle in accounting.report(user)["cycles"] if cycle["name"] == "PG wheel fixture")
+    assert cycle["put_pnl"] == 95 and cycle["fees"] == 2.5 and cycle["realized_pnl"] == 92.5
+    import account_transfer
+    destination = database.create_user(uuid4().hex, "test-only", "Transfer destination")["id"]
+    package = account_transfer.export_account(user)
+    assert account_transfer.preview_import(destination, package)["counts"]["closed_options"] == 2
+    barrier = Barrier(2)
+
+    def transfer():
+        barrier.wait()
+        return account_transfer.import_account(destination, package)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(lambda _: transfer(), range(2)))
+    assert sum(not result["already_imported"] for result in results) == 1
+    transferred = next(row for row in database.get_closed_options(destination) if row["ticker"] == "WDC")
+    assert transferred["net_pnl"] == 92.5 and transferred["is_manual"]
+    assert transferred["review"]["target_capture_pct"] == 50
+    assert accounting.report(destination)["cycles"][0]["realized_pnl"] == 92.5
     assert not database.delete_closed_option(other, updated["id"])
     assert database.delete_closed_option(user, updated["id"])
     assert accounting.report(user)["fees"] == 0

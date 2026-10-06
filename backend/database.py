@@ -930,6 +930,15 @@ def get_closed_trades(user_id: int) -> list[dict]:
     cur.execute(f"SELECT * FROM closed_trades WHERE user_id={PH} ORDER BY closed_at DESC", (user_id,))
     rows = _fetchall(cur)
     _release(conn)
+    if rows:
+        from accounting import report
+        details = {lot["source_id"]: lot for lot in report(user_id)["tax_lots"] if lot["source"] == "closed_trades"}
+        for row in rows:
+            detail = details.get(row["id"], {})
+            row["ledger_event_id"] = detail.get("opening_event_id")
+            row["review"] = detail.get("review")
+            row["fees"] = detail.get("fees")
+            row["net_pnl"] = detail.get("gain")
     return rows
 
 
@@ -1044,9 +1053,12 @@ def get_closed_options(user_id: int) -> list[dict]:
     _release(conn)
     if rows:
         from accounting import report
-        fees = {lot["source_id"]: lot["fees"] for lot in report(user_id)["tax_lots"] if lot["source"] == "closed_options"}
+        details = {lot["source_id"]: lot for lot in report(user_id)["tax_lots"] if lot["source"] == "closed_options"}
         for row in rows:
-            row["fees"] = fees.get(row["id"], 0)
+            detail = details.get(row["id"], {})
+            row["ledger_event_id"] = detail.get("opening_event_id")
+            row["review"] = detail.get("review")
+            row["fees"] = detail.get("fees", 0)
             row["net_pnl"] = round(row["pnl"] - row["fees"], 2)
     return rows
 

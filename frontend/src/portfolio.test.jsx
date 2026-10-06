@@ -5,7 +5,7 @@ import { calculatePosition } from './components/PositionCalculator';
 import { pnlAt } from './components/OptionsDesk';
 import IncomeIdeas, { eligibleIncomeIdeas } from './components/IncomeIdeas';
 import { alignedCorrelation } from './components/CorrelationHeatmap';
-import { render, screen, fireEvent, cleanup, act, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, act, waitFor, within } from '@testing-library/react';
 import * as stockApi from './api/stockApi';
 import * as auth from './AuthContext';
 import StrategyTester from './components/StrategyTester';
@@ -16,12 +16,182 @@ import Accounting from './components/Accounting';
 import WheelIdeas from './components/WheelIdeas';
 import MarketContext from './components/MarketContext';
 import PreTradeChecklist from './components/PreTradeChecklist';
-import Journal from './components/Journal';
+import Journal, { recordedTradeMetrics, recordedOptionStats } from './components/Journal';
 import WheelManager from './components/WheelManager';
 import RollRepair from './components/RollRepair';
+import WheelCycles from './components/WheelCycles';
+import AccountTransfer from './components/AccountTransfer';
 
-beforeEach(() => { localStorage.clear(); sessionStorage.clear(); });
+beforeEach(() => {
+  localStorage.clear(); sessionStorage.clear();
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value() { this.open = true; } });
+});
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+test('account transfer previews before confirmation and retries the identical file', async () => {
+  vi.spyOn(auth, 'useAuth').mockReturnValue({ user: { id: 2, display_name: 'Destination' } });
+  const bundle = { payload: '{"source_user_id":1,"shares":1.0}', signature: 'signed' };
+  const preview = vi.spyOn(stockApi, 'previewAccountImport').mockResolvedValue({ source_name: 'Source', source_user_id: 1,
+    counts: { holdings: 2, journal: 3 }, destination_counts: { holdings: 1 }, ledger_events: 12, already_imported: false });
+  const save = vi.spyOn(stockApi, 'importAccountData').mockRejectedValueOnce(new Error('Import response unavailable')).mockResolvedValue({ already_imported: false });
+  const refresh = vi.fn();
+  render(<AccountTransfer onImported={refresh} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Import from another account' }));
+  expect(screen.queryByRole('button', { name: 'Confirm import' })).toBeNull();
+  fireEvent.change(screen.getByLabelText('Transfer file (.json)'), { target: { files: [{ size: 100, text: async () => JSON.stringify(bundle) }] } });
+  const confirm = await screen.findByRole('button', { name: 'Confirm import' });
+  expect(preview).toHaveBeenCalledWith(bundle);
+  expect(confirm.disabled).toBe(true);
+  expect(save).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('checkbox', { name: /I confirm adding these records to Destination/ }));
+  fireEvent.click(confirm);
+  await screen.findByText('Import response unavailable');
+  expect(refresh).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm import' }));
+  await screen.findByText(/Portfolio and Journal imported into Destination/);
+  expect(save.mock.calls[0][0]).toEqual(bundle);
+  expect(save.mock.calls[1][0]).toEqual(bundle);
+  expect(refresh).toHaveBeenCalledTimes(1);
+});
+
+test('account transfer blocks invalid files and duplicate imports and clears drafts on account switch', async () => {
+  const user = vi.spyOn(auth, 'useAuth').mockReturnValue({ user: { id: 2, display_name: 'Destination' } });
+  const preview = vi.spyOn(stockApi, 'previewAccountImport').mockResolvedValue({ source_name: 'Source', source_user_id: 1,
+    counts: {}, destination_counts: {}, ledger_events: 1, already_imported: true });
+  const save = vi.spyOn(stockApi, 'importAccountData');
+  const view = render(<AccountTransfer />);
+  fireEvent.click(screen.getByRole('button', { name: 'Import from another account' }));
+  const input = screen.getByLabelText('Transfer file (.json)');
+  fireEvent.change(input, { target: { files: [{ size: 11 * 1024 * 1024 }] } });
+  await screen.findByText('Transfer file exceeds 10 MB.');
+  fireEvent.change(input, { target: { files: [{ size: 2, text: async () => 'no' }] } });
+  await screen.findByText('Choose a valid StockPilot transfer JSON file.');
+  expect(preview).not.toHaveBeenCalled();
+  fireEvent.change(input, { target: { files: [{ size: 2, text: async () => '{}' }] } });
+  await screen.findByText('This export was already imported. No duplicate records will be added.');
+  expect(screen.queryByRole('button', { name: 'Confirm import' })).toBeNull();
+  expect(save).not.toHaveBeenCalled();
+  user.mockReturnValue({ user: { id: 3, display_name: 'Other' } });
+  view.rerender(<AccountTransfer />);
+  expect(screen.queryByRole('dialog')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Import from another account' }));
+  expect(screen.queryByText('Source')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Confirm import' })).toBeNull();
+  user.mockReturnValue({ user: null });
+  view.rerender(<AccountTransfer />);
+  expect(screen.queryByRole('button', { name: 'Export to another account' })).toBeNull();
+});
+
+test('journal capture and holding metrics respect direction, losses and missing history', () => {
+  const trade = { position: 'short', option_type: 'put', open_premium: 2, close_premium: 0.5,
+    opened_at: '2026-03-07', closed_at: '2026-03-09T15:00:00Z', expiry: '2026-03-13' };
+  expect(recordedTradeMetrics(trade)).toMatchObject({ capture: 75, daysHeld: 2, dteAtClose: 4, label: 'Captured' });
+  expect(recordedTradeMetrics({ ...trade, close_premium: 3 }).capture).toBe(-50);
+  expect(recordedTradeMetrics({ ...trade, close_premium: 0 }).capture).toBe(100);
+  expect(recordedTradeMetrics({ ...trade, position: 'long', close_premium: 3 })).toMatchObject({ capture: 50, label: 'Return' });
+  for (const open_premium of [null, '', 0, undefined]) expect(recordedTradeMetrics({ ...trade, open_premium }).capture).toBeNull();
+  expect(recordedTradeMetrics({ ...trade, opened_at: '2026-02-30' }).daysHeld).toBeNull();
+  expect(recordedTradeMetrics({ ...trade, opened_at: '2026-03-10' }).daysHeld).toBeNull();
+  expect(recordedTradeMetrics({ ...trade, opened_at: '2026-03-09' }).daysHeld).toBe(0);
+  expect(recordedTradeMetrics({ ...trade, review: { target_capture_pct: 50 } })).toMatchObject({ target: 50, targetGap: 25 });
+  expect(recordedTradeMetrics({ ...trade, review: { target_capture_pct: 0 } })).toMatchObject({ target: 0, targetGap: 75 });
+  expect(recordedTradeMetrics({ ...trade, position: 'long', review: { target_capture_pct: 50 } }).target).toBeNull();
+  expect(recordedTradeMetrics({ ...trade, close_premium: null, review: { target_capture_pct: 50 } }).targetGap).toBeNull();
+});
+
+test('journal review saves retrospective targets without changing fills and retries the same request', async () => {
+  vi.spyOn(auth, 'useAuth').mockReturnValue({ user: { id: 1 } });
+  vi.spyOn(stockApi, 'fetchClosedTrades').mockResolvedValue({ trades: [] });
+  const trade = { id: 12, ledger_event_id: 42, ticker: 'AAPL', position: 'short', option_type: 'put',
+    open_premium: 2, close_premium: .5, contracts: 1, strike: 100, pnl: 150, net_pnl: 148, fees: 2,
+    opened_at: '2025-09-01', closed_at: '2025-09-10', expiry: '2025-09-19' };
+  const fetch = vi.spyOn(stockApi, 'fetchClosedOptions').mockResolvedValue({ trades: [trade] });
+  const save = vi.spyOn(stockApi, 'recordAccountingEntry').mockRejectedValueOnce(new Error('Review temporarily unavailable')).mockResolvedValue({ id: 51 });
+  const fills = vi.spyOn(stockApi, 'updateClosedOption');
+  render(<Journal />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Review AAPL trade 12' }));
+  const dialog = screen.getByRole('dialog', { name: 'Review AAPL closed trade' });
+  expect(within(dialog).getByText(/not verified pre-trade plans/)).toBeTruthy();
+  fireEvent.change(within(dialog).getByLabelText('Exit reason'), { target: { value: 'profit_target' } });
+  fireEvent.change(within(dialog).getByLabelText('Target capture (%)'), { target: { value: '101' } });
+  expect(within(dialog).getByRole('button', { name: 'Save review' }).disabled).toBe(true);
+  fireEvent.change(within(dialog).getByLabelText('Target capture (%)'), { target: { value: '50' } });
+  fireEvent.change(within(dialog).getByLabelText('Review notes'), { target: { value: 'Closed early' } });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Save review' }));
+  await screen.findByText('Review temporarily unavailable');
+  const first = save.mock.calls[0][0];
+  expect(first).toMatchObject({ kind: 'review', event_id: 42, target_capture_pct: 50, exit_reason: 'profit_target', note: 'Closed early' });
+  fetch.mockResolvedValue({ trades: [{ ...trade, review: { review_id: 51, target_capture_pct: 50, exit_reason: 'profit_target', review_note: 'Closed early' } }] });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Save review' }));
+  await screen.findByRole('cell', { name: '+25.0 pp' });
+  expect(save.mock.calls[1][0]).toEqual(first);
+  expect(fills).not.toHaveBeenCalled();
+  expect(screen.getByRole('cell', { name: 'Captured: 75.0%' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Review AAPL trade 12' }));
+  expect(screen.getByLabelText('Target capture (%)').value).toBe('50');
+  expect(screen.getByLabelText('Review notes').value).toBe('Closed early');
+});
+
+test('journal long option review has no capture target and can clear exit reason', async () => {
+  vi.spyOn(auth, 'useAuth').mockReturnValue({ user: { id: 1 } });
+  vi.spyOn(stockApi, 'fetchClosedTrades').mockResolvedValue({ trades: [] });
+  vi.spyOn(stockApi, 'fetchClosedOptions').mockResolvedValue({ trades: [{ id: 1, ledger_event_id: 7, ticker: 'AAPL',
+    position: 'long', option_type: 'call', open_premium: 2, close_premium: 3, review: { exit_reason: 'stop' } }] });
+  const save = vi.spyOn(stockApi, 'recordAccountingEntry').mockResolvedValue({ id: 8 });
+  render(<Journal />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Review AAPL trade 1' }));
+  expect(screen.queryByLabelText('Target capture (%)')).toBeNull();
+  fireEvent.change(screen.getByLabelText('Exit reason'), { target: { value: '' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save review' }));
+  await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({ kind: 'review', event_id: 7, exit_reason: null, target_capture_pct: null })));
+  await screen.findByText('AAPL review saved.');
+});
+
+test('journal cycle view links remaining whole contracts and reverses allocations with retry safety', async () => {
+  const report = { tax_lots: [{ opening_event_id: 42, source_id: 12, ticker: 'AAPL', source: 'closed_options', position: 'short', option_type: 'put', quantity: 2, closed_at: '2025-09-10' }],
+    manual_entries: [{ kind: 'link', event_id: 42, quantity: '1' }], cycles: [{ name: 'AAPL wheel', put_pnl: 150, call_pnl: 300,
+      stock_pnl: -1000, fees: 13, realized_pnl: -563, open_links: 1, unresolved_links: 1,
+      links: [{ link_id: 51, event_id: 42, source: 'closed_options', ticker: 'AAPL', quantity: '1', status: 'realized' }] }] };
+  const fetch = vi.spyOn(stockApi, 'fetchAccountingReport').mockResolvedValue(report);
+  const save = vi.spyOn(stockApi, 'recordAccountingEntry').mockRejectedValueOnce(new Error('Allocation temporarily unavailable')).mockResolvedValue({ id: 52 });
+  render(<WheelCycles />);
+  await screen.findByRole('option', { name: /1 available/ });
+  expect(screen.getByText('-$563.00').className).toBe('negative');
+  expect(screen.getByText(/unresolved allocations are excluded/)).toBeTruthy();
+  expect(screen.getByText(/open lot allocations are excluded/)).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('Closed trade'), { target: { value: '42' } });
+  fireEvent.change(screen.getByLabelText('Cycle name'), { target: { value: 'AAPL wheel' } });
+  for (const quantity of ['1.5', '2']) {
+    fireEvent.change(screen.getByLabelText('Contracts to link'), { target: { value: quantity } });
+    expect(screen.getByRole('button', { name: 'Link to cycle' }).disabled).toBe(true);
+  }
+  fireEvent.change(screen.getByLabelText('Contracts to link'), { target: { value: '1' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Link to cycle' }));
+  await screen.findByText('Allocation temporarily unavailable');
+  const first = save.mock.calls[0][0];
+  expect(first).toMatchObject({ kind: 'link', event_id: 42, cycle: 'AAPL wheel', quantity: '1' });
+  fetch.mockResolvedValue({ ...report, manual_entries: [...report.manual_entries, { kind: 'link', event_id: 42, quantity: '1' }] });
+  fireEvent.click(screen.getByRole('button', { name: 'Link to cycle' }));
+  await screen.findByText('No unallocated closed trades available.');
+  expect(save.mock.calls[1][0]).toEqual(first);
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  fireEvent.click(screen.getByRole('button', { name: 'Remove allocation 51' }));
+  expect(save).toHaveBeenCalledTimes(2);
+  confirm.mockReturnValue(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Remove allocation 51' }));
+  await screen.findByText('Allocation reversed; audit history retained.');
+  expect(save).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'reverse', event_id: 51 }));
+});
+
+test('journal option expectancy and profit factor exclude missing results and stocks', () => {
+  const option = { position: 'short', option_type: 'put' };
+  const stats = recordedOptionStats([{ ...option, net_pnl: 75 }, { ...option, net_pnl: -25 }, { ...option, net_pnl: 0 },
+    { ...option, net_pnl: null }, { net_pnl: 1000 }]);
+  expect(stats).toMatchObject({ count: 3, net: 50, expectancy: 50 / 3, profitFactor: '3.00' });
+  expect(stats.winRate).toBeCloseTo(100 / 3);
+  expect(recordedOptionStats([]).expectancy).toBeNull();
+  expect(recordedOptionStats([{ ...option, net_pnl: 75 }]).profitFactor).toBe('No losses');
+});
 
 test('put repair only submits a live listed expiry', async () => {
   vi.spyOn(stockApi, 'fetchOptionExpirations').mockResolvedValue({ expirations: [{ date: '2026-10-09', dte: 4 }] });
@@ -179,7 +349,7 @@ test('closed option journal previews net profit and retries the same canonical e
   expect(log.mock.calls[1][0]).toEqual(first);
   expect(stockJournal).not.toHaveBeenCalled();
   await screen.findByText('WDC');
-  expect(screen.getByText('$83.7')).toBeTruthy();
+  expect(screen.getByRole('cell', { name: '$83.7', exact: true })).toBeTruthy();
 });
 
 test('manual option corrections prefill the trade, retry updates and confirm deletion', async () => {
@@ -207,7 +377,7 @@ test('manual option corrections prefill the trade, retry updates and confirm del
   expect(update.mock.calls[0][0]).toBe(12);
   expect(update.mock.calls[1]).toEqual(update.mock.calls[0]);
   expect(create).toHaveBeenCalledTimes(1);
-  await screen.findByText('$92.5');
+  await screen.findByRole('cell', { name: '$92.5', exact: true });
   const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
   fireEvent.click(screen.getByRole('button', { name: 'Delete WDC option' }));
   expect(remove).not.toHaveBeenCalled();

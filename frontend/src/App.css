@@ -4533,6 +4533,19 @@ tr.alert-triggered {
 .covered-call-card .structure-stats strong { flex-shrink: 0; }
 .tool-input.covered-call-horizon { width: 220px; max-width: 100%; }
 .tool-input.covered-call-dates { width: 280px; max-width: 100%; }
+.journal-review-meta { display: block; color: var(--text-muted); }
+.journal-cycle { border-top: 1px solid var(--border); padding: 1rem 0; }
+.wheel-cycles .accounting-form label { min-width: 0; }
+.wheel-cycles .accounting-form select { width: 100%; max-width: 100%; }
+.account-transfer { margin: 0.75rem 0; }
+.account-transfer .accounting-toolbar { flex-wrap: wrap; }
+.journal-plan-dialog.account-transfer-dialog { width: min(700px, calc(100% - 2rem)); }
+.account-transfer-dialog .market-table { width: 100%; }
+.account-transfer-dialog p, .transfer-confirm { overflow-wrap: anywhere; }
+.transfer-file { display: grid; gap: 0.5rem; margin: 1rem 0; }
+.transfer-file input { width: 100%; min-width: 0; }
+.transfer-confirm { display: flex; align-items: flex-start; gap: 0.65rem; margin: 1rem 0; }
+.transfer-confirm input { flex: 0 0 auto; margin-top: 0.2rem; }
 .income-ideas .ivrank-header { flex-wrap: wrap; gap: 0.5rem; }
 .income-ideas .chart-toggle { flex-wrap: wrap; }
 
