@@ -43,8 +43,9 @@ def check_alerts(metrics: dict, thresholds: dict | None = None) -> list[dict]:
             alerts.append({
                 "type": "NEAR_52W_HIGH",
                 "severity": "info",
-                "message": f"{metrics['name']} is within {pct_from_high:.1f}% of its 52-week high (${high_52:.2f})",
-                "value": round(pct_from_high, 2),
+                "message": (f"{metrics['name']} is at a new 52-week high (${high_52:.2f})" if price >= high_52 else
+                            f"{metrics['name']} is within {pct_from_high:.1f}% of its 52-week high (${high_52:.2f})"),
+                "value": round(max(pct_from_high, 0), 2),
             })
 
     if price and low_52:

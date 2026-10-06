@@ -143,6 +143,7 @@ curl -fs "https://${DOMAIN}/health" && echo "  ← public HTTPS OK" \
 echo ""
 echo "✅ API: https://${DOMAIN}"
 echo "   Set VITE_API_URL=https://${DOMAIN} in Vercel and redeploy the frontend."
+echo "   If the host changed, also add it to connect-src in vercel.json's Content-Security-Policy."
 echo ""
 echo "   Logs:    sudo journalctl -u ${SERVICE_NAME} -f"
 echo "   Update:  bash $APP_DIR/deploy/update.sh"

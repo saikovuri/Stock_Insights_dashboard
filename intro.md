@@ -494,7 +494,7 @@ Source: [backend/smart_money.py](backend/smart_money.py).
 
 ## Ideas: Macro Calendar and Prediction Markets
 
-The Economic calendar groups releases by date, showing times in Eastern Time, impact, actual/consensus/previous values when available, and the next Fed decision. The full view requests 14 days and initially includes medium-impact releases; the compact Dashboard view requests seven days and initially shows high impact only. The checkbox controls display filtering, not options eligibility. Scheduled events and reported dates can change.
+The Economic calendar groups releases by date, showing times in Eastern Time, impact, actual/consensus/previous values when available, and the next Fed decision. Actual values are hidden for future-dated releases because the provider can repeat a prior figure before publication. The full view requests 14 days and initially includes medium-impact releases; the compact Dashboard view requests seven days and initially shows high impact only. The checkbox controls display filtering, not options eligibility. Scheduled events and reported dates can change.
 
 ### Prediction-Market Context
 
@@ -562,7 +562,7 @@ Source: [backend/track_record.py](backend/track_record.py).
 
 The Watchlist workspace has one sortable quote table, not additional top-level subtabs. Add/remove symbols, drag to reorder, choose manual or column sorting, refresh, click a ticker for Dashboard research, or open the row's alert controls.
 
-Columns include price/change, 52-week high/low, P/E, EPS, market cap, RSI, volume, dividend yield and sector. RSI >=70 is labeled overbought and <=30 oversold. These are visual labels, not automatic trade instructions. Data gaps stay visible as missing fields.
+Columns include price/change, 52-week high/low, P/E, EPS, market cap, RSI, volume, dividend yield and sector. Provider 52-week ranges can lag the current session, so the range is widened to include today's price and session high/low. RSI >=70 is labeled overbought and <=30 oversold. These are visual labels, not automatic trade instructions. Data gaps stay visible as missing fields.
 
 Guest watchlists are local to the browser. Signed-in lists synchronize to the account and unlock account alerts and additional data such as RSI. A side watchlist rail also appears on Dashboard. Old Screener components/bookmarks do not imply a second current navigation tab.
 
@@ -903,7 +903,7 @@ Indicator periods refer to bars, not always calendar days. Chart overlays, setup
 
 ### Other Nested Controls
 
-- **Market Overview:** Top movers switches among Gainers, Losers and Most active. Sector performance switches Today, 1W, 1M, 3M and sorts by the chosen return. It also shows upcoming earnings for tracked stocks.
+- **Market Overview:** Index tiles show ETF proxies (SPY, QQQ, DIA, IWM) labeled with their tickers, so prices are ETF share prices, not index levels; VIX and the 10-year yield are index values. Top movers switches among Gainers, Losers and Most active. Sector performance switches Today, 1W, 1M, 3M and sorts by the chosen return. It also shows upcoming earnings for tracked stocks.
 - **Financial statements:** Income Statement, Balance Sheet, Cash Flow; annual/quarterly selection and key/all-row display. Missing fields and incomparable fiscal periods require care.
 - **Ownership:** Institutional holders and Insider transactions. These are the selected stock's provider disclosures, separate from Ideas' cross-company insider cluster filter.
 - **Thesis:** Save/edit the user's thesis and review its Intact/Weakening/Broken status. These are AI assessments of the recorded thesis and available evidence, not binding eligibility rules.
@@ -921,8 +921,8 @@ These are distinct from the option-position alerts in Portfolio Risk:
 | --- | --- |
 | Daily price move | Absolute daily change >=5% by default; High severity at twice the configured threshold. |
 | Volume spike | Reported volume / average volume >=2 by default; High at twice the configured threshold. This is not In Play's session-adjusted relative volume. |
-| Near 52-week high | No more than 2% below the reported high. |
-| Near 52-week low | No more than 5% above the reported low. |
+| Near 52-week high | No more than 2% below the 52-week high; at or above it reads as a new 52-week high. |
+| Near 52-week low | No more than 5% above the 52-week low. |
 | Golden/death cross | SMA 50 crosses SMA 200 within the last ten daily bars. |
 | Reclaim/lose 200-day | Close crosses SMA 200 within the last three daily bars. |
 | MACD cross | MACD crosses its signal within the last two daily bars. |
@@ -1056,6 +1056,14 @@ The frontend lockfile uses Capacitor Android, iOS and core 8.5.2 to address GHSA
 `source-map-js` is temporarily overridden with the maintainer's 1.2.2 release archive at immutable commit `0a1d334fd1e55a47df97fcd60a7915d46df3b08a`, which includes the fix for GHSA-68fv-2mgg-jv7q. The patched npm release was unavailable during verification. The lockfile records archive integrity; installation requires access to GitHub's codeload host and the public package mirror used by the new Capacitor entries. Replace the override with the patched npm release when it is available and verified, then rerun the audit and regression checks. Do not bypass the security gate or force a breaking Vite downgrade.
 
 Frontend-only dependency changes trigger regression checks but do not match the Oracle workflow's automatic `backend/**` and `deploy/**` push filters. After pushing a validated fix, manually dispatch the Oracle deployment workflow on the updated branch; rerunning an old failed commit still uses its old lockfile.
+
+### Sessions, Passwords and Web Security Headers
+
+Passwords must be 6 characters to 72 bytes (bcrypt's limit); multibyte characters count as several bytes. Longer passwords are rejected at registration, and login treats them as invalid credentials. Access tokens last 60 minutes by default. Each refresh token is single-use: refreshing atomically consumes it and issues a new pair, so a replayed or concurrently reused token fails. Tabs in the same browser share the stored session and take turns refreshing through a browser lock; a waiting tab adopts the same account's newly rotated tokens instead of reusing the consumed one, and never adopts a different account's session. Browsers without the Web Locks API fall back to per-tab deduplication. Logout revokes all of the account's refresh tokens. Refresh tokens are stored in the database as issued, not hashed; database access controls therefore protect active sessions.
+
+The Vercel frontend sends a Content Security Policy plus anti-framing, MIME-sniffing, referrer and permissions headers from [vercel.json](vercel.json). The policy permits scripts only from the app's own origin, Google Fonts styles/fonts, and network requests to the app origin, the Oracle API host and Sentry. Changing the production API host (`VITE_API_URL`) also requires updating `connect-src`, or browser API requests will be blocked. `vite preview` serves the same headers, so the browser regression suite fails on CSP violations. The native Capacitor app does not receive these hosting headers.
+
+PostgreSQL helpers return pooled connections and roll back failed transactions even when a query raises, so repeated errors cannot exhaust the 20-connection pool. A burst of more than 20 simultaneous database operations still receives errors rather than waiting for a connection.
 
 ### Supabase Table Access
 

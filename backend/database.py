@@ -493,32 +493,17 @@ def create_user(username: str, password_hash: str, display_name: str) -> dict | 
 
 
 def get_user_by_username(username: str) -> dict | None:
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(f"SELECT * FROM users WHERE username = {PH}", (username,))
-    result = _fetchone(cur)
-    _release(conn)
-    return result
+    return _run(f"SELECT * FROM users WHERE username = {PH}", (username,), "one")
 
 
 def get_user_by_username_by_id(user_id: int) -> dict | None:
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(f"SELECT * FROM users WHERE id = {PH}", (user_id,))
-    result = _fetchone(cur)
-    _release(conn)
-    return result
+    return _run(f"SELECT * FROM users WHERE id = {PH}", (user_id,), "one")
 
 
 # ── Holdings operations ──────────────────────────────────────────────────
 
 def get_user_holdings(user_id: int) -> list[dict]:
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(f"SELECT * FROM holdings WHERE user_id = {PH} ORDER BY id", (user_id,))
-    rows = _fetchall(cur)
-    _release(conn)
-    return rows
+    return _run(f"SELECT * FROM holdings WHERE user_id = {PH} ORDER BY id", (user_id,), "all")
 
 
 def add_user_holding(user_id: int, ticker: str, shares: float, buy_price: float,
@@ -526,69 +511,84 @@ def add_user_holding(user_id: int, ticker: str, shares: float, buy_price: float,
     _quantity(shares, "shares")
     _quantity(buy_price, "price", zero=True)
     conn = _conn or get_db()
-    cur = conn.cursor()
-    cols, vals = "user_id, ticker, shares, buy_price", [user_id, ticker.upper(), shares, buy_price]
-    if acquired:
-        cols += ", date_added"
-        vals.append(acquired)
-    ph = ", ".join([PH] * len(vals))
-    if USE_PG:
-        cur.execute(f"INSERT INTO holdings ({cols}) VALUES ({ph}) RETURNING *", tuple(vals))
-        new_row = _fetchone(cur)
-    else:
-        cur.execute(f"INSERT INTO holdings ({cols}) VALUES ({ph})", tuple(vals))
-        cur.execute(f"SELECT * FROM holdings WHERE id = {PH}", (cur.lastrowid,))
-        new_row = _fetchone(cur)
-    cur.execute(
-        f"INSERT INTO transactions (user_id, action, ticker, details) VALUES ({PH}, 'BUY', {PH}, {PH})",
-        (user_id, ticker.upper(), json.dumps({"shares": shares, "price": buy_price})),
-    )
-    if _conn is None:
-        conn.commit()
-        _release(conn)
-    return new_row
+    try:
+        cur = conn.cursor()
+        cols, vals = "user_id, ticker, shares, buy_price", [user_id, ticker.upper(), shares, buy_price]
+        if acquired:
+            cols += ", date_added"
+            vals.append(acquired)
+        ph = ", ".join([PH] * len(vals))
+        if USE_PG:
+            cur.execute(f"INSERT INTO holdings ({cols}) VALUES ({ph}) RETURNING *", tuple(vals))
+            new_row = _fetchone(cur)
+        else:
+            cur.execute(f"INSERT INTO holdings ({cols}) VALUES ({ph})", tuple(vals))
+            cur.execute(f"SELECT * FROM holdings WHERE id = {PH}", (cur.lastrowid,))
+            new_row = _fetchone(cur)
+        cur.execute(
+            f"INSERT INTO transactions (user_id, action, ticker, details) VALUES ({PH}, 'BUY', {PH}, {PH})",
+            (user_id, ticker.upper(), json.dumps({"shares": shares, "price": buy_price})),
+        )
+        if _conn is None:
+            conn.commit()
+        return new_row
+    except Exception:
+        if _conn is None:
+            conn.rollback()
+        raise
+    finally:
+        if _conn is None:
+            _release(conn)
 
 
 def update_user_holding(user_id: int, holding_id: int, ticker: str, shares: float, buy_price: float) -> dict | None:
     _quantity(shares, "shares")
     _quantity(buy_price, "price", zero=True)
     conn = get_db()
-    cur = conn.cursor()
-    cur.execute(
-        f"UPDATE holdings SET ticker={PH}, shares={PH}, buy_price={PH} WHERE id={PH} AND user_id={PH}",
-        (ticker.upper(), shares, buy_price, holding_id, user_id),
-    )
-    if cur.rowcount == 0:
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            f"UPDATE holdings SET ticker={PH}, shares={PH}, buy_price={PH} WHERE id={PH} AND user_id={PH}",
+            (ticker.upper(), shares, buy_price, holding_id, user_id),
+        )
+        if cur.rowcount == 0:
+            conn.rollback()
+            return None
+        cur.execute(
+            f"INSERT INTO transactions (user_id, action, ticker, details) VALUES ({PH}, 'EDIT', {PH}, {PH})",
+            (user_id, ticker.upper(), json.dumps({"shares": shares, "price": buy_price})),
+        )
+        conn.commit()
+        cur.execute(f"SELECT * FROM holdings WHERE id = {PH}", (holding_id,))
+        return _fetchone(cur)
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
         _release(conn)
-        return None
-    cur.execute(
-        f"INSERT INTO transactions (user_id, action, ticker, details) VALUES ({PH}, 'EDIT', {PH}, {PH})",
-        (user_id, ticker.upper(), json.dumps({"shares": shares, "price": buy_price})),
-    )
-    conn.commit()
-    cur.execute(f"SELECT * FROM holdings WHERE id = {PH}", (holding_id,))
-    result = _fetchone(cur)
-    _release(conn)
-    return result
 
 
 def delete_user_holding(user_id: int, holding_id: int) -> dict | None:
     conn = get_db()
-    cur = conn.cursor()
-    cur.execute(f"SELECT * FROM holdings WHERE id={PH} AND user_id={PH}", (holding_id, user_id))
-    row = _fetchone(cur)
-    if not row:
+    try:
+        cur = conn.cursor()
+        cur.execute(f"SELECT * FROM holdings WHERE id={PH} AND user_id={PH}", (holding_id, user_id))
+        removed = _fetchone(cur)
+        if not removed:
+            conn.rollback()
+            return None
+        cur.execute(f"DELETE FROM holdings WHERE id={PH} AND user_id={PH}", (holding_id, user_id))
+        cur.execute(
+            f"INSERT INTO transactions (user_id, action, ticker, details) VALUES ({PH}, 'DELETE', {PH}, {PH})",
+            (user_id, removed["ticker"], json.dumps({"shares": removed["shares"]})),
+        )
+        conn.commit()
+        return removed
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
         _release(conn)
-        return None
-    removed = row
-    cur.execute(f"DELETE FROM holdings WHERE id={PH} AND user_id={PH}", (holding_id, user_id))
-    cur.execute(
-        f"INSERT INTO transactions (user_id, action, ticker, details) VALUES ({PH}, 'DELETE', {PH}, {PH})",
-        (user_id, removed["ticker"], json.dumps({"shares": removed["shares"]})),
-    )
-    conn.commit()
-    _release(conn)
-    return removed
 
 
 def sell_user_holding(user_id: int, ticker: str, shares: float, sell_price: float) -> dict | None:
@@ -680,41 +680,41 @@ def sell_user_holding_by_lot(user_id: int, holding_id: int, shares: float, sell_
 # ── Options operations ──────────────────────────────────────────────────
 
 def get_user_options(user_id: int) -> list[dict]:
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(f"SELECT * FROM options WHERE user_id = {PH} ORDER BY id", (user_id,))
-    rows = _fetchall(cur)
-    _release(conn)
-    return rows
+    return _run(f"SELECT * FROM options WHERE user_id = {PH} ORDER BY id", (user_id,), "all")
 
 
 def add_user_option(user_id: int, ticker: str, option_type: str, strike: float,
                     expiry: str, premium: float, contracts: int, position: str = "long") -> dict:
     _option_values(option_type, position, strike, expiry, premium, contracts)
     conn = get_db()
-    cur = conn.cursor()
-    action = "BTO" if position == "long" else "STO"
-    if USE_PG:
+    try:
+        cur = conn.cursor()
+        action = "BTO" if position == "long" else "STO"
+        if USE_PG:
+            cur.execute(
+                f"INSERT INTO options (user_id, ticker, option_type, position, strike, expiry, premium, contracts) VALUES ({PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH}) RETURNING *",
+                (user_id, ticker.upper(), option_type.lower(), position.lower(), strike, expiry, premium, contracts),
+            )
+            new_row = _fetchone(cur)
+        else:
+            cur.execute(
+                f"INSERT INTO options (user_id, ticker, option_type, position, strike, expiry, premium, contracts) VALUES ({PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH})",
+                (user_id, ticker.upper(), option_type.lower(), position.lower(), strike, expiry, premium, contracts),
+            )
+            cur.execute(f"SELECT * FROM options WHERE id = {PH}", (cur.lastrowid,))
+            new_row = _fetchone(cur)
         cur.execute(
-            f"INSERT INTO options (user_id, ticker, option_type, position, strike, expiry, premium, contracts) VALUES ({PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH}) RETURNING *",
-            (user_id, ticker.upper(), option_type.lower(), position.lower(), strike, expiry, premium, contracts),
+            f"INSERT INTO transactions (user_id, action, ticker, details) VALUES ({PH}, {PH}, {PH}, {PH})",
+            (user_id, f"{action}_{option_type.upper()}", ticker.upper(),
+             json.dumps({"strike": strike, "expiry": expiry, "premium": premium, "contracts": contracts})),
         )
-        new_row = _fetchone(cur)
-    else:
-        cur.execute(
-            f"INSERT INTO options (user_id, ticker, option_type, position, strike, expiry, premium, contracts) VALUES ({PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH})",
-            (user_id, ticker.upper(), option_type.lower(), position.lower(), strike, expiry, premium, contracts),
-        )
-        cur.execute(f"SELECT * FROM options WHERE id = {PH}", (cur.lastrowid,))
-        new_row = _fetchone(cur)
-    cur.execute(
-        f"INSERT INTO transactions (user_id, action, ticker, details) VALUES ({PH}, {PH}, {PH}, {PH})",
-        (user_id, f"{action}_{option_type.upper()}", ticker.upper(),
-         json.dumps({"strike": strike, "expiry": expiry, "premium": premium, "contracts": contracts})),
-    )
-    conn.commit()
-    _release(conn)
-    return new_row
+        conn.commit()
+        return new_row
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        _release(conn)
 
 
 def close_user_option(user_id: int, ticker: str, option_type: str, strike: float,
@@ -842,96 +842,79 @@ def update_user_option(user_id: int, option_id: int, ticker: str, option_type: s
                        position: str = "long") -> dict | None:
     _option_values(option_type, position, strike, expiry, premium, contracts)
     conn = get_db()
-    cur = conn.cursor()
-    cur.execute(
-        f"UPDATE options SET ticker={PH}, option_type={PH}, position={PH}, strike={PH}, expiry={PH}, premium={PH}, contracts={PH} WHERE id={PH} AND user_id={PH}",
-        (ticker.upper(), option_type.lower(), position.lower(), strike, expiry, premium, contracts, option_id, user_id),
-    )
-    if cur.rowcount == 0:
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            f"UPDATE options SET ticker={PH}, option_type={PH}, position={PH}, strike={PH}, expiry={PH}, premium={PH}, contracts={PH} WHERE id={PH} AND user_id={PH}",
+            (ticker.upper(), option_type.lower(), position.lower(), strike, expiry, premium, contracts, option_id, user_id),
+        )
+        if cur.rowcount == 0:
+            conn.rollback()
+            return None
+        cur.execute(
+            f"INSERT INTO transactions (user_id, action, ticker, details) VALUES ({PH}, 'EDIT_OPTION', {PH}, {PH})",
+            (user_id, ticker.upper(), json.dumps({"strike": strike, "expiry": expiry})),
+        )
+        conn.commit()
+        cur.execute(f"SELECT * FROM options WHERE id = {PH}", (option_id,))
+        return _fetchone(cur)
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
         _release(conn)
-        return None
-    cur.execute(
-        f"INSERT INTO transactions (user_id, action, ticker, details) VALUES ({PH}, 'EDIT_OPTION', {PH}, {PH})",
-        (user_id, ticker.upper(), json.dumps({"strike": strike, "expiry": expiry})),
-    )
-    conn.commit()
-    cur.execute(f"SELECT * FROM options WHERE id = {PH}", (option_id,))
-    result = _fetchone(cur)
-    _release(conn)
-    return result
 
 
 def delete_user_option(user_id: int, option_id: int) -> dict | None:
     conn = get_db()
-    cur = conn.cursor()
-    cur.execute(f"SELECT * FROM options WHERE id={PH} AND user_id={PH}", (option_id, user_id))
-    row = _fetchone(cur)
-    if not row:
+    try:
+        cur = conn.cursor()
+        cur.execute(f"SELECT * FROM options WHERE id={PH} AND user_id={PH}", (option_id, user_id))
+        removed = _fetchone(cur)
+        if not removed:
+            conn.rollback()
+            return None
+        cur.execute(f"DELETE FROM options WHERE id={PH} AND user_id={PH}", (option_id, user_id))
+        cur.execute(
+            f"INSERT INTO transactions (user_id, action, ticker, details) VALUES ({PH}, 'DELETE_OPTION', {PH}, {PH})",
+            (user_id, removed["ticker"], json.dumps({"strike": removed["strike"]})),
+        )
+        conn.commit()
+        return removed
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
         _release(conn)
-        return None
-    removed = row
-    cur.execute(f"DELETE FROM options WHERE id={PH} AND user_id={PH}", (option_id, user_id))
-    cur.execute(
-        f"INSERT INTO transactions (user_id, action, ticker, details) VALUES ({PH}, 'DELETE_OPTION', {PH}, {PH})",
-        (user_id, removed["ticker"], json.dumps({"strike": removed["strike"]})),
-    )
-    conn.commit()
-    _release(conn)
-    return removed
 
 
 def get_user_transactions(user_id: int) -> list[dict]:
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(f"SELECT * FROM transactions WHERE user_id={PH} ORDER BY created_at DESC", (user_id,))
-    rows = _fetchall(cur)
-    _release(conn)
-    return rows
+    return _run(f"SELECT * FROM transactions WHERE user_id={PH} ORDER BY created_at DESC", (user_id,), "all")
 
 
 # ── Watchlist operations ─────────────────────────────────────────────────
 
 def get_user_watchlist(user_id: int) -> list[str]:
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(f"SELECT ticker FROM watchlist WHERE user_id={PH} ORDER BY added_at", (user_id,))
-    rows = _fetchall(cur)
-    _release(conn)
+    rows = _run(f"SELECT ticker FROM watchlist WHERE user_id={PH} ORDER BY added_at", (user_id,), "all")
     return [r["ticker"] for r in rows]
 
 
 def add_to_watchlist(user_id: int, ticker: str) -> bool:
-    conn = get_db()
-    cur = conn.cursor()
     try:
-        cur.execute(f"INSERT INTO watchlist (user_id, ticker) VALUES ({PH}, {PH})", (user_id, ticker.upper()))
-        conn.commit()
-        _release(conn)
+        _run(f"INSERT INTO watchlist (user_id, ticker) VALUES ({PH}, {PH})", (user_id, ticker.upper()))
         return True
     except Exception:
-        conn.rollback()
-        _release(conn)
         return False
 
 
 def remove_from_watchlist(user_id: int, ticker: str) -> bool:
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(f"DELETE FROM watchlist WHERE user_id={PH} AND ticker={PH}", (user_id, ticker.upper()))
-    conn.commit()
-    removed = cur.rowcount > 0
-    _release(conn)
-    return removed
+    return _run(f"DELETE FROM watchlist WHERE user_id={PH} AND ticker={PH}", (user_id, ticker.upper())) > 0
 
 
 # ── Closed trades operations ─────────────────────────────────────────────
 
 def get_closed_trades(user_id: int) -> list[dict]:
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(f"SELECT * FROM closed_trades WHERE user_id={PH} ORDER BY closed_at DESC", (user_id,))
-    rows = _fetchall(cur)
-    _release(conn)
+    rows = _run(f"SELECT * FROM closed_trades WHERE user_id={PH} ORDER BY closed_at DESC", (user_id,), "all")
     if rows:
         from accounting import report
         details = {lot["source_id"]: lot for lot in report(user_id)["tax_lots"] if lot["source"] == "closed_trades"}
@@ -1045,14 +1028,10 @@ def record_closed_option(user_id: int, request, *, trade_id: int | None = None) 
 
 
 def get_closed_options(user_id: int) -> list[dict]:
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(f"""SELECT closed_options.*, EXISTS (SELECT 1 FROM accounting_events event
+    rows = _run(f"""SELECT closed_options.*, EXISTS (SELECT 1 FROM accounting_events event
         WHERE event.user_id=closed_options.user_id AND event.source_id=closed_options.id
         AND event.source='closed_option_import') AS is_manual
-        FROM closed_options WHERE user_id={PH} ORDER BY closed_at DESC""", (user_id,))
-    rows = _fetchall(cur)
-    _release(conn)
+        FROM closed_options WHERE user_id={PH} ORDER BY closed_at DESC""", (user_id,), "all")
     if rows:
         from accounting import report
         details = {lot["source_id"]: lot for lot in report(user_id)["tax_lots"] if lot["source"] == "closed_options"}
@@ -1098,48 +1077,21 @@ def delete_closed_option(user_id: int, trade_id: int) -> bool:
 # ── Refresh token operations ─────────────────────────────────────────────
 
 def store_refresh_token(user_id: int, token: str, expires_at: str) -> None:
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(
-        f"INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES ({PH}, {PH}, {PH})",
-        (user_id, token, expires_at),
-    )
-    conn.commit()
-    _release(conn)
+    _run(f"INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES ({PH}, {PH}, {PH})",
+         (user_id, token, expires_at))
 
 
-def get_refresh_token(token: str) -> dict | None:
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(f"SELECT * FROM refresh_tokens WHERE token = {PH}", (token,))
-    row = _fetchone(cur)
-    _release(conn)
-    return row
-
-
-def delete_refresh_token(token: str) -> None:
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(f"DELETE FROM refresh_tokens WHERE token = {PH}", (token,))
-    conn.commit()
-    _release(conn)
+def consume_refresh_token(token: str) -> dict | None:
+    """Atomically delete and return a refresh token so concurrent requests cannot reuse it."""
+    return _run(f"DELETE FROM refresh_tokens WHERE token = {PH} RETURNING *", (token,), "one")
 
 
 def delete_user_refresh_tokens(user_id: int) -> None:
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(f"DELETE FROM refresh_tokens WHERE user_id = {PH}", (user_id,))
-    conn.commit()
-    _release(conn)
+    _run(f"DELETE FROM refresh_tokens WHERE user_id = {PH}", (user_id,))
 
 
 def cleanup_expired_refresh_tokens() -> None:
-    conn = get_db()
-    cur = conn.cursor()
-    now = datetime.utcnow().isoformat()
-    cur.execute(f"DELETE FROM refresh_tokens WHERE expires_at < {PH}", (now,))
-    conn.commit()
-    _release(conn)
+    _run(f"DELETE FROM refresh_tokens WHERE expires_at < {PH}", (datetime.utcnow().isoformat(),))
 
 
 # ── Notifications ─────────────────────────────────────────────────────────────────
@@ -1167,11 +1119,7 @@ def add_notification(user_id: int, kind: str, title: str, body: str, dedup_key: 
 
 
 def delete_notification(user_id: int, dedup_key: str) -> None:
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(f"DELETE FROM notifications WHERE user_id={PH} AND dedup_key={PH}", (user_id, dedup_key))
-    conn.commit()
-    _release(conn)
+    _run(f"DELETE FROM notifications WHERE user_id={PH} AND dedup_key={PH}", (user_id, dedup_key))
 
 
 def _decode_notification(row: dict) -> dict:
@@ -1184,53 +1132,33 @@ def _decode_notification(row: dict) -> dict:
 
 
 def get_notification(user_id: int, dedup_key: str) -> dict | None:
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(f"SELECT * FROM notifications WHERE user_id={PH} AND dedup_key={PH}", (user_id, dedup_key))
-    row = _fetchone(cur)
-    _release(conn)
+    row = _run(f"SELECT * FROM notifications WHERE user_id={PH} AND dedup_key={PH}", (user_id, dedup_key), "one")
     return _decode_notification(row) if row else None
 
 
 def list_notifications(user_id: int, limit: int = 50) -> list[dict]:
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(
+    rows = _run(
         f"SELECT id, kind, ticker, title, body, created_at, read_at FROM notifications "
         f"WHERE user_id={PH} ORDER BY created_at DESC, id DESC LIMIT {PH}",
-        (user_id, limit),
+        (user_id, limit), "all",
     )
-    rows = _fetchall(cur)
-    _release(conn)
     return [_decode_notification(r) for r in rows]
 
 
 def mark_notifications_read(user_id: int) -> None:
-    conn = get_db()
-    cur = conn.cursor()
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-    cur.execute(f"UPDATE notifications SET read_at={PH} WHERE user_id={PH} AND read_at IS NULL", (now, user_id))
-    conn.commit()
-    _release(conn)
+    _run(f"UPDATE notifications SET read_at={PH} WHERE user_id={PH} AND read_at IS NULL", (now, user_id))
 
 
 def delete_old_notifications(days: int = 30) -> None:
     from datetime import timedelta
     cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(f"DELETE FROM notifications WHERE created_at < {PH}", (cutoff,))
-    conn.commit()
-    _release(conn)
+    _run(f"DELETE FROM notifications WHERE created_at < {PH}", (cutoff,))
 
 
 def get_all_user_tickers() -> dict[int, set[str]]:
     """Map of user_id -> tickers they hold or watch (for scheduled alerts/briefings)."""
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute("SELECT user_id, ticker FROM holdings UNION SELECT user_id, ticker FROM watchlist")
-    rows = _fetchall(cur)
-    _release(conn)
+    rows = _run("SELECT user_id, ticker FROM holdings UNION SELECT user_id, ticker FROM watchlist", (), "all")
     out: dict[int, set[str]] = {}
     for r in rows:
         out.setdefault(r["user_id"], set()).add(r["ticker"].upper())
@@ -1242,20 +1170,12 @@ def get_option_user_ids() -> list[int]:
 
 
 def get_ntfy_topic(user_id: int) -> str | None:
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(f"SELECT ntfy_topic FROM users WHERE id={PH}", (user_id,))
-    row = _fetchone(cur)
-    _release(conn)
+    row = _run(f"SELECT ntfy_topic FROM users WHERE id={PH}", (user_id,), "one")
     return row["ntfy_topic"] if row else None
 
 
 def set_ntfy_topic(user_id: int, topic: str | None) -> None:
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(f"UPDATE users SET ntfy_topic={PH} WHERE id={PH}", (topic, user_id))
-    conn.commit()
-    _release(conn)
+    _run(f"UPDATE users SET ntfy_topic={PH} WHERE id={PH}", (topic, user_id))
 
 
 # ── Implied volatility history (for true IV rank) ─────────────────────────────────
@@ -1277,12 +1197,8 @@ def record_iv(ticker: str, day: str, iv: float) -> None:
 
 
 def get_iv_history(ticker: str, since_day: str) -> list[float]:
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(f"SELECT iv FROM iv_history WHERE ticker={PH} AND day >= {PH} ORDER BY day",
-                (ticker.upper(), since_day))
-    rows = _fetchall(cur)
-    _release(conn)
+    rows = _run(f"SELECT iv FROM iv_history WHERE ticker={PH} AND day >= {PH} ORDER BY day",
+                (ticker.upper(), since_day), "all")
     return [float(r["iv"]) for r in rows]
 
 

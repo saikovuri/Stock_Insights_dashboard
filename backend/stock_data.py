@@ -183,11 +183,18 @@ def _finnhub_metrics(ticker: str) -> dict | None:
 def get_key_metrics(ticker: str) -> dict:
     """Key metrics: Finnhub (real-time, reliable) with yfinance fallback. Cached 5 min."""
     def _fetch():
+        metrics = None
         if finnhub_enabled():
-            fh = _finnhub_metrics(ticker)
-            if fh:
-                return fh
-        return _yf_metrics(ticker)
+            metrics = _finnhub_metrics(ticker)
+        metrics = metrics or _yf_metrics(ticker)
+        # Provider 52-week ranges can lag today's session; today's trading must stay inside the range.
+        session = [v for v in (metrics.get("price"), metrics.get("day_high"), metrics.get("day_low")) if v]
+        if session:
+            if metrics.get("52w_high"):
+                metrics["52w_high"] = max(metrics["52w_high"], *session)
+            if metrics.get("52w_low"):
+                metrics["52w_low"] = min(metrics["52w_low"], *session)
+        return metrics
 
     return get_or_fetch(f"metrics:{ticker}", _fetch, ttl=METRICS_TTL)
 

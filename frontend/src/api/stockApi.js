@@ -45,6 +45,19 @@ function currentCredentials(credentials) {
     && localStorage.getItem('refresh_token') === credentials.refresh_token;
 }
 
+function tokenSubject(token) {
+  try {
+    return JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).sub ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// Refresh tokens are single-use, so tabs must take turns; a waiting tab adopts the winner's rotation.
+function withRefreshLock(callback) {
+  return navigator.locks?.request ? navigator.locks.request('stockpilot-auth-refresh', callback) : callback();
+}
+
 export async function authFetch(url, opts = {}) {
   const credentials = { token: localStorage.getItem('token'), refresh_token: localStorage.getItem('refresh_token') };
   opts = { ...opts, headers: { ...opts.headers, ...authHeaders() } };
@@ -54,14 +67,23 @@ export async function authFetch(url, opts = {}) {
     if (!state || state.credentials.token !== credentials.token
         || state.credentials.refresh_token !== credentials.refresh_token
         || !currentCredentials(state.result ?? state.credentials)) {
-      if (!currentCredentials(credentials)) throw new Error('Session changed. Retry from the current account.');
       const pending = { credentials, result: null, promise: null };
       _refreshState = pending;
-      pending.promise = netFetch(`${BASE}/auth/refresh`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refresh_token: credentials.refresh_token }),
-      }).then(async (response) => {
+      pending.promise = withRefreshLock(async () => {
+        if (!currentCredentials(credentials)) {
+          const stored = { token: localStorage.getItem('token'), refresh_token: localStorage.getItem('refresh_token') };
+          const subject = tokenSubject(credentials.token);
+          if (subject === null || !stored.refresh_token || tokenSubject(stored.token) !== subject) {
+            throw new Error('Session changed. Retry from the current account.');
+          }
+          pending.result = stored;
+          return stored;
+        }
+        const response = await netFetch(`${BASE}/auth/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh_token: credentials.refresh_token }),
+        });
         if (!response.ok) {
           const error = new Error(response.status === 401 || response.status === 403 ? 'Session expired' : 'Session refresh unavailable. Retry shortly.');
           error.status = response.status;

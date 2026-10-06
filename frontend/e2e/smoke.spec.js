@@ -28,6 +28,9 @@ const fixtures = {
 test.beforeEach(async ({ page }) => {
   errors.set(page, []);
   page.on('pageerror', error => errors.get(page).push(error.message));
+  page.on('console', message => {
+    if (message.type() === 'error' && /Content Security Policy/i.test(message.text())) errors.get(page).push(message.text());
+  });
   await page.addInitScript(() => {
     localStorage.setItem('token', 'synthetic-test-token');
     localStorage.setItem('stockpilot_tour_v1', 'done');

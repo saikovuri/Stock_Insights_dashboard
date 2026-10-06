@@ -697,6 +697,44 @@ test.each([200, 401])('old token refresh (%s) cannot replace or clear a new sess
   expect(sessionStorage.getItem('new-account-cache')).toBe('keep');
 });
 
+const jwt = (sub) => `h.${btoa(JSON.stringify({ sub: String(sub) })).replace(/=+$/, '')}.s`;
+
+test('a tab adopts a same-account rotation made by another tab instead of reusing the consumed token', async () => {
+  const [oldAccess, rotatedAccess] = [jwt(7), `${jwt(7)}x`];
+  localStorage.setItem('token', oldAccess); localStorage.setItem('refresh_token', 'consumed');
+  let resolveRequest;
+  const fetch = vi.fn((url, options) => {
+    if (url.endsWith('/auth/refresh')) return Promise.resolve(new Response('{}', { status: 401 }));
+    if (options.headers.Authorization === `Bearer ${rotatedAccess}`) return Promise.resolve(new Response('{}'));
+    return new Promise(resolve => { resolveRequest = resolve; });
+  });
+  vi.stubGlobal('fetch', fetch);
+  const request = authFetch('/private');
+  localStorage.setItem('token', rotatedAccess); localStorage.setItem('refresh_token', 'rotated');
+  resolveRequest(new Response('{}', { status: 401 }));
+  expect((await request).ok).toBe(true);
+  expect(fetch.mock.calls.filter(([url]) => url.endsWith('/auth/refresh'))).toHaveLength(0);
+  expect(localStorage.getItem('refresh_token')).toBe('rotated');
+});
+
+test('cross-tab refreshes take turns through the shared lock', async () => {
+  const order = [];
+  let tail = Promise.resolve();
+  vi.stubGlobal('navigator', { ...navigator, locks: { request: (name, callback) => {
+    order.push(name);
+    const run = tail.then(callback);
+    tail = run.catch(() => {});
+    return run;
+  } } });
+  localStorage.setItem('token', jwt(3)); localStorage.setItem('refresh_token', 'r1');
+  vi.stubGlobal('fetch', vi.fn(async (url, options) => url.endsWith('/auth/refresh')
+    ? new Response(JSON.stringify({ token: `${jwt(3)}n`, refresh_token: 'r2' }))
+    : new Response('{}', { status: options.headers.Authorization === `Bearer ${jwt(3)}n` ? 200 : 401 })));
+  expect((await authFetch('/private')).ok).toBe(true);
+  expect(order).toEqual(['stockpilot-auth-refresh']);
+  expect(localStorage.getItem('refresh_token')).toBe('r2');
+});
+
 test('delayed unauthorized mutation is not retried as a different account', async () => {
   localStorage.setItem('token', 'old-access'); localStorage.setItem('refresh_token', 'old-refresh');
   let resolveRequest;

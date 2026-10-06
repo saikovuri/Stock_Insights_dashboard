@@ -53,7 +53,7 @@ from database import (
     assign_user_option, kv_set,
     get_user_transactions, get_user_watchlist, add_to_watchlist, remove_from_watchlist,
     get_closed_trades, get_closed_options, delete_closed_trade, delete_closed_option, record_closed_option,
-    store_refresh_token, get_refresh_token, delete_refresh_token, delete_user_refresh_tokens,
+    store_refresh_token, consume_refresh_token, delete_user_refresh_tokens,
     list_notifications, mark_notifications_read, get_ntfy_topic, set_ntfy_topic,
     get_trader_profile, set_trader_profile, list_user_alerts, add_user_alert, delete_user_alert,
     count_active_alerts, list_journal, add_journal, update_journal, delete_journal,
@@ -114,7 +114,7 @@ async def health_check():
     return {"status": "ok"}
 
 @app.api_route("/api/health", methods=["GET", "HEAD"])
-async def api_health_check():
+def api_health_check():
     """Health check that pings the DB to keep Supabase alive."""
     conn = None
     try:
@@ -243,6 +243,8 @@ def register(request: Request, req: RegisterRequest):
         raise HTTPException(status_code=400, detail="Username must be at least 3 characters")
     if len(req.password) < 6:
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    if len(req.password.encode()) > 72:
+        raise HTTPException(status_code=400, detail="Password must be at most 72 bytes")
     hashed = hash_password(req.password)
     user = create_user(req.username.strip(), hashed, req.display_name.strip())
     if not user:
@@ -254,7 +256,7 @@ def register(request: Request, req: RegisterRequest):
 @limiter.limit("10/minute")
 def login(request: Request, req: LoginRequest):
     user = get_user_by_username(req.username.strip())
-    if not user or not verify_password(req.password, user["password_hash"]):
+    if not user or len(req.password.encode()) > 72 or not verify_password(req.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid username or password")
     return _issue_tokens(user)
 
@@ -266,20 +268,15 @@ class RefreshRequest(BaseModel):
 @app.post("/api/auth/refresh")
 @limiter.limit("30/minute")
 def refresh(request: Request, req: RefreshRequest):
-    stored = get_refresh_token(req.refresh_token)
+    stored = consume_refresh_token(req.refresh_token)
     if not stored:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
-    # Check expiry
     expires = datetime.fromisoformat(str(stored["expires_at"]).replace("+00:00", "").replace("Z", ""))
     if datetime.utcnow() > expires:
-        delete_refresh_token(req.refresh_token)
         raise HTTPException(status_code=401, detail="Refresh token expired")
-    # Rotate: delete old, issue new pair
     user = get_user_by_username_by_id(stored["user_id"])
     if not user:
-        delete_refresh_token(req.refresh_token)
         raise HTTPException(status_code=401, detail="User not found")
-    delete_refresh_token(req.refresh_token)
     return _issue_tokens(user)
 
 

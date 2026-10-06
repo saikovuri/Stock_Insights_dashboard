@@ -13,7 +13,7 @@ from stock_data import get_quote, get_stock_data
 log = logging.getLogger(__name__)
 ET = ZoneInfo("America/New_York")
 
-INDEXES = [("SPY", "S&P 500"), ("QQQ", "Nasdaq 100"), ("DIA", "Dow 30"), ("IWM", "Russell 2000")]
+INDEXES = [("SPY", "S&P 500 (SPY)"), ("QQQ", "Nasdaq 100 (QQQ)"), ("DIA", "Dow 30 (DIA)"), ("IWM", "Russell 2000 (IWM)")]
 SECTORS = [
     ("XLK", "Technology"), ("XLC", "Communication"), ("XLY", "Consumer Disc."), ("XLF", "Financials"),
     ("XLV", "Health Care"), ("XLI", "Industrials"), ("XLE", "Energy"), ("XLP", "Staples"),

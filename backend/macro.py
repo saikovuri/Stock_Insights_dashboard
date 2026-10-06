@@ -67,6 +67,8 @@ def economic_calendar(days: int = 7) -> dict:
             log.info("Economic calendar unavailable for %s: %s", d, e)
     if weekdays and failed == len(weekdays):
         source = "Federal Reserve schedule"
+    # Nasdaq can echo a prior value as "actual" before a release; only past/today's releases have actuals.
+    events = [{**e, "actual": None} if e["date"] > today.isoformat() else e for e in events]
     fomc = [f for f in FOMC_2026 if today.isoformat() <= f <= (today + timedelta(days=days)).isoformat()]
     for f in fomc:
         if not any(e["date"] == f and "rate decision" in e["event"].lower() for e in events):

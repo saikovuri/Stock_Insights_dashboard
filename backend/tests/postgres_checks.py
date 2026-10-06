@@ -92,6 +92,17 @@ def main():
     with ThreadPoolExecutor(max_workers=2) as executor:
         results = list(executor.map(lambda _: transfer(), range(2)))
     assert sum(not result["already_imported"] for result in results) == 1
+    token = uuid4().hex
+    database.store_refresh_token(user, token, "2099-01-01T00:00:00")
+    barrier = Barrier(2)
+
+    def consume():
+        barrier.wait()
+        return database.consume_refresh_token(token)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        consumed = list(executor.map(lambda _: consume(), range(2)))
+    assert sum(row is not None for row in consumed) == 1, "Refresh token was reusable concurrently"
     transferred = next(row for row in database.get_closed_options(destination) if row["ticker"] == "WDC")
     assert transferred["net_pnl"] == 92.5 and transferred["is_manual"]
     assert transferred["review"]["target_capture_pct"] == 50
