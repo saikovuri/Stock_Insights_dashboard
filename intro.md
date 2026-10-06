@@ -1056,3 +1056,24 @@ The frontend lockfile uses Capacitor Android, iOS and core 8.5.2 to address GHSA
 `source-map-js` is temporarily overridden with the maintainer's 1.2.2 release archive at immutable commit `0a1d334fd1e55a47df97fcd60a7915d46df3b08a`, which includes the fix for GHSA-68fv-2mgg-jv7q. The patched npm release was unavailable during verification. The lockfile records archive integrity; installation requires access to GitHub's codeload host and the public package mirror used by the new Capacitor entries. Replace the override with the patched npm release when it is available and verified, then rerun the audit and regression checks. Do not bypass the security gate or force a breaking Vite downgrade.
 
 Frontend-only dependency changes trigger regression checks but do not match the Oracle workflow's automatic `backend/**` and `deploy/**` push filters. After pushing a validated fix, manually dispatch the Oracle deployment workflow on the updated branch; rerunning an old failed commit still uses its old lockfile.
+
+### Supabase Table Access
+
+`public.idea_log` stores generated options ideas and their paper outcomes. PostgreSQL startup enables row-level security (RLS) on this table immediately after creation, including when upgrading an existing table. This does not remove any pre-existing policies. StockPilot uses its own backend authentication and trusted database connection, not direct browser access to this table through Supabase Auth. The table owner or a role with `BYPASSRLS` retains backend access; do not add a public allow-all policy to silence a warning.
+
+An existing production warning requires a live database change; editing or committing the repository alone does not secure Supabase. For a warning about `public.idea_log`, run this as the database owner in the affected project's Supabase SQL Editor:
+
+```sql
+BEGIN;
+ALTER TABLE public.idea_log ENABLE ROW LEVEL SECURITY;
+REVOKE ALL PRIVILEGES ON TABLE public.idea_log FROM PUBLIC, anon, authenticated;
+COMMIT;
+
+SELECT relrowsecurity AS rls_enabled,
+	   has_table_privilege('anon', 'public.idea_log', 'SELECT') AS anon_can_select,
+	   has_table_privilege('authenticated', 'public.idea_log', 'SELECT') AS authenticated_can_select
+FROM pg_class
+WHERE oid = 'public.idea_log'::regclass;
+```
+
+Expect `true`, `false`, `false`, then rerun Supabase's Security Advisor and check the backend's options-track-record view. The transaction preserves records and blocks public-role table access even if legacy RLS policies remain. If the backend uses a non-owner role without `BYPASSRLS`, configure a narrowly scoped backend policy before enabling RLS rather than granting access to browser roles. The broader [Supabase RLS script](deploy/supabase_rls.sql) covers the other named StockPilot tables; verify their status separately. A warning alone does not establish that data was accessed: inspect available API/database logs to assess past exposure. Local tests do not verify production grants, policies, or historical access.

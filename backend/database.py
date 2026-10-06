@@ -431,6 +431,8 @@ def init_db():
             UNIQUE(kind, ticker, expiry, legs_key)
         )
     """)
+    if USE_PG:
+        cur.execute("ALTER TABLE public.idea_log ENABLE ROW LEVEL SECURITY")
     for column in ("opened_at", "notes"):
         if USE_PG:
             cur.execute(f"ALTER TABLE closed_options ADD COLUMN IF NOT EXISTS {column} TEXT")

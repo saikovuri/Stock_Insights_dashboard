@@ -102,6 +102,8 @@ def main():
     conn = database.get_db()
     try:
         cursor = conn.cursor()
+        cursor.execute("SELECT relrowsecurity FROM pg_class WHERE oid='public.idea_log'::regclass")
+        assert cursor.fetchone()[0], "Startup left idea_log exposed without RLS"
         for statement in ("UPDATE accounting_events SET operation='changed'", "DELETE FROM accounting_events", "TRUNCATE accounting_events"):
             try:
                 cursor.execute(statement)
@@ -127,7 +129,7 @@ def main():
         assert cursor.fetchone(), "RLS migration removed an unrelated policy"
         conn.rollback()
         for role in ("anon", "authenticated"):
-            for table in ("holdings", "closed_trades", "accounting_events", "universe_snapshots"):
+            for table in ("holdings", "closed_trades", "accounting_events", "universe_snapshots", "idea_log"):
                 cursor.execute(f"SET LOCAL ROLE {role}")
                 try:
                     cursor.execute(f"SELECT * FROM {table}")
