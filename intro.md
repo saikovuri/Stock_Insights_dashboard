@@ -1046,3 +1046,13 @@ This guide describes the current **React frontend and FastAPI backend**, includi
 All monetary examples and standard equity-option multipliers assume the app's USD/100-share conventions unless a view states otherwise. The application is a research and record-keeping tool, not an execution venue, broker-reconciled accounting system or comprehensive tax filing product. A visible idea, favorable score, AI verdict or completed checklist does not override missing-data warnings or independent eligibility/capital checks.
 
 Implementation references throughout the guide are the best starting point when rules change. Updating a threshold in code should also update its corresponding explanation here.
+
+### Build and Deployment Dependency Checks
+
+CI runs frontend lint, unit tests, the production build, desktop/mobile browser checks, and `npm audit --audit-level=high`. The Oracle deployment depends on successful CI validation; a failed audit skips deployment rather than restarting the backend.
+
+The frontend lockfile uses Capacitor Android, iOS and core 8.5.2 to address GHSA-rvm3-566m-v7fv. The CLI is pinned separately to 8.4.3 because CLI 8.5.x introduces an `xcode` dependency with the vulnerable `uuid` version identified by GHSA-w5hq-g745-h8pq. This dependency update does not itself rebuild or publish native apps.
+
+`source-map-js` is temporarily overridden with the maintainer's 1.2.2 release archive at immutable commit `0a1d334fd1e55a47df97fcd60a7915d46df3b08a`, which includes the fix for GHSA-68fv-2mgg-jv7q. The patched npm release was unavailable during verification. The lockfile records archive integrity; installation requires access to GitHub's codeload host and the public package mirror used by the new Capacitor entries. Replace the override with the patched npm release when it is available and verified, then rerun the audit and regression checks. Do not bypass the security gate or force a breaking Vite downgrade.
+
+Frontend-only dependency changes trigger regression checks but do not match the Oracle workflow's automatic `backend/**` and `deploy/**` push filters. After pushing a validated fix, manually dispatch the Oracle deployment workflow on the updated branch; rerunning an old failed commit still uses its old lockfile.

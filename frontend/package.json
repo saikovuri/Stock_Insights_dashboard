@@ -15,10 +15,10 @@
     "cap:ios": "vite build && npx cap sync ios && npx cap open ios"
   },
   "dependencies": {
-    "@capacitor/android": "^8.3.0",
-    "@capacitor/cli": "^8.3.0",
-    "@capacitor/core": "^8.3.0",
-    "@capacitor/ios": "^8.3.0",
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/cli": "8.4.3",
+    "@capacitor/core": "^8.5.2",
+    "@capacitor/ios": "^8.5.2",
     "@capacitor/splash-screen": "^8.0.1",
     "@capacitor/status-bar": "^8.0.2",
     "@sentry/react": "^10.75.2",
@@ -40,5 +40,8 @@
     "typescript": "^6.0.2",
     "vite": "^6.0.0",
     "vitest": "^4.1.11"
+  },
+  "overrides": {
+    "source-map-js": "https://codeload.github.com/7rulnik/source-map-js/tar.gz/0a1d334fd1e55a47df97fcd60a7915d46df3b08a"
   }
 }
