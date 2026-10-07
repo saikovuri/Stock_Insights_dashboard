@@ -32,6 +32,7 @@ import ThesisCard from './components/ThesisCard';
 import EconomicCalendar from './components/EconomicCalendar';
 import Tour, { TOUR_KEY } from './components/Tour';
 import SystemStatus from './components/SystemStatus';
+import MyStock from './components/MyStock';
 import { ProfileProvider, useProfile, PROFILES, ALL_OPTION_TABS } from './ProfileContext';
 import { fetchMetrics, fetchHistory, fetchNews, fetchAlerts, fetchEvents } from './api/stockApi';
 
@@ -53,6 +54,7 @@ function getInitialTab() {
 function AppShell() {
   const { user, logout, loading: authLoading } = useAuth();
   const [statusOpen, setStatusOpen] = useState(false);
+  const [myLevels, setMyLevels] = useState([]);
   const { theme, toggle: toggleTheme } = useTheme();
   const { profile, setProfile, config } = useProfile();
   const [activeTab, setActiveTab] = useState(getInitialTab);
@@ -256,7 +258,8 @@ function AppShell() {
                     <KeyMetrics metrics={metrics} />
                     <AiBrief ticker={ticker} profile={profile} onSignIn={() => setShowLogin(true)} />
                     {show('thesis') && <ThesisCard ticker={ticker} />}
-                    <PriceChart ticker={ticker} data={history} events={events}
+                    {user && <MyStock ticker={ticker} price={metrics.price} onLevels={setMyLevels} />}
+                    <PriceChart ticker={ticker} data={history} events={events} myLevels={user ? myLevels : []}
                       period={period} interval={interval} prepost={prepost}
                       onSettingsChange={({ period: p, interval: i, prepost: pp }) => {
                         const newPeriod = p ?? period;

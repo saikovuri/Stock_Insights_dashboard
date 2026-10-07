@@ -85,7 +85,8 @@ The market overview shows when its quotes were fetched, and a selected stock sho
 | Key metrics | Price and daily change, market capitalization, valuation and other reported stock statistics. Missing provider fields are not proof of zero or absence. |
 | AI Brief | Profile-aware narrative, cited headlines, bull/bear arguments, risks, catalysts, and technical context. AI interpretation may be wrong and is not the deterministic options eligibility engine. |
 | Thesis | A signed-in user's investment thesis and subsequent reviews. Normally hidden for day traders. |
-| Price chart | Price history, selectable range/bar interval, extended-hours toggle, and event overlays. The visible time horizon follows the selected profile until changed. |
+| Your &lt;ticker&gt; | Signed-in only, shown when you have anything recorded for the stock (`GET /api/stock/{ticker}/mine`). Shows shares and average cost across all accounts (with a per-account split when there are several), unrealized P&L at the current price, earliest recorded purchase date, open options, and closed stock/option trade counts, gross realized P&L and win rates. |
+| Price chart | Price history, selectable range/bar interval, extended-hours toggle, and event overlays. The visible time horizon follows the selected profile until changed. When signed in, **My levels** draws your average cost per account (solid), each open option strike (dashed, coloured by side and type, labelled with expiry) and active price-above/below alerts as labelled price lines. Lines outside the visible price range are not drawn into view. |
 | Price alerts | Save price/RSI conditions for account notifications; this is distinct from visually drawn chart levels. |
 
 ### Analysis Tab

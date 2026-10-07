@@ -361,6 +361,24 @@ class FeatureTests(unittest.TestCase):
             with self.assertRaises(LookupError):
                 trim_plan.plan(uid, "TSLA", 50)
 
+    def test_my_stock_summarizes_positions_results_and_chart_levels(self):
+        uid = new_user()
+        database.add_user_holding(uid, "AMD", 100, 50, "2020-01-02 00:00:00", account="A")
+        database.add_user_holding(uid, "AMD", 100, 70, "2021-01-02 00:00:00", account="B")
+        database.add_user_option(uid, "AMD", "call", 580, "2099-06-16", 10, 1, "short", account="A")
+        database.add_user_holding(uid, "MSFT", 10, 300)
+        database.add_user_alert(uid, "AMD", "price_above", 700, None)
+        database.add_user_alert(uid, "AMD", "rsi_above", 70, None)
+        with self.as_user(uid):
+            self.assertEqual(self.client.get("/api/stock/AMD/mine").status_code, 200)
+            amd = self.client.get("/api/stock/amd/mine").json()
+            self.assertTrue(self.client.get("/api/stock/TSLA/mine").json()["empty"])
+        self.assertEqual((amd["shares"], amd["avg_cost"], amd["first_bought"]), (200, 60, "2020-01-02"))
+        self.assertEqual([(a["account"], a["avg_cost"]) for a in amd["accounts"]], [("A", 50), ("B", 70)])
+        self.assertEqual([(l["kind"], l["price"]) for l in amd["levels"]],
+                         [("alert", 700), ("short_call", 580), ("cost", 70), ("cost", 50)], "RSI alerts are not price levels")
+        self.assertEqual(self.client.get("/api/stock/AMD/mine").status_code, 401)
+
     def test_next_steps_flag_cash_concentration_and_covered_calls(self):
         import accounts as accounts_module
         import next_steps

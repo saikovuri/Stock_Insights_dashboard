@@ -9,6 +9,7 @@ import Tip from './Tip';
 
 const UP = '#26a69a';
 const DOWN = '#ef5350';
+const MY_LEVEL_COLORS = { cost: '#7c6cf0', short_call: '#f97316', short_put: '#eab308', long_call: '#22c55e', long_put: '#38bdf8', alert: '#9ca3af' };
 const INTRADAY = ['1m', '2m', '5m', '15m', '30m', '1h'];
 const DEFAULT_OVERLAYS = { intraday: ['vwap', 'ema_9', 'ema_21'], daily: ['sma_50', 'sma_200'] };
 
@@ -68,7 +69,7 @@ function fmtVol(v) {
   return String(v);
 }
 
-export default function CandleChart({ ticker, data, events, period, interval, prepost, onSettingsChange }) {
+export default function CandleChart({ ticker, data, events, period, interval, prepost, onSettingsChange, myLevels = [] }) {
   const { theme } = useTheme();
   const containerRef = useRef(null);
   const chartRef = useRef(null);
@@ -87,6 +88,7 @@ export default function CandleChart({ ticker, data, events, period, interval, pr
   const [hoverIdx, setHoverIdx] = useState(null);
   const [levels, setLevels] = useState(null);
   const [levelGroups, setLevelGroups] = useState(['prev', 'pre', 'or15']);
+  const [showMine, setShowMine] = useState(true);
 
   useEffect(() => {
     setOverlays(isIntraday ? DEFAULT_OVERLAYS.intraday : DEFAULT_OVERLAYS.daily);
@@ -190,6 +192,12 @@ export default function CandleChart({ ticker, data, events, period, interval, pr
     }
 
     let pane = 1;
+    if (showMine) {
+      myLevels.forEach(level => main.createPriceLine({
+        price: level.price, color: MY_LEVEL_COLORS[level.kind] || '#9ca3af', lineWidth: level.kind === 'cost' ? 2 : 1,
+        lineStyle: level.kind === 'cost' ? LineStyle.Solid : LineStyle.Dashed, axisLabelVisible: true, title: level.label,
+      }));
+    }
     const guide = (series, price, color) => series.createPriceLine({
       price, color, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false,
     });
@@ -256,7 +264,7 @@ export default function CandleChart({ ticker, data, events, period, interval, pr
       chart.remove();
       chartRef.current = null;
     };
-  }, [data, bars, candles, chartType, candleStyle, overlays, panels, showVolume, logScale, showEvents, events, theme, isIntraday, levels, levelGroups]);
+  }, [data, bars, candles, chartType, candleStyle, overlays, panels, showVolume, logScale, showEvents, events, theme, isIntraday, levels, levelGroups, myLevels, showMine]);
 
   if (!bars.length) return null;
 
@@ -308,6 +316,10 @@ export default function CandleChart({ ticker, data, events, period, interval, pr
           {!isIntraday && events && (
             <button className={showEvents ? 'active' : ''} onClick={() => setShowEvents(!showEvents)}
               title="Earnings & dividend markers">Events</button>
+          )}
+          {myLevels.length > 0 && (
+            <button className={showMine ? 'active' : ''} aria-pressed={showMine} onClick={() => setShowMine(!showMine)}
+              title="Your cost basis, option strikes and price alerts">My levels</button>
           )}
           <button onClick={() => chartRef.current?.timeScale().fitContent()} title="Reset zoom">⟲</button>
         </div>

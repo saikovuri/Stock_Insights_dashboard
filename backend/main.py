@@ -333,6 +333,14 @@ def stock_brief(request: Request, ticker: str, user: dict = Depends(get_current_
         raise _upstream_error(e)
 
 
+@app.get("/api/stock/{ticker}/mine")
+@limiter.limit("60/minute")
+def stock_mine(request: Request, ticker: str, user: dict = Depends(get_current_user)):
+    """The signed-in user's own positions, results and price levels for one ticker."""
+    import my_stock
+    return my_stock.summary(int(user["user_id"]), _valid_ticker(ticker))
+
+
 @app.get("/api/stock/{ticker}/alerts")
 @limiter.limit("60/minute")
 def stock_alerts(request: Request, ticker: str):
