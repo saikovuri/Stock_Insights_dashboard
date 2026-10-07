@@ -463,7 +463,8 @@ def portfolio_sell_lot(holding_id: int, req: HoldingRequest, user: dict = Depend
 @app.put("/api/portfolio/{holding_id:int}")
 def portfolio_edit(holding_id: int, req: HoldingUpdateRequest, user: dict = Depends(get_current_user)):
     account = req.account if "account" in req.model_fields_set else ...
-    result = update_user_holding(user["user_id"], holding_id, req.ticker, req.shares, req.price, account)
+    result = update_user_holding(user["user_id"], holding_id, req.ticker, req.shares, req.price, account,
+                                 req.acquired.isoformat() if req.acquired else None)
     if result is None:
         raise HTTPException(status_code=404, detail="Holding not found")
     return result

@@ -215,10 +215,10 @@ export async function closeOption(ticker, option_type, strike, expiry, premium, 
 }
 
 // ── Edit / Delete holdings ────────────────────────────────────────
-export async function editHolding(id, ticker, shares, price) {
+export async function editHolding(id, ticker, shares, price, acquired = '') {
   const res = await authFetch(`${BASE}/portfolio/${id}`, {
     method: 'PUT', headers: authHeaders(),
-    body: JSON.stringify({ ticker, shares, price }),
+    body: JSON.stringify({ ticker, shares, price, ...(acquired ? { acquired } : {}) }),
   });
   if (!res.ok) throw new Error(await readError(res, 'Failed to edit holding'));
   return res.json();

@@ -16,7 +16,14 @@ class HoldingRequest(BaseModel):
 
 
 class HoldingUpdateRequest(HoldingRequest):
-    pass
+    acquired: date | None = None
+
+    @field_validator("acquired")
+    @classmethod
+    def _not_future(cls, value: date | None) -> date | None:
+        if value and value > date.today():
+            raise ValueError("Purchase date can't be in the future")
+        return value
 
 
 class OptionRequest(BaseModel):

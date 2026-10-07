@@ -569,13 +569,16 @@ def add_user_holding(user_id: int, ticker: str, shares: float, buy_price: float,
 
 
 def update_user_holding(user_id: int, holding_id: int, ticker: str, shares: float, buy_price: float,
-                        account=...) -> dict | None:
+                        account=..., acquired: str | None = None) -> dict | None:
     _quantity(shares, "shares")
     _quantity(buy_price, "price", zero=True)
     conn = get_db()
     try:
         cur = conn.cursor()
         extra, values = ("", ()) if account is ... else (f", account={PH}", (account_name(account),))
+        if acquired:
+            extra += f", date_added={PH}"
+            values += (f"{acquired} 00:00:00",)
         cur.execute(
             f"UPDATE holdings SET ticker={PH}, shares={PH}, buy_price={PH}{extra} WHERE id={PH} AND user_id={PH}",
             (ticker.upper(), shares, buy_price, *values, holding_id, user_id),

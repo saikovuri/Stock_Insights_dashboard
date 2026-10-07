@@ -201,7 +201,7 @@ export default function Portfolio() {
 
   const startEditStock = (h) => {
     setEditIdx(h.id);
-    setForm({ ticker: h.ticker, shares: h.shares, price: h.buy_price });
+    setForm({ ticker: h.ticker, shares: h.shares, price: h.buy_price, acquired: String(h.date_added || '').slice(0, 10) });
   };
 
   const handleSaveEdit = async () => {
@@ -221,7 +221,7 @@ export default function Portfolio() {
     }
 
     try {
-      await editHolding(editIdx, form.ticker.toUpperCase(), form.shares, form.price);
+      await editHolding(editIdx, form.ticker.toUpperCase(), form.shares, form.price, form.acquired);
       setMsg(`Updated ${form.ticker.toUpperCase()}`);
       setEditIdx(null);
       setForm({ ticker: '', shares: 1, price: 100 });
@@ -472,6 +472,13 @@ export default function Portfolio() {
               <input id="stock-price" type="number" placeholder="Per share" value={form.price} min={0.01} step={0.5}
                 onChange={(e) => setForm({ ...form, price: parseFloat(e.target.value) || 0 })} />
             </div>
+            {editIdx !== null && !isGuest && (
+              <div className="form-field">
+                <label htmlFor="stock-acquired">Purchase date</label>
+                <input id="stock-acquired" type="date" value={form.acquired || ''} max={new Date().toLocaleDateString('en-CA')}
+                  onChange={(e) => setForm({ ...form, acquired: e.target.value })} />
+              </div>
+            )}
             <div className="form-actions">
               {editIdx !== null ? (
                 <>

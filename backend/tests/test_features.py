@@ -220,6 +220,23 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual((done["imported"], done["cash"]["cash"]), (1, 1200))
         self.assertEqual([(h["ticker"], h["account"]) for h in database.get_user_holdings(uid)], [("AAPL", "Fido")])
 
+    def test_editing_a_lot_can_correct_its_purchase_date(self):
+        uid = new_user()
+        lot = database.add_user_holding(uid, "AMD", 100, 59.38, account="Etrade")
+        with self.as_user(uid):
+            future = (date.today() + timedelta(days=2)).isoformat()
+            self.assertEqual(self.client.put(f"/api/portfolio/{lot['id']}", json={
+                "ticker": "AMD", "shares": 100, "price": 59.38, "acquired": future}).status_code, 422)
+            kept = self.client.put(f"/api/portfolio/{lot['id']}", json={"ticker": "AMD", "shares": 100, "price": 59.38})
+            self.assertEqual(kept.status_code, 200, kept.text)
+            before = str(kept.json()["date_added"])
+            edited = self.client.put(f"/api/portfolio/{lot['id']}", json={
+                "ticker": "AMD", "shares": 100, "price": 59.38, "acquired": "2019-03-15"})
+            self.assertEqual(edited.status_code, 200, edited.text)
+        self.assertTrue(str(edited.json()["date_added"]).startswith("2019-03-15"))
+        self.assertNotEqual(before[:10], "2019-03-15", "omitting the date leaves it unchanged")
+        self.assertEqual(edited.json()["account"], "Etrade")
+
     def test_next_steps_flag_cash_concentration_and_covered_calls(self):
         import accounts as accounts_module
         import next_steps

@@ -376,6 +376,25 @@ test('closing links a wheel cycle and expired options record worthless expiry in
   localStorage.removeItem('portfolio_account');
 });
 
+test('editing a stock lot can correct its purchase date', async () => {
+  vi.spyOn(auth, 'useAuth').mockReturnValue({ user: { id: 1 }, token: 'fixture' });
+  vi.spyOn(stockApi, 'fetchPortfolioSummary').mockResolvedValue({ total_invested: 5938, total_current: 64000, total_pnl: 58062, total_pnl_pct: 977,
+    holdings: [{ id: 15, ticker: 'AMD', shares: 100, buy_price: 59.38, current_price: 640, current_value: 64000, cost_value: 5938,
+      pnl: 58062, pnl_pct: 977, date_added: '2026-10-07 14:00:00', account: 'Default' }] });
+  vi.spyOn(stockApi, 'fetchClosedTrades').mockResolvedValue({ trades: [] });
+  vi.spyOn(stockApi, 'fetchClosedOptions').mockResolvedValue({ trades: [] });
+  vi.spyOn(stockApi, 'fetchAccounts').mockResolvedValue({ accounts: [{ name: 'Default', cash: null, put_collateral: 0, free_cash: null }] });
+  vi.spyOn(stockApi, 'fetchCorporateActions').mockResolvedValue({ splits: [] });
+  vi.spyOn(stockApi, 'fetchOptionsSummary').mockResolvedValue({ options: [] });
+  const edit = vi.spyOn(stockApi, 'editHolding').mockResolvedValue({});
+  render(<Portfolio />);
+  fireEvent.click(await screen.findByTitle('Edit'));
+  expect(screen.getByLabelText('Purchase date').value).toBe('2026-10-07');
+  fireEvent.change(screen.getByLabelText('Purchase date'), { target: { value: '2019-03-15' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  await waitFor(() => expect(edit).toHaveBeenCalledWith(15, 'AMD', 100, 59.38, '2019-03-15'));
+});
+
 async function openClosedOptionForm() {
   vi.spyOn(auth, 'useAuth').mockReturnValue({ user: { id: 1 } });
   vi.spyOn(stockApi, 'fetchJournal').mockResolvedValue({ entries: [] });

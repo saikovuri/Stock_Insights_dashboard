@@ -18,6 +18,15 @@ AI-powered stock research and portfolio assistant. FastAPI backend + React (Vite
 
 ## Quick Start
 
+Full setup on a new machine, production deployment, recovery and troubleshooting: **[setup.md](setup.md)**. The short version:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\setup-local.ps1   # or: bash scripts/setup-local.sh
+powershell -ExecutionPolicy Bypass -File scripts\dev.ps1           # or: bash scripts/dev.sh
+powershell -ExecutionPolicy Bypass -File scripts\check.ps1         # same checks as CI
+```
+
+Manual equivalent:
 ```bash
 cd backend
 pip install -r requirements.txt
