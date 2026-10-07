@@ -5,7 +5,7 @@ import {
   fetchPortfolioSummary, buyStock, sellStock, sellStockLot,
   fetchOptionsSummary, buyOption, closeOption,
   editHolding, deleteHolding, editOption, deleteOption,
-  fetchClosedTrades, fetchClosedOptions, assignOption, deleteClosedTrade, deleteClosedOption,
+  fetchClosedTrades, fetchClosedOptions, assignOption, expireOption, deleteClosedTrade, deleteClosedOption,
 } from '../api/stockApi';
 import PortfolioChart from './PortfolioChart';
 import SectorAllocation from './SectorAllocation';
@@ -16,6 +16,8 @@ import { Today, Earnings, WhatIf } from './OptionsDesk';
 import { ImportCsv } from './PortfolioInsights';
 import CorrelationHeatmap from './CorrelationHeatmap';
 import AccountTransfer from './AccountTransfer';
+import { AccountBar, NavHistory, SplitNotice } from './Accounts';
+import Skeleton from './Skeleton';
 
 const GUEST_HOLDINGS_KEY = 'guest_holdings';
 
@@ -35,6 +37,9 @@ export default function Portfolio() {
   const [section, setSection] = useState('holdings');
   const [loadError, setLoadError] = useState(null);
   const [transferRevision, setTransferRevision] = useState(0);
+  const [account, setAccountState] = useState(() => localStorage.getItem('portfolio_account') || '');
+  const setAccount = (name) => { localStorage.setItem('portfolio_account', name); setAccountState(name); };
+  const [cycle, setCycle] = useState('');
   const [view, setView] = useState('current');   // 'current' | 'sold'
   const [portfolio, setPortfolio] = useState(null);
   const [optionsSummary, setOptionsSummary] = useState(null);
@@ -86,13 +91,13 @@ export default function Portfolio() {
 
   const loadStocks = useCallback(async () => {
     if (isGuest) { await loadGuestStocks(); return; }
-    try { setPortfolio(await fetchPortfolioSummary()); } catch (error) { setLoadError(error.message); }
-  }, [isGuest, loadGuestStocks]);
+    try { setPortfolio(await fetchPortfolioSummary(account)); } catch (error) { setLoadError(error.message); }
+  }, [isGuest, loadGuestStocks, account]);
 
   const loadOptions = useCallback(async () => {
     if (isGuest) return;
-    try { setOptionsSummary(await fetchOptionsSummary()); } catch (error) { setLoadError(error.message); }
-  }, [isGuest]);
+    try { setOptionsSummary(await fetchOptionsSummary(account)); } catch (error) { setLoadError(error.message); }
+  }, [isGuest, account]);
 
   const loadClosed = useCallback(async () => {
     if (isGuest) {
@@ -103,9 +108,9 @@ export default function Portfolio() {
       } catch { setClosedStocks({ total_realized_pnl: 0, trades: [] }); }
       return;
     }
-    try { setClosedStocks(await fetchClosedTrades()); } catch (error) { setLoadError(error.message); }
-    try { setClosedOpts(await fetchClosedOptions()); } catch (error) { setLoadError(error.message); }
-  }, [isGuest]);
+    try { setClosedStocks(await fetchClosedTrades(account)); } catch (error) { setLoadError(error.message); }
+    try { setClosedOpts(await fetchClosedOptions(account)); } catch (error) { setLoadError(error.message); }
+  }, [isGuest, account]);
 
   useEffect(() => { loadStocks(); loadOptions(); loadClosed(); }, [loadStocks, loadOptions, loadClosed]);
 
@@ -131,7 +136,7 @@ export default function Portfolio() {
     }
 
     try {
-      await buyStock(ticker, form.shares, form.price);
+      await buyStock(ticker, form.shares, form.price, account);
       setMsg(`Bought ${form.shares} shares of ${ticker}`);
       setForm({ ticker: '', shares: 1, price: 100 });
       loadStocks();
@@ -173,7 +178,7 @@ export default function Portfolio() {
       if (sellLotId) {
         await sellStockLot(sellLotId, ticker, form.shares, form.price);
       } else {
-        await sellStock(ticker, form.shares, form.price);
+        await sellStock(ticker, form.shares, form.price, account);
       }
       setMsg(`Sold ${form.shares} shares of ${ticker} @ $${form.price}`);
       setForm({ ticker: '', shares: 1, price: 100 });
@@ -242,19 +247,23 @@ export default function Portfolio() {
     const { type, strike, expiry, contracts, action } = optForm;
     const premium = Number(optForm.premium);
     try {
+      let closed = null;
       if (action === 'bto') {
-        await buyOption(t, type, strike, expiry, premium, contracts, 'long');
+        await buyOption(t, type, strike, expiry, premium, contracts, 'long', account);
         setMsg(`BTO ${contracts} ${type.toUpperCase()} on ${t}`);
       } else if (action === 'sto') {
-        await buyOption(t, type, strike, expiry, premium, contracts, 'short');
+        await buyOption(t, type, strike, expiry, premium, contracts, 'short', account);
         setMsg(`STO ${contracts} ${type.toUpperCase()} on ${t}`);
       } else if (action === 'stc') {
-        await closeOption(t, type, strike, expiry, premium, contracts, 'long', optForm.option_id);
+        closed = await closeOption(t, type, strike, expiry, premium, contracts, 'long', optForm.option_id, cycle.trim());
         setMsg(`STC ${contracts} ${type.toUpperCase()} on ${t}`);
       } else if (action === 'btc') {
-        await closeOption(t, type, strike, expiry, premium, contracts, 'short', optForm.option_id);
+        closed = await closeOption(t, type, strike, expiry, premium, contracts, 'short', optForm.option_id, cycle.trim());
         setMsg(`BTC ${contracts} ${type.toUpperCase()} on ${t}`);
       }
+      if (closed?.cycle_error) setMsg(closed.cycle_error);
+      else if (closed?.cycle) setMsg(`${action.toUpperCase()} ${contracts} ${type.toUpperCase()} on ${t} · linked to ${closed.cycle}`);
+      setCycle('');
       setOptForm({ ticker: '', type: 'call', strike: 100, expiry: '', premium: 2.5, contracts: 1, action: 'bto' });
       loadOptions();
       if (action === 'stc' || action === 'btc') loadClosed();
@@ -325,6 +334,17 @@ export default function Portfolio() {
     } catch (e) { setMsg(e.message); }
   };
 
+  const handleExpire = async (o) => {
+    const linked = window.prompt(`Record the ${o.ticker} $${o.strike} ${o.type} (${o.expiry}) as expired worthless at $0? `
+      + 'Optionally enter a wheel cycle name to link it; leave blank to skip.', '');
+    if (linked === null) return;
+    try {
+      const r = await expireOption(o.id, linked.trim());
+      setMsg(r.cycle_error || `Expired worthless: ${o.ticker} $${o.strike} ${o.type}${r.cycle ? ` · linked to ${r.cycle}` : ''}`);
+      loadOptions(); loadClosed();
+    } catch (e) { setMsg(e.message); }
+  };
+
   const cancelEdit = () => {
     setEditIdx(null);
     setEditOptIdx(null);
@@ -339,7 +359,7 @@ export default function Portfolio() {
   const totalRealizedPnl = realizedStockPnl + realizedOptPnl;
   const holdings = portfolio?.holdings || [];
   const options = optionsSummary?.options || [];
-  const version = JSON.stringify([holdings, options, closedStocks, closedOpts, transferRevision]);
+  const version = JSON.stringify([holdings, options, closedStocks, closedOpts, transferRevision, account]);
   const repair = id => {
     const option = options.find(item => item.id === id);
     if (option) { setSection('holdings'); setTab('options'); setView('current'); setRepairOpt(option); }
@@ -352,9 +372,11 @@ export default function Portfolio() {
           <button key={id} className={`sub-tab ${section === id ? 'active' : ''}`} onClick={() => setSection(id)}>{label}</button>)}
       </nav>
       <AccountTransfer onImported={() => { loadStocks(); loadOptions(); loadClosed(); setTransferRevision(value => value + 1); }} />
+      {!isGuest && <AccountBar account={account} onChange={setAccount} version={version} />}
       {loadError && <p className="error-text" role="alert">{loadError} <button className="link-btn" onClick={() => { setLoadError(null); loadStocks(); loadOptions(); loadClosed(); }}>Retry</button></p>}
       {portfolio?.incomplete && <p className="error-text">Some stock quotes are unavailable. Current value and P&L totals are incomplete.</p>}
-      {!portfolio && !loadError && <p className="loading-text">Loading holdings...</p>}
+      {!portfolio && !loadError && <Skeleton label="Loading holdings" />}
+      {portfolio?.as_of && <p className="as-of">Quotes as of {new Date(portfolio.as_of).toLocaleTimeString()}{optionsSummary?.as_of ? ` · option marks ${new Date(optionsSummary.as_of).toLocaleTimeString()}` : ''}</p>}
       {section === 'risk' && <section className="portfolio-section">
         {isGuest ? <p>Sign in to review portfolio risk.</p> : <>
           <h3>Position alerts</h3><Today version={version} onRepair={repair} onAssign={id => { const option = options.find(item => item.id === id); if (option) handleAssign(option); }} />
@@ -366,10 +388,12 @@ export default function Portfolio() {
         </>}
       </section>}
       {section === 'performance' && <section className="portfolio-section">
+        {!isGuest && <NavHistory account={account} />}
         {holdings.length > 0 && !portfolio?.incomplete && <PortfolioChart holdings={holdings} closedTrades={closedStocks} />}
         {!isGuest && <PortfolioInsights tickers={[...new Set(holdings.map(item => item.ticker))]} version={version} onImported={loadStocks} />}
       </section>}
       {section === 'holdings' && <>
+      {!isGuest && <SplitNotice version={transferRevision} onApplied={() => { loadStocks(); loadOptions(); }} />}
       {/* ── Realized P/L Banner ─────────────────────────── */}
       {(closedStocks?.trades?.length > 0 || closedOpts?.trades?.length > 0) && (
         <div className={`realized-pnl-banner ${totalRealizedPnl >= 0 ? 'banner-positive' : 'banner-negative'}`}>
@@ -506,6 +530,7 @@ export default function Portfolio() {
                         >
                           <span className="lot-toggle">{hasMultipleLots ? (isOpen ? '▼' : '▶') : '•'}</span>
                           <strong className="lot-ticker">{ticker}</strong>
+                          {!account && [...new Set(lots.map(l => l.account).filter(a => a && a !== 'Default'))].map(a => <span key={a} className="account-badge">{a}</span>)}
                           <span className="lot-shares">{totalShares} shares</span>
                           {hasMultipleLots && <span className="lot-count">{lots.length} lots</span>}
                           <span className="lot-avg">Avg ${avgBuy.toFixed(2)}</span>
@@ -695,6 +720,13 @@ export default function Portfolio() {
               <input id="opt-contracts" type="number" placeholder="Qty" value={optForm.contracts} min={1} step={1}
                 onChange={(e) => setOptForm({ ...optForm, contracts: parseInt(e.target.value) || 1 })} />
             </div>
+            {['btc', 'stc'].includes(optForm.action) && editOptIdx === null && (
+              <div className="form-field">
+                <label htmlFor="opt-cycle">Wheel cycle (optional)</label>
+                <input id="opt-cycle" type="text" placeholder="e.g. AAPL wheel" value={cycle} maxLength={80}
+                  onChange={(e) => setCycle(e.target.value)} />
+              </div>
+            )}
             <div className="form-actions">
               {editOptIdx !== null ? (
                 <>
@@ -758,7 +790,7 @@ export default function Portfolio() {
                     const side = o.position || 'long';
                     return (
                     <tr key={o.id || i} className={editOptIdx === o.id ? 'row-editing' : ''}>
-                      <td><strong>{o.ticker}</strong></td>
+                      <td><strong>{o.ticker}</strong>{!account && o.account && o.account !== 'Default' && <span className="account-badge">{o.account}</span>}</td>
                       <td className={o.type === 'call' ? 'positive' : 'negative'}>
                         {o.type.toUpperCase()}
                       </td>
@@ -806,6 +838,10 @@ export default function Portfolio() {
                         {side === 'short' && (
                           <button className="btn-icon" title={o.type === 'put' ? 'Assigned: add the shares at the strike' : 'Called away: sell the shares at the strike'}
                             onClick={() => handleAssign(o)}>📥</button>
+                        )}
+                        {o.expired && (
+                          <button className="btn-icon" title="Expired worthless: close at $0 on the expiry date" aria-label={`Expired worthless ${o.ticker} ${o.strike} ${o.type}`}
+                            onClick={() => handleExpire(o)}>⌛</button>
                         )}
                         <button className="btn-icon" title="Edit option" onClick={() => startEditOption(o)}>✏️</button>
                         {confirmDelete?.type === 'option' && confirmDelete?.id === o.id ? (
@@ -924,7 +960,7 @@ export default function Portfolio() {
         </>
         )
       )}
-      {!isGuest && <details className="portfolio-section"><summary>Import positions</summary><ImportCsv onImported={loadStocks} /></details>}
+      {!isGuest && <details className="portfolio-section"><summary>Import from broker CSV</summary><ImportCsv account={account} onImported={() => { loadStocks(); loadOptions(); loadClosed(); }} /></details>}
       </>}
     </div>
   );

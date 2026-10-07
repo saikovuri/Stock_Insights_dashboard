@@ -53,9 +53,12 @@ def export_account(user_id):
             counts[table] = len(rows)
             if table in COPY_TABLES:
                 tables[table] = [{key: value for key, value in row.items() if key != "user_id"} for row in rows]
+        cursor.execute(f"SELECT ticker, split_date, ratio, applied_at FROM applied_splits WHERE user_id={database.PH} ORDER BY ticker, split_date", (user_id,))
+        applied_splits = database._fetchall(cursor)
         payload = json.loads(json.dumps({"format": "stockpilot-account-transfer", "version": 1,
             "source_user_id": user_id, "source_name": user["display_name"], "events": events,
-            "tables": tables, "counts": counts, "combined_histories": combined_histories}, default=str, allow_nan=False))
+            "tables": tables, "counts": counts, "combined_histories": combined_histories,
+            "applied_splits": applied_splits}, default=str, allow_nan=False))
         encoded = _canonical(payload)
         package = {"payload": encoded, "signature": _signature(encoded), "exported_at": datetime.now(timezone.utc).isoformat()}
         if len(_canonical(package).encode()) > MAX_BYTES - 64:
@@ -217,6 +220,11 @@ def import_account(user_id, package):
                     if database._fetchone(cursor):
                         continue
                 _insert(cursor, table, {"user_id": user_id, **values})
+        # Copied lots already carry the source's split adjustments; keep them from being adjusted twice.
+        for split in payload.get("applied_splits", []):
+            cursor.execute(f"""INSERT INTO applied_splits (user_id, ticker, split_date, ratio, applied_at)
+                VALUES ({', '.join([database.PH] * 5)}) ON CONFLICT (user_id, ticker, split_date) DO NOTHING""",
+                (user_id, split["ticker"], split["split_date"], split["ratio"], split["applied_at"]))
         _insert(cursor, "accounting_events", {"user_id": user_id, "source": "account_transfer", "source_id": 0,
             "operation": "IMPORT", "idempotency_key": key, "after_json": json.dumps({"digest": digest,
                 "source_user_id": payload["source_user_id"], "source_name": payload["source_name"],

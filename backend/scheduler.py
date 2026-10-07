@@ -394,9 +394,15 @@ def _loop() -> None:
     last_wheel = datetime.min.replace(tzinfo=ET)
     last_positions_day = None
     last_settle_day = None
+    last_nav_day = None
     while True:
         try:
             now = datetime.now(ET)
+            # Late in the session, while option quotes are still live, so marks are real
+            if _market_open(now) and (now.hour, now.minute) >= (15, 45) and last_nav_day != now.date():
+                last_nav_day = now.date()
+                import accounts
+                accounts.snapshot_all()
             if _market_open(now) and (now.hour, now.minute) >= (10, 15) and last_positions_day != now.date():
                 last_positions_day = now.date()
                 _run_position_checks()

@@ -73,6 +73,10 @@ Source: [frontend/src/ProfileContext.jsx](frontend/src/ProfileContext.jsx).
 
 The landing dashboard presents market overview data, a compact economic calendar, and a daily briefing for signed-in users. The watchlist rail provides ticker shortcuts. Searching or selecting a ticker opens that stock's research; the Dashboard is not a broker order-entry screen.
 
+The search box accepts a ticker or a company name. Suggestions come from the S&P 500 / Nasdaq-100 directory first (exact symbol, then symbol prefix, then name matches, larger companies first), followed by Yahoo symbol search for other stocks and ETFs. Use the arrow keys and Enter, or click a suggestion. An uppercase ticker-shaped entry (for example `F`) is opened literally; a lowercase word such as `apple` opens the top suggestion. Press `/` anywhere outside a text field, or Ctrl/Cmd+K, to jump to Dashboard and focus search. Suggestions are cached for a day and can miss recent listings or name changes.
+
+The market overview shows when its quotes were fetched, and a selected stock shows "Quote as of" the fetch time. Fetch time is not the exchange timestamp; provider data can itself be delayed. While a workspace, ticker or list loads, gray placeholder shapes appear instead of loading text. Pinch-zoom is enabled on mobile; form fields use a 16px minimum font size on small screens so iOS does not auto-zoom on focus.
+
 ### Overview Tab
 
 | Panel | What it contains |
@@ -566,11 +570,23 @@ Columns include price/change, 52-week high/low, P/E, EPS, market cap, RSI, volum
 
 Guest watchlists are local to the browser. Signed-in lists synchronize to the account and unlock account alerts and additional data such as RSI. A side watchlist rail also appears on Dashboard. Old Screener components/bookmarks do not imply a second current navigation tab.
 
+Signed-in users can also:
+
+- **Group symbols into lists.** Each symbol belongs to one list (default **Main**); the **List** filter shows one list at a time, and new symbols added while a list is selected join it. A symbol cannot appear in two lists.
+- **Keep a note** (up to 500 characters) per symbol with the 📝 button; the note shows under the company name.
+- **See next earnings** in the Earnings column, using the canonical Finnhub + Yahoo dates (earlier date wins). Dates within 14 days are highlighted with a day count; `*` marks dates the providers do not confirm. Unknown dates show `—`, which is not evidence that no report is scheduled. Up to 60 symbols are checked.
+
 Source: [frontend/src/components/Watchlist.jsx](frontend/src/components/Watchlist.jsx).
 
 ## Portfolio: Holdings
 
 Portfolio has **Holdings**, **Portfolio Risk**, and **Income & Performance**. Holdings contains **Stocks / Options**, with current holdings and sold/closed history for each.
+
+### Brokerage Accounts and Cash
+
+Signed-in users can label records with brokerage accounts (for example Taxable, Roth IRA) inside one login. The account bar's selector filters current stocks, options and closed history; **All accounts** combines them and shows a badge on records outside Default. New lots, options and imports go into the selected account (All accounts records into **Default**). Ticker-level sales consume FIFO lots from the selected account only, and covered-call assignment only uses shares in the option's account; assigned puts add shares to the option's account. Closed records inherit the lot's account. Existing records belong to Default. Names allow letters, numbers, spaces and `. _ & ' ( ) -`, up to 40 characters.
+
+Select an account to enter its **cash balance**. Free cash = cash minus gross short-put collateral (strike × 100 × contracts) for that account, without netting credits or protective wings. Cash is a user-entered balance, not a ledger: it does not change automatically when you record trades, and it is not broker buying power or margin. Risk, Doctor, tax, dividends, the ledger and the SPY comparison remain combined across accounts; Account ledger deposits and withdrawals are not assigned to accounts.
 
 ### Stocks
 
@@ -578,21 +594,39 @@ Record ticker, shares, entry cost/date; edit lots or record a sale. Selling from
 
 Guest stock holdings live only in browser storage; signed-in holdings are account data. This is a record keeper, not a broker connection. Entering a buy/sell does not place an order, and omitting a real position makes downstream analytics incomplete.
 
-### Import Positions
+### Import From a Broker CSV
 
-Signed-in users can expand **Import positions** in Portfolio, upload a positions CSV, preview recognized/skipped rows, then confirm import. It is not a separate Income & Performance tab.
+Signed-in users can expand **Import from broker CSV** in Holdings, choose **Open positions** or **Closed trade history**, preview recognized/skipped rows, then confirm. Rows go into the currently selected account. The file control rejects files over 1 MB; the server parses the text and does not store the file.
 
-- The file control rejects files over 1 MB. Parsing searches the first 30 rows for recognizable Symbol and Quantity columns; it accepts common column aliases for per-share or total cost and acquisition date.
-- Each accepted row becomes a new stock/ETF lot. Positive quantity and positive cost are required; total cost can be divided by quantity when per-share cost is absent.
-- Cash/money-market summary rows, shorts and option symbols are skipped. Symbols must match the supported stock-symbol format; dots normalize to hyphens. Processing stops at 500 accepted rows.
-- Acquisition-date formats include ISO and common US formats. Missing, future or unrecognized dates become unknown to the parser; the current import flow uses the normal new-lot date fallback (displayed as "today"). Correct this before relying on holding-period/benchmark analytics.
-- This is an **append**, not automatic broker synchronization, reconciliation or duplicate detection. Reimporting the same positions can duplicate lots. Preview does not write; confirmation does. It does not import cash balances, order history or full tax-lot adjustments.
+**Open positions** searches the first 30 rows for Symbol and Quantity columns, accepting common aliases for per-share or total cost and acquisition date.
+
+- Stock/ETF rows become new lots. Positive quantity and positive cost are required; total cost can be divided by quantity when per-share cost is absent. Short stock positions are skipped. Dots normalize to hyphens. Processing stops at 500 accepted rows.
+- Option symbols are recognized in OCC (`AAPL  250117C00150000`), Fidelity (`-AAPL250117C150`), Schwab (`AAPL 01/17/2025 150.00 C`) and E*TRADE (`AAPL Jan 17 '25 $150 Call`) styles. Negative quantity records a short; whole contracts are required. Premium per share is |total cost| / (contracts × 100), or the per-share average when no total is given. Brokers that report per-contract averages without a total will be misread by 100×, so check the preview. Already-expired options are skipped.
+- Cash/money-market summary rows are skipped. Missing, future or unrecognized acquisition dates fall back to the import date. Correct this before relying on holding-period/benchmark analytics.
+- Positions import is an **append**, not broker synchronization or duplicate detection; reimporting the same positions duplicates lots.
+
+**Closed trade history** reads a realized gain/loss (closed lots) export with Quantity, Date sold/closed, Proceeds and Cost basis columns (plus Date acquired/opened and an optional Position/Side column).
+
+- Closed options go through the same audited manual-history path as Journal's historical options. Short options are identified by a Short side or, without a side column, negative quantity. For shorts, proceeds become the opening premium and cost becomes the closing premium; for longs, the reverse. Fees are not imported; add them separately.
+- Closed long stock lots are recorded as sold trades with the broker's dates and per-share cost/proceeds. Short stock history and unrecognized symbols are skipped.
+- Identical rows re-import as no-ops (options by a content-derived request key, stocks by matching ticker, shares, prices and close date) and are reported as already recorded. Rows failing validation, such as a close after expiry, are listed as rejected. Processing stops at 1,000 rows.
+- Wash-sale adjustments and broker-specific tax columns are not imported.
 
 ### Options
 
 Record long/short, call/put, strike, expiry, premium per share and contract count. Standard contracts use 100 shares. For long options, marked P&L is `(current midpoint - entry premium) * 100 * contracts`; for shorts the sign reverses. Missing valid quotes mean unavailable P&L, not zero value.
 
 The view includes closing, assignment and roll/repair entry points for applicable records. Assignment recording changes the corresponding holdings and option records; it is not an automatic assertion that a broker assigned the contract. Covered-call assignment requires sufficient recorded shares. FIFO/specific-lot operations and assignment are transactional to avoid overselling concurrent records.
+
+After expiry (past the 4 p.m. Eastern close on the expiry date), an option shows an ⌛ **Expired worthless** button. It closes the whole lot at $0 with the expiry date as the closing date, so a short keeps its full premium and a long loses its cost. It asks first and is your assertion that the contract expired out of the money; use assignment instead for an assigned short.
+
+When buying or selling to close, the optional **Wheel cycle** field, or the expiry prompt, links the new closed record to a named cycle after the close is saved. For a roll, close the old leg with the cycle name, then open the new leg. If the link fails, the close stays recorded and the message says it was not linked; link it later from Journal's Wheel cycles. Retries cannot double-link the same close.
+
+### Stock Splits
+
+Holdings checks recorded tickers against the provider's split history. A split is offered only when lots acquired, or open options opened, before the split date exist and that split has not already been applied. **Apply adjustment** asks for confirmation, then in one transaction multiplies shares and divides cost per share for those lots. For whole-number forward splits (2-for-1, 10-for-1) it also multiplies contracts and divides strike and premium for open options spanning the date. Other ratios (3-for-2, reverse splits) create nonstandard adjusted contracts. Those options are left unchanged and flagged for a manual edit.
+
+Each split applies once per account; every change is captured by the audit trail and logged as a SPLIT transaction. Closed trades are not restated. Spin-offs, mergers, special dividends and cash-in-lieu are not detected. Lots dated at import time instead of the real acquisition date can be missed.
 
 Common cash-settled index symbols cannot use the physical-share assignment workflow. Adjusted/nonstandard contracts, corporate actions and tax basis adjustments need external reconciliation. Source edits remain possible, but the signed-in account's audit history retains changes.
 
@@ -658,7 +692,13 @@ Sources: [backend/options_desk.py](backend/options_desk.py), [backend/portfolio_
 
 ## Portfolio: Income & Performance
 
-This workspace includes the portfolio history chart and seven tabs: **Combined P&L**, **Account ledger**, **Premium cash flow**, **vs S&P 500**, **Dividends**, **Tax**, and **Weekly review**.
+This workspace includes the account value history, the portfolio history chart and seven tabs: **Combined P&L**, **Account ledger**, **Premium cash flow**, **vs S&P 500**, **Dividends**, **Tax**, and **Weekly review**.
+
+### Account Value History
+
+On trading days at 3:45 p.m. Eastern (while option quotes are live) the scheduler records each account's value: entered cash + current stock value + option marks. Long options add and short options subtract `midpoint × 100 × contracts`. **Record value now** records today's snapshot immediately. A later recording on the same day replaces it. Any missing stock or option quote, or an account without a cash balance, makes that day **incomplete**. Incomplete days are left out of the chart and statistics rather than valued at zero.
+
+The chart follows the account selector. For **All accounts**, daily returns remove Account ledger deposits and withdrawals: `(value today - net flows since the previous snapshot) / previous value`. The results chain into a time-weighted return, and max drawdown is the largest peak-to-trough fall of that index. A single account's chart is **not** flow-adjusted, because ledger flows are not assigned to accounts. A deposit shown only as a higher cash balance looks like a gain unless it is also recorded in the Account ledger. Snapshot cadence, stale quotes, scheduler downtime and entered-cash accuracy limit precision. History starts when snapshots begin; past values are not reconstructed.
 
 ### Portfolio Performance Chart
 
@@ -711,7 +751,7 @@ When a destination already has financial ledger history, the merged report leave
 
 Files are authenticated with a domain-separated HMAC derived from the installation's `JWT_SECRET`, versioned, and limited to 10 MB. The signed payload is opaque JSON text within the outer JSON document to preserve exact numeric serialization across browsers. Edited files, accounting-report exports and unsupported formats are rejected. Imports require authentication and explicit confirmation; endpoints use the authenticated destination ID, never a client-selected destination. Export and preview/import responses are marked `Cache-Control: no-store`.
 
-The file is **not encrypted** and contains private financial information. Keep it private; do not edit it. Exports contain no account passwords, authentication tokens or session data. Alerts, push subscriptions, account settings, local planning drafts and shared paper-idea logs are outside this transfer. Files require the same installation/signing secret; rotating `JWT_SECRET` invalidates earlier transfer signatures. No signing secret is included in the file.
+The file is **not encrypted** and contains private financial information. Keep it private; do not edit it. Exports contain no account passwords, authentication tokens or session data. Alerts, push subscriptions, account settings, cash balances, account value snapshots, local planning drafts and shared paper-idea logs are outside this transfer. Brokerage-account labels, watchlist lists/notes and applied-split markers are included, so copied lots are not offered the same split again. Files require the same installation/signing secret; rotating `JWT_SECRET` invalidates earlier transfer signatures. No signing secret is included in the file.
 
 The existing **Export report** in Account ledger is a read-only accounting summary, not an importable transfer file. Existing stock CSV import is also separate and does not restore a complete account.
 
@@ -807,6 +847,8 @@ Gross/net P&L values, capture/return percentages and the gross realized total ar
 Missing/invalid premiums, nonpositive opening premium, invalid dates or reversed chronology leave the corresponding metric unavailable. Percentages measure only the option: not collateral return, buying-power return or whole-cycle profit. A zero closing premium produces 100% short-premium capture but does **not** establish expiry, assignment or profitability of resulting stock exposure.
 
 The recorded-option summary shows sample count, net P&L, net expectancy per close (mean net dollars), positive-net-result win rate, and profit factor (sum of positive net results / absolute sum of negative net results). Only options with a known net result are included; each close record counts once, including partial closes and breakevens. No losses displays **No losses**, not an infinite verified edge; an empty sample has unavailable expectancy, win rate and profit factor. These are historical statistics using recorded fees only, not forecasts or complete account returns.
+
+**Option results by** repeats those statistics per group, chosen with **Group by**: Strategy (short/long put/call), Ticker, Closing month, Exit reason (reviews; otherwise Not recorded) or Account. Groups sort by net P&L, or newest month first. Groups with fewer than 10 closes are flagged as too small to show a reliable edge. Manual stock-journal entries keep their separate per-setup breakdown.
 
 **Review trade** in the Actions column opens a nonfinancial review dialog for an owned closed stock or option record with a ledger reference. Choose profit target, stop/risk limit, expiry, assignment, roll, discretionary exit, other, or leave the reason unrecorded. Short options additionally accept an optional capture target. Review notes are limited to 500 characters. Targets and exit reasons are self-reported after the trade; they are not verified pre-trade plans and do not execute any trade workflow.
 
@@ -956,6 +998,7 @@ Defaults are server-side and require a running scheduler process:
 | Daily briefing | Weekdays after 8 a.m. Eastern by default. |
 | Weekly review | Weekend checks after 9 a.m. Eastern, with saved-period deduplication. |
 | Thesis checks | Weekdays after 5 p.m. Eastern for eligible tracked theses. |
+| Account value snapshots | Market-window days from 3:45 p.m. Eastern, once per day, for users with holdings, options or cash. |
 
 The scheduler's market-window helper checks weekday/time, **not a full exchange holiday/early-close calendar**. Restarts, backend suspension, provider limits and failures affect timing. Requests can also generate/cache results on demand; these are not precise execution-time promises.
 
@@ -1085,3 +1128,9 @@ WHERE oid = 'public.idea_log'::regclass;
 ```
 
 Expect `true`, `false`, `false`, then rerun Supabase's Security Advisor and check the backend's options-track-record view. The transaction preserves records and blocks public-role table access even if legacy RLS policies remain. If the backend uses a non-owner role without `BYPASSRLS`, configure a narrowly scoped backend policy before enabling RLS rather than granting access to browser roles. The broader [Supabase RLS script](deploy/supabase_rls.sql) covers the other named StockPilot tables; verify their status separately. A warning alone does not establish that data was accessed: inspect available API/database logs to assess past exposure. Local tests do not verify production grants, policies, or historical access.
+
+The `account_cash`, `nav_snapshots` and `applied_splits` tables are created with RLS enabled and public-role grants revoked at PostgreSQL startup, and are included in the RLS script.
+
+### Route Notes
+
+Holding edit/delete routes accept only integer IDs (`/api/portfolio/{id:int}`), so named routes such as `PUT /api/portfolio/cash` and `PUT /api/portfolio/income-goal` reach their own handlers.

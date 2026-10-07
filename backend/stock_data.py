@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 
 import yfinance as yf
 import pandas as pd
@@ -194,6 +195,7 @@ def get_key_metrics(ticker: str) -> dict:
                 metrics["52w_high"] = max(metrics["52w_high"], *session)
             if metrics.get("52w_low"):
                 metrics["52w_low"] = min(metrics["52w_low"], *session)
+        metrics["as_of"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
         return metrics
 
     return get_or_fetch(f"metrics:{ticker}", _fetch, ttl=METRICS_TTL)

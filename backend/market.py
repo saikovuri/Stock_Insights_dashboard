@@ -109,6 +109,45 @@ def overview() -> dict:
     return get_or_fetch("market:overview", _fetch, ttl=90)
 
 
+def search_symbols(query: str) -> list[dict]:
+    """Ticker or company-name lookup: S&P 500 / Nasdaq-100 directory first, then Yahoo search for everything else."""
+    q = query.strip()
+    if not q:
+        return []
+
+    def _fetch():
+        upper, lower = q.upper(), q.lower()
+        ranked = []
+        try:
+            from intraday import _directory
+            directory = _directory()
+        except Exception as error:
+            log.info("Symbol directory unavailable: %s", error)
+            directory = {}
+        for symbol, info in directory.items():
+            name = info.get("name") or ""
+            rank = (0 if symbol == upper else 1 if symbol.startswith(upper) else
+                    2 if name.lower().startswith(lower) else 3 if lower in name.lower() else None)
+            if rank is not None:
+                ranked.append((rank, -(info.get("market_cap") or 0), {"symbol": symbol, "name": name or symbol,
+                                                                       "exchange": None, "type": "EQUITY"}))
+        results = [item for _, _, item in sorted(ranked, key=lambda r: (r[0], r[1]))][:8]
+        if len(results) < 8:
+            seen = {r["symbol"] for r in results}
+            try:
+                for quote in yf.Search(q, max_results=10, news_count=0).quotes:
+                    symbol = quote.get("symbol")
+                    if symbol and symbol not in seen and quote.get("quoteType") in ("EQUITY", "ETF"):
+                        seen.add(symbol)
+                        results.append({"symbol": symbol, "name": quote.get("shortname") or quote.get("longname") or symbol,
+                                        "exchange": quote.get("exchDisp") or quote.get("exchange"),
+                                        "type": quote.get("quoteType")})
+            except Exception as error:
+                log.info("Yahoo symbol search failed for %r: %s", q, error)
+        return results[:10]
+    return get_or_fetch(f"symbol-search:{q.lower()}", _fetch, ttl=24 * 3600)
+
+
 def movers(kind: str) -> list[dict]:
     screen = SCREENS.get(kind)
     if not screen:

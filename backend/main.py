@@ -10,7 +10,7 @@ import math
 import re
 from typing import Literal
 from pydantic import Field
-from portfolio_models import AccountingEntryRequest, HoldingRequest, HoldingUpdateRequest, OptionRequest, OptionUpdateRequest, ClosedOptionRequest
+from portfolio_models import AccountingEntryRequest, HoldingRequest, HoldingUpdateRequest, OptionRequest, OptionUpdateRequest, ClosedOptionRequest, LifecycleRequest, ACCOUNT_PATTERN
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -58,6 +58,7 @@ from database import (
     get_trader_profile, set_trader_profile, list_user_alerts, add_user_alert, delete_user_alert,
     count_active_alerts, list_journal, add_journal, update_journal, delete_journal,
     get_thesis, list_theses, delete_thesis,
+    in_account, get_watchlist_items, update_watchlist_item,
 )
 from config import CORS_ORIGINS, SCHEDULER_ENABLED, SENTRY_DSN, SENTRY_ENVIRONMENT
 
@@ -218,6 +219,7 @@ class LoginRequest(BaseModel):
 
 class WatchlistRequest(BaseModel):
     ticker: str
+    list_name: Optional[str] = Field(None, max_length=40)
 
 
 # ── Auth endpoints ──────────────────────────────────────────────────────────
@@ -459,10 +461,12 @@ def stock_alerts(request: Request, ticker: str):
 # ── Portfolio (auth required) ──────────────────────────────────────────────
 
 @app.get("/api/portfolio/summary")
-def portfolio_summary_endpoint(user: dict = Depends(get_current_user)):
-    holdings = get_user_holdings(user["user_id"])
+def portfolio_summary_endpoint(user: dict = Depends(get_current_user), account: Optional[str] = None):
+    from datetime import timezone
+    as_of = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    holdings = [h for h in get_user_holdings(user["user_id"]) if in_account(h, account)]
     if not holdings:
-        return {"total_invested": 0, "total_current": 0, "total_pnl": 0, "total_pnl_pct": 0, "holdings": []}
+        return {"total_invested": 0, "total_current": 0, "total_pnl": 0, "total_pnl_pct": 0, "holdings": [], "as_of": as_of}
 
     # Real-time Finnhub quotes first; one batched yfinance download for anything left
     import yfinance as yf
@@ -531,7 +535,7 @@ def portfolio_summary_endpoint(user: dict = Depends(get_current_user)):
             "buy_price": buy_price, "current_price": current,
             "invested": round(invested, 2), "current_value": round(current_val, 2) if current_val is not None else None,
             "pnl": round(pnl, 2) if pnl is not None else None, "pnl_pct": round(pnl_pct, 2) if pnl_pct is not None else None,
-            "sector": sector,
+            "sector": sector, "account": h.get("account") or "Default",
         })
     total_pnl = total_current - total_invested
     incomplete = any(holding["current_price"] is None for holding in details)
@@ -542,18 +546,19 @@ def portfolio_summary_endpoint(user: dict = Depends(get_current_user)):
         "total_pnl_pct": None if incomplete else round((total_pnl / total_invested * 100) if total_invested else 0, 2),
         "incomplete": incomplete,
         "holdings": details,
+        "as_of": as_of,
     }
 
 
 @app.post("/api/portfolio/buy")
 def portfolio_buy(req: HoldingRequest, user: dict = Depends(get_current_user)):
-    return add_user_holding(user["user_id"], req.ticker, req.shares, req.price)
+    return add_user_holding(user["user_id"], req.ticker, req.shares, req.price, account=req.account)
 
 
 @app.post("/api/portfolio/sell")
 def portfolio_sell(req: HoldingRequest, user: dict = Depends(get_current_user)):
     try:
-        result = sell_user_holding(user["user_id"], req.ticker, req.shares, req.price)
+        result = sell_user_holding(user["user_id"], req.ticker, req.shares, req.price, req.account)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error))
     if result is None:
@@ -572,15 +577,16 @@ def portfolio_sell_lot(holding_id: int, req: HoldingRequest, user: dict = Depend
     return result
 
 
-@app.put("/api/portfolio/{holding_id}")
+@app.put("/api/portfolio/{holding_id:int}")
 def portfolio_edit(holding_id: int, req: HoldingUpdateRequest, user: dict = Depends(get_current_user)):
-    result = update_user_holding(user["user_id"], holding_id, req.ticker, req.shares, req.price)
+    account = req.account if "account" in req.model_fields_set else ...
+    result = update_user_holding(user["user_id"], holding_id, req.ticker, req.shares, req.price, account)
     if result is None:
         raise HTTPException(status_code=404, detail="Holding not found")
     return result
 
 
-@app.delete("/api/portfolio/{holding_id}")
+@app.delete("/api/portfolio/{holding_id:int}")
 def portfolio_delete(holding_id: int, user: dict = Depends(get_current_user)):
     result = delete_user_holding(user["user_id"], holding_id)
     if result is None:
@@ -670,15 +676,15 @@ def accounting_entry(req: AccountingEntryRequest, user: dict = Depends(get_curre
 
 
 @app.get("/api/portfolio/closed")
-def closed_trades_endpoint(user: dict = Depends(get_current_user)):
-    trades = get_closed_trades(user["user_id"])
+def closed_trades_endpoint(user: dict = Depends(get_current_user), account: Optional[str] = None):
+    trades = [t for t in get_closed_trades(user["user_id"]) if in_account(t, account)]
     total_pnl = sum(t["pnl"] for t in trades)
     return {"total_realized_pnl": round(total_pnl, 2), "trades": trades}
 
 
 @app.get("/api/portfolio/options/closed")
-def closed_options_endpoint(user: dict = Depends(get_current_user)):
-    trades = get_closed_options(user["user_id"])
+def closed_options_endpoint(user: dict = Depends(get_current_user), account: Optional[str] = None):
+    trades = [t for t in get_closed_options(user["user_id"]) if in_account(t, account)]
     total_pnl = sum(t["pnl"] for t in trades)
     return {"total_realized_pnl": round(total_pnl, 2), "trades": trades,
             "total_fees": round(sum(t["fees"] for t in trades), 2),
@@ -720,11 +726,13 @@ def closed_option_delete(trade_id: int, user: dict = Depends(get_current_user)):
 # ── Options (auth required) ────────────────────────────────────────────────
 
 @app.get("/api/portfolio/options/summary")
-def options_summary_endpoint(user: dict = Depends(get_current_user)):
+def options_summary_endpoint(user: dict = Depends(get_current_user), account: Optional[str] = None):
     import yfinance as yf
-    options = get_user_options(user["user_id"])
+    from datetime import timezone
+    as_of = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    options = [o for o in get_user_options(user["user_id"]) if in_account(o, account)]
     if not options:
-        return {"total_cost": 0, "total_value": 0, "total_pnl": 0, "total_pnl_pct": 0, "options": []}
+        return {"total_cost": 0, "total_value": 0, "total_pnl": 0, "total_pnl_pct": 0, "options": [], "as_of": as_of}
 
     INDEX_MAP = {
         "SPX": "^SPX", "NDX": "^NDX", "RUT": "^RUT", "DJX": "^DJI",
@@ -830,6 +838,7 @@ def options_summary_endpoint(user: dict = Depends(get_current_user)):
             "iv": round(iv * 100, 1), "volume": volume, "open_interest": oi,
             "est_value": round(market_price, 2) if quoted else None,
             "pnl": round(pnl, 2) if pnl is not None else None, "pnl_pct": round(pnl_pct, 2) if pnl_pct is not None else None,
+            "account": o.get("account") or "Default", "expired": not options_analytics._live(o["expiry"]),
         })
 
     total_cost = sum(d["cost"] for d in details)
@@ -843,13 +852,26 @@ def options_summary_endpoint(user: dict = Depends(get_current_user)):
         "total_pnl_pct": None if incomplete else round((total_pnl / total_cost * 100) if total_cost else 0, 2),
         "incomplete": incomplete,
         "options": details,
+        "as_of": as_of,
     }
+
+
+def _link_cycle(user_id: int, result: dict, cycle: str | None) -> dict:
+    """Link the new closed-option record to a wheel cycle; the close itself has already been recorded."""
+    if cycle and result and result.get("closed_id"):
+        import accounts
+        try:
+            accounts.link_closed_option(user_id, result["closed_id"], result["contracts"], cycle)
+            result["cycle"] = cycle.strip()
+        except (ValueError, LookupError) as error:
+            result["cycle_error"] = f"Closed, but not linked to the cycle: {error}"
+    return result
 
 
 @app.post("/api/portfolio/options/buy")
 def options_buy(req: OptionRequest, user: dict = Depends(get_current_user)):
     return add_user_option(user["user_id"], req.ticker, req.option_type, req.strike,
-                          req.expiry, req.premium, req.contracts, req.position)
+                          req.expiry, req.premium, req.contracts, req.position, account=req.account)
 
 
 @app.post("/api/portfolio/options/close")
@@ -861,13 +883,29 @@ def options_close(req: OptionRequest, user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=400, detail=str(error))
     if result is None:
         raise HTTPException(status_code=404, detail="Option not found in portfolio")
-    return result
+    return _link_cycle(int(user["user_id"]), result, req.cycle)
+
+
+@app.post("/api/portfolio/options/{option_id}/expire")
+def options_expire(option_id: int, req: Optional[LifecycleRequest] = None, user: dict = Depends(get_current_user)):
+    """Record an expired contract as expired worthless: closed at $0 on its expiry date."""
+    uid = int(user["user_id"])
+    option = next((o for o in get_user_options(uid) if o["id"] == option_id), None)
+    if not option:
+        raise HTTPException(status_code=404, detail="Option not found")
+    if options_analytics._live(option["expiry"]):
+        raise HTTPException(status_code=400, detail="This option hasn't expired yet")
+    result = close_user_option(uid, option["ticker"], option["option_type"], option["strike"], option["expiry"], 0.0,
+                               option["contracts"], option["position"], option_id=option_id,
+                               closed_at=f"{option['expiry']} 20:00:00")
+    return _link_cycle(uid, {**result, "action": "EXPIRED"}, req.cycle if req else None)
 
 
 @app.put("/api/portfolio/options/{option_id}")
 def options_edit(option_id: int, req: OptionUpdateRequest, user: dict = Depends(get_current_user)):
+    account = req.account if "account" in req.model_fields_set else ...
     result = update_user_option(user["user_id"], option_id, req.ticker, req.option_type,
-                                req.strike, req.expiry, req.premium, req.contracts, req.position)
+                                req.strike, req.expiry, req.premium, req.contracts, req.position, account)
     if result is None:
         raise HTTPException(status_code=404, detail="Option not found")
     return result
@@ -882,14 +920,15 @@ def options_delete(option_id: int, user: dict = Depends(get_current_user)):
 
 
 @app.post("/api/portfolio/options/{option_id}/assign")
-def options_assign(option_id: int, user: dict = Depends(get_current_user)):
+def options_assign(option_id: int, req: Optional[LifecycleRequest] = None, user: dict = Depends(get_current_user)):
     """Short put assigned → shares bought at the strike; short call assigned → shares sold at the strike."""
     try:
-        return assign_user_option(int(user["user_id"]), option_id)
+        result = assign_user_option(int(user["user_id"]), option_id)
     except LookupError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    return _link_cycle(int(user["user_id"]), result, req.cycle if req else None)
 
 
 class IncomeGoal(BaseModel):
@@ -913,8 +952,32 @@ def portfolio_income_goal(request: Request, req: IncomeGoal, user: dict = Depend
 
 @app.get("/api/watchlist")
 def watchlist_get(user: dict = Depends(get_current_user)):
-    tickers = get_user_watchlist(user["user_id"])
-    return {"tickers": tickers}
+    items = get_watchlist_items(user["user_id"])
+    return {"tickers": [item["ticker"] for item in items], "items": items}
+
+
+class WatchlistItemRequest(BaseModel):
+    list_name: Optional[str] = Field(None, max_length=40)
+    note: Optional[str] = Field(None, max_length=500)
+
+
+@app.put("/api/watchlist/{ticker}")
+def watchlist_update(ticker: str, req: WatchlistItemRequest, user: dict = Depends(get_current_user)):
+    if not update_watchlist_item(user["user_id"], _valid_ticker(ticker), req.list_name, req.note):
+        raise HTTPException(status_code=404, detail="Not in watchlist")
+    return {"ok": True}
+
+
+@app.get("/api/watchlist/earnings")
+@limiter.limit("10/minute")
+def watchlist_earnings(request: Request, user: dict = Depends(get_current_user)):
+    """Next earnings for watchlist symbols (canonical Finnhub + Yahoo dates, earlier date wins)."""
+    from concurrent.futures import ThreadPoolExecutor
+    tickers = get_user_watchlist(user["user_id"])[:60]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        infos = list(pool.map(options_analytics.earnings_info, tickers))
+    return {"items": [{"ticker": t, "next": i.get("next"), "timing": i.get("next_timing"),
+                       "confirmed": i.get("next_confirmed", False)} for t, i in zip(tickers, infos)]}
 
 
 @app.post("/api/watchlist")
@@ -924,7 +987,7 @@ def watchlist_add(req: WatchlistRequest, user: dict = Depends(get_current_user))
         get_key_metrics(ticker)
     except Exception:
         raise HTTPException(status_code=404, detail=f"Ticker '{ticker}' not found")
-    added = add_to_watchlist(user["user_id"], ticker)
+    added = add_to_watchlist(user["user_id"], ticker, req.list_name)
     if not added:
         raise HTTPException(status_code=409, detail="Already in watchlist")
     return {"message": f"{ticker} added to watchlist"}
@@ -1850,18 +1913,21 @@ class JournalEntry(BaseModel):
     target: Optional[float] = Field(None, gt=0)
     setup: Optional[str] = Field(None, max_length=40)
     notes: Optional[str] = Field(None, max_length=1000)
+    account: Optional[str] = Field(None, pattern=ACCOUNT_PATTERN)
 
 
 def _journal_payload(req: JournalEntry) -> dict:
+    from database import account_name
     d = req.model_dump()
     d["ticker"] = _valid_ticker(req.ticker)
     d["setup"] = (req.setup or "").strip() or None
+    d["account"] = account_name(req.account)
     return d
 
 
 @app.get("/api/journal")
-def journal_get(user: dict = Depends(get_current_user)):
-    return journal.compute_stats(list_journal(int(user["user_id"])))
+def journal_get(user: dict = Depends(get_current_user), account: Optional[str] = None):
+    return journal.compute_stats([e for e in list_journal(int(user["user_id"])) if in_account(e, account)])
 
 
 @app.post("/api/journal")
@@ -2033,18 +2099,96 @@ def portfolio_tax(request: Request, user: dict = Depends(get_current_user)):
 class ImportRequest(BaseModel):
     csv: str = Field(..., min_length=10, max_length=1_000_000)
     commit: bool = False
+    kind: Literal["positions", "history"] = "positions"
+    account: Optional[str] = Field(None, pattern=ACCOUNT_PATTERN)
 
 
 @app.post("/api/portfolio/import")
 @limiter.limit("10/minute")
 def portfolio_import(request: Request, req: ImportRequest, user: dict = Depends(get_current_user)):
+    parse = portfolio_insights.parse_history_csv if req.kind == "history" else portfolio_insights.parse_broker_csv
     try:
-        parsed = portfolio_insights.parse_broker_csv(req.csv)
+        parsed = parse(req.csv)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     if req.commit:
-        parsed["imported"] = portfolio_insights.import_rows(int(user["user_id"]), parsed["rows"])
+        uid = int(user["user_id"])
+        if req.kind == "history":
+            parsed["result"] = portfolio_insights.import_history(uid, parsed["rows"], req.account)
+            parsed["imported"] = parsed["result"]["imported"]
+        else:
+            parsed["imported"] = portfolio_insights.import_rows(uid, parsed["rows"], req.account)
     return parsed
+
+
+# ── Accounts, cash, daily account value and corporate actions ────────────────────────
+
+class CashRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+    account: Optional[str] = Field(None, pattern=ACCOUNT_PATTERN)
+    cash: float = Field(..., ge=-100_000_000, le=1_000_000_000, allow_inf_nan=False)
+
+
+class SplitRequest(BaseModel):
+    ticker: str
+    split_date: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$")
+
+
+@app.get("/api/portfolio/accounts")
+def portfolio_accounts(user: dict = Depends(get_current_user)):
+    import accounts
+    return accounts.list_accounts(int(user["user_id"]))
+
+
+@app.put("/api/portfolio/cash")
+@limiter.limit("30/minute")
+def portfolio_cash(request: Request, req: CashRequest, user: dict = Depends(get_current_user)):
+    import accounts
+    return accounts.set_cash(int(user["user_id"]), req.account, req.cash)
+
+
+@app.get("/api/portfolio/nav-history")
+def portfolio_nav_history(account: Optional[str] = None, user: dict = Depends(get_current_user)):
+    import accounts
+    return accounts.nav_history(int(user["user_id"]), account)
+
+
+@app.post("/api/portfolio/nav-snapshot")
+@limiter.limit("4/minute")
+def portfolio_nav_snapshot(request: Request, user: dict = Depends(get_current_user)):
+    import accounts
+    try:
+        return {"snapshots": accounts.snapshot(int(user["user_id"]))}
+    except Exception as e:
+        raise _upstream_error(e)
+
+
+@app.get("/api/portfolio/corporate-actions")
+@limiter.limit("10/minute")
+def portfolio_corporate_actions(request: Request, user: dict = Depends(get_current_user)):
+    import corporate_actions
+    return {"splits": corporate_actions.pending_splits(int(user["user_id"]))}
+
+
+@app.post("/api/portfolio/corporate-actions/apply")
+@limiter.limit("10/minute")
+def portfolio_apply_split(request: Request, req: SplitRequest, user: dict = Depends(get_current_user)):
+    import corporate_actions
+    try:
+        return corporate_actions.apply_split(int(user["user_id"]), _valid_ticker(req.ticker), req.split_date)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@app.get("/api/search")
+@limiter.limit("60/minute")
+def symbol_search(request: Request, q: str = Query(..., min_length=1, max_length=40)):
+    try:
+        return {"results": market.search_symbols(q)}
+    except Exception as e:
+        raise _upstream_error(e)
 
 
 @app.get("/api/weekly-review")

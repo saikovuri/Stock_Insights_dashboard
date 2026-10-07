@@ -329,13 +329,35 @@ def parse_broker_csv(text: str) -> dict:
         if "**" in raw or any(w in raw for w in _SKIP):
             skipped.append({"line": n, "symbol": raw, "reason": "cash / money market"})
             continue
+        qty = _num(get("shares"))
+        option = parse_option_symbol(raw)
+        if option:
+            if not qty:
+                skipped.append({"line": n, "symbol": raw, "reason": "no quantity"})
+                continue
+            if option["expiry"] < date.today().isoformat():
+                skipped.append({"line": n, "symbol": raw, "reason": "option already expired"})
+                continue
+            contracts = abs(qty)
+            if not float(contracts).is_integer():
+                skipped.append({"line": n, "symbol": raw, "reason": "fractional contract quantity"})
+                continue
+            total, avg = _num(get("total")), _num(get("avg"))
+            premium = abs(total) / (contracts * 100) if total else abs(avg) if avg else None
+            if not premium:
+                skipped.append({"line": n, "symbol": raw, "reason": "no option cost"})
+                continue
+            out.append({"kind": "option", **option, "contracts": int(contracts),
+                        "position": "short" if qty < 0 else "long", "premium": round(premium, 4)})
+            if len(out) >= 500:
+                break
+            continue
         sym = raw.rstrip("*").replace(" ", "")
         if not re.fullmatch(r"[A-Z]{1,5}([.-][A-Z])?", sym):
-            skipped.append({"line": n, "symbol": raw, "reason": "not a stock or ETF symbol (options aren't imported)"})
+            skipped.append({"line": n, "symbol": raw, "reason": "not a recognized stock, ETF or option symbol"})
             continue
-        qty = _num(get("shares"))
         if not qty or qty <= 0:
-            skipped.append({"line": n, "symbol": sym, "reason": "no quantity (short positions aren't imported)"})
+            skipped.append({"line": n, "symbol": sym, "reason": "no quantity (short stock positions aren't imported)"})
             continue
         avg = _num(get("avg"))
         if avg is None and _num(get("total")) is not None:
@@ -343,7 +365,7 @@ def parse_broker_csv(text: str) -> dict:
         if not avg or avg <= 0:
             skipped.append({"line": n, "symbol": sym, "reason": "no cost basis"})
             continue
-        out.append({"ticker": sym.replace(".", "-"), "shares": round(qty, 6), "price": round(avg, 4),
+        out.append({"kind": "stock", "ticker": sym.replace(".", "-"), "shares": round(qty, 6), "price": round(avg, 4),
                     "acquired": _date(get("acquired"))})
         if len(out) >= 500:
             break
@@ -351,8 +373,155 @@ def parse_broker_csv(text: str) -> dict:
             "columns": {k: rows[header_i][v] for k, v in cols.items() if v is not None}}
 
 
-def import_rows(user_id: int, rows: list[dict]) -> int:
+_MONTHS = {m: i for i, m in enumerate(("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"), 1)}
+_OPTION_FORMATS = (
+    # OCC: AAPL  250117C00150000
+    (re.compile(r"([A-Z]{1,6})\s*(\d{2})(\d{2})(\d{2})([CP])(\d{8})"), lambda m: (m[1], 2000 + int(m[2]), int(m[3]), int(m[4]), m[5], int(m[6]) / 1000)),
+    # Fidelity: -AAPL250117C150
+    (re.compile(r"([A-Z]{1,6})(\d{2})(\d{2})(\d{2})([CP])(\d+(?:\.\d+)?)"), lambda m: (m[1], 2000 + int(m[2]), int(m[3]), int(m[4]), m[5], float(m[6]))),
+    # Schwab: AAPL 01/17/2025 150.00 C
+    (re.compile(r"([A-Z]{1,6}) (\d{2})/(\d{2})/(\d{4}) (\d+(?:\.\d+)?) ([CP])"), lambda m: (m[1], int(m[4]), int(m[2]), int(m[3]), m[6], float(m[5]))),
+    # E*Trade / generic: AAPL JAN 17 '25 $150 CALL
+    (re.compile(r"([A-Z]{1,6}) ([A-Z]{3}) (\d{1,2}) '?(\d{2}) \$?(\d+(?:\.\d+)?) (CALL|PUT)"),
+     lambda m: (m[1], 2000 + int(m[4]), _MONTHS.get(m[2], 0), int(m[3]), m[6][0], float(m[5]))),
+)
+
+
+def parse_option_symbol(raw: str) -> dict | None:
+    """Recognize common broker option symbols; returns underlying, expiry, type and strike."""
+    text = re.sub(r"\s+", " ", raw.strip().upper().lstrip("-").strip())
+    for pattern, fields in _OPTION_FORMATS:
+        match = pattern.fullmatch(text)
+        if not match:
+            continue
+        ticker, year, month, day, kind, strike = fields(match)
+        try:
+            expiry = date(year, month, day).isoformat()
+        except ValueError:
+            return None
+        if strike <= 0:
+            return None
+        return {"ticker": ticker, "expiry": expiry, "option_type": "call" if kind == "C" else "put", "strike": strike}
+    return None
+
+
+_HISTORY_COLS = {
+    "symbol": ("symbol", "ticker", "security symbol", "instrument"),
+    "description": ("description", "security description", "security"),
+    "shares": ("quantity", "qty", "shares", "share quantity"),
+    "opened": ("opened date", "open date", "date acquired", "acquired", "purchase date", "acquisition date"),
+    "closed": ("closed date", "close date", "date sold", "sold", "sale date", "date closed", "sold date"),
+    "proceeds": ("proceeds", "total proceeds", "sales proceeds", "proceeds ($)"),
+    "cost": ("cost basis", "cost basis ($)", "total cost", "cost", "adjusted cost basis"),
+    "side": ("position", "side", "long/short"),
+}
+
+
+def parse_history_csv(text: str) -> dict:
+    """Realized gain/loss (closed lots) export: one row per closed stock lot or option position."""
+    rows = list(csv.reader(io.StringIO(text.lstrip("\ufeff"))))
+    header_i, cols = None, {}
+    for i, r in enumerate(rows[:30]):
+        names = [c.strip().lower() for c in r]
+        found = {k: next((j for j, n in enumerate(names) if n in syn), None) for k, syn in _HISTORY_COLS.items()}
+        if all(found[k] is not None for k in ("shares", "closed", "proceeds", "cost")) and (
+                found["symbol"] is not None or found["description"] is not None):
+            header_i, cols = i, found
+            break
+    if header_i is None:
+        raise ValueError("Couldn't find Quantity, Closed date, Proceeds and Cost basis columns. "
+                         "Export realized gain/loss (closed positions) as CSV from your broker.")
+    out, skipped = [], []
+    for n, r in enumerate(rows[header_i + 1:], start=header_i + 2):
+        get = lambda k: r[cols[k]] if cols.get(k) is not None and cols[k] < len(r) else None
+        raw = (get("symbol") or "").strip().upper()
+        option = parse_option_symbol(raw) or parse_option_symbol(get("description") or "")
+        if not raw and not option:
+            continue
+        qty, proceeds, cost = _num(get("shares")), _num(get("proceeds")), _num(get("cost"))
+        opened, closed = _date(get("opened")), _date(get("closed"))
+        label = raw or (get("description") or "").strip()
+        if not qty or proceeds is None or cost is None or not closed:
+            skipped.append({"line": n, "symbol": label, "reason": "missing quantity, proceeds, cost or closed date"})
+            continue
+        if option:
+            contracts = abs(qty)
+            if not float(contracts).is_integer():
+                skipped.append({"line": n, "symbol": label, "reason": "fractional contract quantity"})
+                continue
+            side = (get("side") or "").strip().lower()
+            short = side.startswith("short") or (not side and qty < 0)
+            open_total, close_total = (abs(proceeds), abs(cost)) if short else (abs(cost), abs(proceeds))
+            if open_total <= 0:
+                skipped.append({"line": n, "symbol": label, "reason": "no opening premium"})
+                continue
+            out.append({"kind": "option", **option, "position": "short" if short else "long", "contracts": int(contracts),
+                        "open_premium": round(open_total / (contracts * 100), 4),
+                        "close_premium": round(close_total / (contracts * 100), 4),
+                        "opened_at": opened or closed, "closed_at": closed})
+        else:
+            sym = raw.rstrip("*").replace(" ", "")
+            if not re.fullmatch(r"[A-Z]{1,5}([.-][A-Z])?", sym) or qty <= 0 or cost <= 0:
+                skipped.append({"line": n, "symbol": label, "reason": "not a long stock/ETF lot or recognized option"})
+                continue
+            out.append({"kind": "stock", "ticker": sym.replace(".", "-"), "shares": round(qty, 6),
+                        "buy_price": round(cost / qty, 4), "sell_price": round(proceeds / qty, 4),
+                        "acquired": opened, "closed_at": closed})
+        if len(out) >= 1000:
+            break
+    return {"rows": out, "skipped": skipped,
+            "columns": {k: rows[header_i][v] for k, v in cols.items() if v is not None}}
+
+
+def import_rows(user_id: int, rows: list[dict], account: str | None = None) -> int:
+    from database import add_user_option
     for r in rows:
-        add_user_holding(user_id, r["ticker"], r["shares"], r["price"],
-                         f"{r['acquired']} 00:00:00" if r.get("acquired") else None)
+        if r.get("kind") == "option":
+            add_user_option(user_id, r["ticker"], r["option_type"], r["strike"], r["expiry"], r["premium"],
+                            r["contracts"], r["position"], account=account)
+        else:
+            add_user_holding(user_id, r["ticker"], r["shares"], r["price"],
+                             f"{r['acquired']} 00:00:00" if r.get("acquired") else None, account=account)
     return len(rows)
+
+
+def import_history(user_id: int, rows: list[dict], account: str | None = None) -> dict:
+    """Closed options go through the audited manual-history path; identical rows re-import as no-ops."""
+    import hashlib
+    import json
+    from pydantic import ValidationError
+    import database
+    imported, duplicates, failed = 0, 0, []
+    for r in rows:
+        key = "brk-" + hashlib.sha256(json.dumps([user_id, account, r], sort_keys=True).encode()).hexdigest()[:32]
+        try:
+            if r["kind"] == "option":
+                before = database._run(f"SELECT 1 FROM accounting_events WHERE user_id={database.PH} AND idempotency_key={database.PH}",
+                                       (user_id, key), "one")
+                database.record_closed_option(user_id, {
+                    "ticker": r["ticker"], "option_type": r["option_type"], "position": r["position"],
+                    "strike": str(r["strike"]), "expiry": r["expiry"], "contracts": r["contracts"],
+                    "open_premium": str(r["open_premium"]), "close_premium": str(r["close_premium"]),
+                    "opened_at": r["opened_at"], "closed_at": r["closed_at"], "notes": "Imported from broker CSV",
+                    "idempotency_key": key, "account": account})
+            else:
+                closed_at = f"{r['closed_at']} 20:00:00"
+                PH = database.PH
+                before = database._run(f"""SELECT 1 FROM closed_trades WHERE user_id={PH} AND ticker={PH} AND shares={PH}
+                    AND buy_price={PH} AND sell_price={PH} AND closed_at={PH}""",
+                    (user_id, r["ticker"], r["shares"], r["buy_price"], r["sell_price"], closed_at), "one")
+                if not before:
+                    pnl = (r["sell_price"] - r["buy_price"]) * r["shares"]
+                    database._run(f"""INSERT INTO closed_trades (user_id, ticker, shares, buy_price, sell_price, pnl, pnl_pct,
+                        acquired_at, closed_at, account) VALUES ({', '.join([PH] * 10)})""",
+                        (user_id, r["ticker"], r["shares"], r["buy_price"], r["sell_price"], round(pnl, 2),
+                         round(pnl / (r["buy_price"] * r["shares"]) * 100, 2), r.get("acquired"), closed_at,
+                         database.account_name(account)))
+            if before:
+                duplicates += 1
+            else:
+                imported += 1
+        except (ValueError, ValidationError, LookupError) as error:
+            message = error.errors()[0]["msg"] if isinstance(error, ValidationError) else str(error)
+            failed.append({"symbol": r["ticker"], "reason": message})
+    return {"imported": imported, "duplicates": duplicates, "failed": failed}

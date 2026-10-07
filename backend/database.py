@@ -13,6 +13,17 @@ if USE_PG:
     from psycopg2 import pool as pg_pool
 
 DB_PATH = os.getenv("STOCKPILOT_DB_PATH", os.path.join(os.path.dirname(__file__), "stockinsights.db"))
+DEFAULT_ACCOUNT = "Default"
+
+
+def account_name(value) -> str | None:
+    """Stored account label; the default account is stored as NULL."""
+    value = (value or "").strip()
+    return None if not value or value == DEFAULT_ACCOUNT else value
+
+
+def in_account(row: dict, account: str | None) -> bool:
+    return account is None or (row.get("account") or DEFAULT_ACCOUNT) == account
 
 
 def _quantity(value, name, *, integer=False, zero=False):
@@ -459,10 +470,21 @@ def init_db():
     ]
     for stmt in idx_stmts:
         idx.execute(stmt)
+    # Columns must exist before audit triggers are rebuilt so snapshots include them.
+    added_columns = {table: {"account": "TEXT"} for table in ("holdings", "options", "closed_trades", "closed_options", "journal")}
+    added_columns["watchlist"] = {"list_name": "TEXT", "note": "TEXT"}
+    for table, columns in added_columns.items():
+        for column, datatype in columns.items():
+            if USE_PG:
+                idx.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {datatype}")
+            elif column not in [row[1] for row in idx.execute(f"PRAGMA table_info({table})").fetchall()]:
+                idx.execute(f"ALTER TABLE {table} ADD COLUMN {column} {datatype}")
     from accounting import install_audit_schema
     install_audit_schema(conn, USE_PG)
     from research_universe import install_schema
     install_schema(conn, USE_PG)
+    import accounts
+    accounts.install_schema(conn, USE_PG)
     for column, datatype in {"cost_per_share": "DOUBLE PRECISION", "cost_model": "TEXT"}.items():
         if USE_PG:
             idx.execute(f"ALTER TABLE idea_log ADD COLUMN IF NOT EXISTS {column} {datatype}")
@@ -507,13 +529,13 @@ def get_user_holdings(user_id: int) -> list[dict]:
 
 
 def add_user_holding(user_id: int, ticker: str, shares: float, buy_price: float,
-                     acquired: str | None = None, *, _conn=None) -> dict:
+                     acquired: str | None = None, *, account: str | None = None, _conn=None) -> dict:
     _quantity(shares, "shares")
     _quantity(buy_price, "price", zero=True)
     conn = _conn or get_db()
     try:
         cur = conn.cursor()
-        cols, vals = "user_id, ticker, shares, buy_price", [user_id, ticker.upper(), shares, buy_price]
+        cols, vals = "user_id, ticker, shares, buy_price, account", [user_id, ticker.upper(), shares, buy_price, account_name(account)]
         if acquired:
             cols += ", date_added"
             vals.append(acquired)
@@ -541,15 +563,17 @@ def add_user_holding(user_id: int, ticker: str, shares: float, buy_price: float,
             _release(conn)
 
 
-def update_user_holding(user_id: int, holding_id: int, ticker: str, shares: float, buy_price: float) -> dict | None:
+def update_user_holding(user_id: int, holding_id: int, ticker: str, shares: float, buy_price: float,
+                        account=...) -> dict | None:
     _quantity(shares, "shares")
     _quantity(buy_price, "price", zero=True)
     conn = get_db()
     try:
         cur = conn.cursor()
+        extra, values = ("", ()) if account is ... else (f", account={PH}", (account_name(account),))
         cur.execute(
-            f"UPDATE holdings SET ticker={PH}, shares={PH}, buy_price={PH} WHERE id={PH} AND user_id={PH}",
-            (ticker.upper(), shares, buy_price, holding_id, user_id),
+            f"UPDATE holdings SET ticker={PH}, shares={PH}, buy_price={PH}{extra} WHERE id={PH} AND user_id={PH}",
+            (ticker.upper(), shares, buy_price, *values, holding_id, user_id),
         )
         if cur.rowcount == 0:
             conn.rollback()
@@ -591,7 +615,8 @@ def delete_user_holding(user_id: int, holding_id: int) -> dict | None:
         _release(conn)
 
 
-def sell_user_holding(user_id: int, ticker: str, shares: float, sell_price: float) -> dict | None:
+def sell_user_holding(user_id: int, ticker: str, shares: float, sell_price: float,
+                      account: str | None = None) -> dict | None:
     _quantity(shares, "shares")
     _quantity(sell_price, "price", zero=True)
     conn = get_db()
@@ -602,7 +627,7 @@ def sell_user_holding(user_id: int, ticker: str, shares: float, sell_price: floa
             cur.execute("BEGIN IMMEDIATE")
         cur.execute(f"SELECT * FROM holdings WHERE user_id={PH} AND ticker={PH} ORDER BY date_added, id"
                     + (" FOR UPDATE" if USE_PG else ""), (user_id, ticker))
-        lots = _fetchall(cur)
+        lots = [lot for lot in _fetchall(cur) if in_account(lot, account)]
         if not lots:
             return None
         if shares > sum(lot["shares"] for lot in lots):
@@ -664,8 +689,8 @@ def sell_user_holding_by_lot(user_id: int, holding_id: int, shares: float, sell_
     invested = h["buy_price"] * sold_shares
     pnl_pct = (pnl / invested * 100) if invested else 0
     cur.execute(
-        f"INSERT INTO closed_trades (user_id, ticker, shares, buy_price, sell_price, pnl, pnl_pct, source_lot_id, acquired_at) VALUES ({PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH})",
-        (user_id, h["ticker"], sold_shares, h["buy_price"], sell_price, round(pnl, 2), round(pnl_pct, 2), h["id"], str(h.get("date_added") or "")[:10] or None),
+        f"INSERT INTO closed_trades (user_id, ticker, shares, buy_price, sell_price, pnl, pnl_pct, source_lot_id, acquired_at, account) VALUES ({PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH})",
+        (user_id, h["ticker"], sold_shares, h["buy_price"], sell_price, round(pnl, 2), round(pnl_pct, 2), h["id"], str(h.get("date_added") or "")[:10] or None, h.get("account")),
     )
     cur.execute(
         f"INSERT INTO transactions (user_id, action, ticker, details) VALUES ({PH}, 'SELL', {PH}, {PH})",
@@ -684,23 +709,20 @@ def get_user_options(user_id: int) -> list[dict]:
 
 
 def add_user_option(user_id: int, ticker: str, option_type: str, strike: float,
-                    expiry: str, premium: float, contracts: int, position: str = "long") -> dict:
+                    expiry: str, premium: float, contracts: int, position: str = "long",
+                    account: str | None = None) -> dict:
     _option_values(option_type, position, strike, expiry, premium, contracts)
     conn = get_db()
     try:
         cur = conn.cursor()
         action = "BTO" if position == "long" else "STO"
+        values = (user_id, ticker.upper(), option_type.lower(), position.lower(), strike, expiry, premium, contracts, account_name(account))
+        sql = f"INSERT INTO options (user_id, ticker, option_type, position, strike, expiry, premium, contracts, account) VALUES ({', '.join([PH] * 9)})"
         if USE_PG:
-            cur.execute(
-                f"INSERT INTO options (user_id, ticker, option_type, position, strike, expiry, premium, contracts) VALUES ({PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH}) RETURNING *",
-                (user_id, ticker.upper(), option_type.lower(), position.lower(), strike, expiry, premium, contracts),
-            )
+            cur.execute(sql + " RETURNING *", values)
             new_row = _fetchone(cur)
         else:
-            cur.execute(
-                f"INSERT INTO options (user_id, ticker, option_type, position, strike, expiry, premium, contracts) VALUES ({PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH})",
-                (user_id, ticker.upper(), option_type.lower(), position.lower(), strike, expiry, premium, contracts),
-            )
+            cur.execute(sql, values)
             cur.execute(f"SELECT * FROM options WHERE id = {PH}", (cur.lastrowid,))
             new_row = _fetchone(cur)
         cur.execute(
@@ -719,7 +741,7 @@ def add_user_option(user_id: int, ticker: str, option_type: str, strike: float,
 
 def close_user_option(user_id: int, ticker: str, option_type: str, strike: float,
                       expiry: str, close_premium: float, contracts: int, position: str = "long",
-                      *, option_id: int | None = None, _conn=None) -> dict | None:
+                      *, option_id: int | None = None, closed_at: str | None = None, _conn=None) -> dict | None:
     _option_values(option_type, position, strike, expiry, close_premium, contracts)
     if _conn is None:
         conn = get_db()
@@ -727,7 +749,7 @@ def close_user_option(user_id: int, ticker: str, option_type: str, strike: float
             if not USE_PG:
                 conn.execute("BEGIN IMMEDIATE")
             result = close_user_option(user_id, ticker, option_type, strike, expiry, close_premium,
-                                       contracts, position, option_id=option_id, _conn=conn)
+                                       contracts, position, option_id=option_id, closed_at=closed_at, _conn=conn)
             conn.commit()
             return result
         except Exception:
@@ -773,10 +795,15 @@ def close_user_option(user_id: int, ticker: str, option_type: str, strike: float
         pnl = (opt["premium"] - close_premium) * closed * 100
     cost_basis = opt["premium"] * closed * 100
     pnl_pct = (pnl / cost_basis * 100) if cost_basis else 0
-    cur.execute(
-        f"INSERT INTO closed_options (user_id, ticker, option_type, position, strike, expiry, open_premium, close_premium, contracts, pnl, pnl_pct, opened_at, source_lot_id) VALUES ({PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH})",
-        (user_id, ticker, option_type.lower(), position.lower(), strike, expiry, opt["premium"], close_premium, closed, round(pnl, 2), round(pnl_pct, 2), str(opt.get("date_added") or "")[:10] or None, opt["id"]),
-    )
+    columns = "user_id, ticker, option_type, position, strike, expiry, open_premium, close_premium, contracts, pnl, pnl_pct, opened_at, source_lot_id, account"
+    values = (user_id, ticker, option_type.lower(), position.lower(), strike, expiry, opt["premium"], close_premium, closed,
+              round(pnl, 2), round(pnl_pct, 2), str(opt.get("date_added") or "")[:10] or None, opt["id"], opt.get("account"))
+    if closed_at:
+        columns += ", closed_at"
+        values += (closed_at,)
+    cur.execute(f"INSERT INTO closed_options ({columns}) VALUES ({', '.join([PH] * len(values))})"
+                + (" RETURNING id" if USE_PG else ""), values)
+    closed_id = _fetchone(cur)["id"] if USE_PG else cur.lastrowid
     close_action = "STC" if position == "long" else "BTC"
     cur.execute(
         f"INSERT INTO transactions (user_id, action, ticker, details) VALUES ({PH}, {PH}, {PH}, {PH})",
@@ -787,7 +814,8 @@ def close_user_option(user_id: int, ticker: str, option_type: str, strike: float
         conn.commit()
         _release(conn)
     return {"action": close_action, "ticker": ticker, "type": option_type, "strike": strike,
-            "expiry": expiry, "close_premium": close_premium, "contracts": closed, "pnl": round(pnl, 2)}
+            "expiry": expiry, "close_premium": close_premium, "contracts": closed, "pnl": round(pnl, 2),
+            "closed_id": closed_id}
 
 
 def assign_user_option(user_id: int, option_id: int) -> dict:
@@ -809,14 +837,14 @@ def assign_user_option(user_id: int, option_id: int) -> dict:
         shares = 100 * opt["contracts"]
         cur.execute(f"SELECT * FROM holdings WHERE user_id={PH} AND ticker={PH} ORDER BY date_added, id" + lock,
                     (user_id, opt["ticker"]))
-        lots = _fetchall(cur)
+        lots = [lot for lot in _fetchall(cur) if lot.get("account") == opt.get("account")]
         if opt["option_type"] == "call" and sum(lot["shares"] for lot in lots) < shares:
-            raise ValueError(f"Assignment needs {shares} recorded shares")
-        close_user_option(user_id, opt["ticker"], opt["option_type"], opt["strike"], opt["expiry"], 0.0,
-                          opt["contracts"], "short", option_id=option_id, _conn=conn)
+            raise ValueError(f"Assignment needs {shares} recorded shares in the option's account")
+        closed = close_user_option(user_id, opt["ticker"], opt["option_type"], opt["strike"], opt["expiry"], 0.0,
+                                   opt["contracts"], "short", option_id=option_id, _conn=conn)
         pnl = 0.0
         if opt["option_type"] == "put":
-            add_user_holding(user_id, opt["ticker"], shares, opt["strike"], _conn=conn)
+            add_user_holding(user_id, opt["ticker"], shares, opt["strike"], account=opt.get("account"), _conn=conn)
         else:
             left = shares
             for lot in lots:
@@ -829,7 +857,8 @@ def assign_user_option(user_id: int, option_id: int) -> dict:
                     (user_id, opt["ticker"], json.dumps({"option_id": option_id, "shares": shares})))
         conn.commit()
         return {"action": "ASSIGNED_PUT" if opt["option_type"] == "put" else "CALLED_AWAY",
-                "ticker": opt["ticker"], "shares": shares, "price": opt["strike"], "pnl": round(pnl, 2)}
+                "ticker": opt["ticker"], "shares": shares, "price": opt["strike"], "pnl": round(pnl, 2),
+                "closed_id": closed["closed_id"], "contracts": opt["contracts"]}
     except Exception:
         conn.rollback()
         raise
@@ -839,14 +868,15 @@ def assign_user_option(user_id: int, option_id: int) -> dict:
 
 def update_user_option(user_id: int, option_id: int, ticker: str, option_type: str,
                        strike: float, expiry: str, premium: float, contracts: int,
-                       position: str = "long") -> dict | None:
+                       position: str = "long", account=...) -> dict | None:
     _option_values(option_type, position, strike, expiry, premium, contracts)
     conn = get_db()
     try:
         cur = conn.cursor()
+        extra, values = ("", ()) if account is ... else (f", account={PH}", (account_name(account),))
         cur.execute(
-            f"UPDATE options SET ticker={PH}, option_type={PH}, position={PH}, strike={PH}, expiry={PH}, premium={PH}, contracts={PH} WHERE id={PH} AND user_id={PH}",
-            (ticker.upper(), option_type.lower(), position.lower(), strike, expiry, premium, contracts, option_id, user_id),
+            f"UPDATE options SET ticker={PH}, option_type={PH}, position={PH}, strike={PH}, expiry={PH}, premium={PH}, contracts={PH}{extra} WHERE id={PH} AND user_id={PH}",
+            (ticker.upper(), option_type.lower(), position.lower(), strike, expiry, premium, contracts, *values, option_id, user_id),
         )
         if cur.rowcount == 0:
             conn.rollback()
@@ -899,12 +929,23 @@ def get_user_watchlist(user_id: int) -> list[str]:
     return [r["ticker"] for r in rows]
 
 
-def add_to_watchlist(user_id: int, ticker: str) -> bool:
+def add_to_watchlist(user_id: int, ticker: str, list_name: str | None = None) -> bool:
     try:
-        _run(f"INSERT INTO watchlist (user_id, ticker) VALUES ({PH}, {PH})", (user_id, ticker.upper()))
+        _run(f"INSERT INTO watchlist (user_id, ticker, list_name) VALUES ({PH}, {PH}, {PH})",
+             (user_id, ticker.upper(), (list_name or "").strip() or None))
         return True
     except Exception:
         return False
+
+
+def get_watchlist_items(user_id: int) -> list[dict]:
+    rows = _run(f"SELECT ticker, list_name, note FROM watchlist WHERE user_id={PH} ORDER BY added_at", (user_id,), "all")
+    return [{"ticker": r["ticker"], "list_name": r["list_name"] or "Main", "note": r["note"] or ""} for r in rows]
+
+
+def update_watchlist_item(user_id: int, ticker: str, list_name: str | None, note: str | None) -> bool:
+    return _run(f"UPDATE watchlist SET list_name={PH}, note={PH} WHERE user_id={PH} AND ticker={PH}",
+                ((list_name or "").strip() or None, (note or "").strip() or None, user_id, ticker.upper())) > 0
 
 
 def remove_from_watchlist(user_id: int, ticker: str) -> bool:
@@ -959,6 +1000,8 @@ def record_closed_option(user_id: int, request, *, trade_id: int | None = None) 
 
     request = ClosedOptionRequest.model_validate(request)
     payload = request.model_dump(mode="json")
+    if payload.get("account") is None:
+        payload.pop("account", None)  # keeps retries of entries recorded before accounts existed comparable
     source = "closed_option_import" if trade_id is None else "closed_option_edit"
     conn = get_db()
     try:
@@ -986,12 +1029,12 @@ def record_closed_option(user_id: int, request, *, trade_id: int | None = None) 
             values = (request.ticker, request.option_type, request.position, float(request.strike),
                       request.expiry.isoformat(), float(request.open_premium), float(request.close_premium),
                       request.contracts, float(pnl), float(pnl_pct), request.opened_at.isoformat(),
-                      request.closed_at.isoformat(), request.notes)
+                      request.closed_at.isoformat(), request.notes, account_name(request.account))
             if trade_id is None:
                 cur.execute(f"""INSERT INTO closed_options
                     (user_id, ticker, option_type, position, strike, expiry, open_premium, close_premium,
-                     contracts, pnl, pnl_pct, opened_at, closed_at, notes)
-                    VALUES ({', '.join([PH] * 14)})""" + (" RETURNING id" if USE_PG else ""), (user_id, *values))
+                     contracts, pnl, pnl_pct, opened_at, closed_at, notes, account)
+                    VALUES ({', '.join([PH] * 15)})""" + (" RETURNING id" if USE_PG else ""), (user_id, *values))
                 trade_id = _fetchone(cur)["id"] if USE_PG else cur.lastrowid
             else:
                 cur.execute(f"""SELECT id FROM closed_options WHERE user_id={PH} AND id={PH}
@@ -1001,7 +1044,7 @@ def record_closed_option(user_id: int, request, *, trade_id: int | None = None) 
                     raise LookupError("Manual closed option not found")
                 _reverse_closed_option_entries(cur, user_id, trade_id, contracts=request.contracts)
                 cur.execute(f"""UPDATE closed_options SET ticker={PH}, option_type={PH}, position={PH}, strike={PH}, expiry={PH},
-                    open_premium={PH}, close_premium={PH}, contracts={PH}, pnl={PH}, pnl_pct={PH}, opened_at={PH}, closed_at={PH}, notes={PH}
+                    open_premium={PH}, close_premium={PH}, contracts={PH}, pnl={PH}, pnl_pct={PH}, opened_at={PH}, closed_at={PH}, notes={PH}, account={PH}
                     WHERE user_id={PH} AND id={PH}""", (*values, user_id, trade_id))
             cur.execute(f"SELECT id FROM accounting_events WHERE user_id={PH} AND source='closed_options' AND source_id={PH} AND operation='INSERT' ORDER BY id DESC",
                         (user_id, trade_id))
@@ -1283,7 +1326,7 @@ def mark_alert_triggered(alert_id: int) -> bool:
 # ── Trade journal ────────────────────────────────────────────────────────────────────
 
 _JOURNAL_FIELDS = ("ticker", "side", "shares", "entry_date", "entry_price", "exit_date", "exit_price",
-                   "stop", "target", "setup", "notes")
+                   "stop", "target", "setup", "notes", "account")
 
 
 def list_journal(user_id: int) -> list[dict]:

@@ -6,6 +6,7 @@ import PositionCalculator from './PositionCalculator';
 import { Review } from './OptionsDesk';
 import WheelCycles from './WheelCycles';
 import AccountTransfer from './AccountTransfer';
+import Skeleton from './Skeleton';
 import {
   fetchJournal, addJournalEntry, updateJournalEntry, deleteJournalEntry, fetchJournalCoach, fetchClosedTrades, fetchClosedOptions, logClosedOption, updateClosedOption, deleteClosedOption,
   recordAccountingEntry,
@@ -61,6 +62,43 @@ export function recordedOptionStats(rows) {
     expectancy: values.length ? (gain - loss) / values.length : null,
     winRate: values.length ? wins.length / values.length * 100 : null,
     profitFactor: loss ? (gain / loss).toFixed(2) : values.length ? 'No losses' : 'Unavailable' };
+}
+
+export const GROUPINGS = {
+  strategy: ['Strategy', row => `${row.position === 'short' ? 'Short' : 'Long'} ${row.option_type}`],
+  ticker: ['Ticker', row => row.ticker],
+  month: ['Closing month', row => String(row.closed_at).slice(0, 7)],
+  exit: ['Exit reason', row => EXIT_REASONS[row.review?.exit_reason] || 'Not recorded'],
+  account: ['Account', row => row.account || 'Default'],
+};
+
+export function groupedOptionStats(rows, grouping) {
+  const [, keyOf] = GROUPINGS[grouping];
+  const groups = new Map();
+  rows.filter(row => recordedTradeMetrics(row).option && finiteNumber(row.net_pnl)).forEach(row => {
+    const key = keyOf(row);
+    groups.set(key, [...(groups.get(key) || []), row]);
+  });
+  return [...groups.entries()].map(([key, members]) => ({ key, ...recordedOptionStats(members) }))
+    .sort((first, second) => grouping === 'month' ? second.key.localeCompare(first.key) : second.net - first.net);
+}
+
+function GroupedOptionStats({ rows }) {
+  const [grouping, setGrouping] = useState('strategy');
+  const groups = groupedOptionStats(rows, grouping);
+  if (!groups.length) return null;
+  return <div className="journal-breakdown">
+    <div className="ivrank-header"><h4 style={{ margin: 0 }}>Option results by {GROUPINGS[grouping][0].toLowerCase()}</h4>
+      <label className="market-sub">Group by{' '}<select value={grouping} onChange={event => setGrouping(event.target.value)}>
+        {Object.entries(GROUPINGS).map(([key, [label]]) => <option key={key} value={key}>{label}</option>)}</select></label></div>
+    <div className="table-scroll"><table className="market-table" aria-label="Grouped option results">
+      <thead><tr><th>{GROUPINGS[grouping][0]}</th><th>Closes</th><th>Net win rate</th><th>Net P&L</th><th>Expectancy / close</th><th>Profit factor</th></tr></thead>
+      <tbody>{groups.map(group => <tr key={group.key} className="no-click"><td>{group.key}</td><td>{group.count}</td>
+        <td>{percent(group.winRate)}</td><td className={pnlClass(group.net)}>{money(group.net)}</td>
+        <td className={pnlClass(group.expectancy)}>{money(group.expectancy)}</td><td>{group.profitFactor}</td></tr>)}</tbody>
+    </table></div>
+    {groups.some(group => group.count < 10) && <p className="market-sub">Groups with fewer than 10 closes are too small to show a reliable edge.</p>}
+  </div>;
 }
 
 function Breakdown({ title, rows }) {
@@ -169,7 +207,7 @@ function RecordedHistory({ optionsOnly = false, version = 0, onEdit, onDelete, b
     return () => { active = false; };
   }, [optionsOnly, version, revision]);
   if (error) return <p className="error-text">{error}</p>;
-  if (!rows) return <p className="loading-text">Loading recorded trades...</p>;
+  if (!rows) return <Skeleton label="Loading recorded trades" lines={2} />;
   if (!rows.length) return <p className="empty-state">{optionsOnly ? 'No closed options recorded.' : 'No closed stock or option trades recorded.'}</p>;
   const grossTotal = rows.reduce((total, row) => total + row.pnl, 0);
   const stats = recordedOptionStats(rows);
@@ -188,7 +226,8 @@ function RecordedHistory({ optionsOnly = false, version = 0, onEdit, onDelete, b
     </div>
     <p className="market-sub">Capture and return percentages are before fees and measure the option only, not return on collateral or a full wheel cycle.
       Net statistics include recorded fees only; each closing record counts once, including partial closes. Past averages are not forecasts.</p>
-    <div className="table-scroll"><table className="market-table">
+    <GroupedOptionStats rows={rows} />
+    <div className="table-scroll"><table className="market-table" aria-label="Recorded trades">
       <thead><tr><th>Actions</th><th>Opened</th><th>Closed</th><th>Ticker</th><th>Position</th><th>Quantity</th><th>Open / close premium</th><th>Captured / return %</th><th>Target capture</th><th>Actual vs target</th><th>Exit reason</th><th>Days held</th><th>DTE at close</th><th>Gross P&L</th><th>Recorded fees</th><th>Net P&L</th><th>Notes</th></tr></thead>
       <tbody>{rows.map(row => { const metrics = recordedTradeMetrics(row); return <tr key={row.key}>
         <td className="closed-option-actions">

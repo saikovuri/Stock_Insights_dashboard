@@ -4,12 +4,15 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+ACCOUNT_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9 ._&'()-]{0,39}$"
+
 
 class HoldingRequest(BaseModel):
     model_config = ConfigDict(allow_inf_nan=False)
     ticker: str = Field(min_length=1, max_length=20, pattern=r"^[A-Za-z^][A-Za-z0-9.^=-]*$")
     shares: float = Field(gt=0)
     price: float = Field(ge=0)
+    account: str | None = Field(default=None, pattern=ACCOUNT_PATTERN)
 
 
 class HoldingUpdateRequest(HoldingRequest):
@@ -26,6 +29,8 @@ class OptionRequest(BaseModel):
     contracts: int = Field(default=1, gt=0, strict=True)
     position: Literal["long", "short"] = "long"
     option_id: int | None = Field(default=None, gt=0)
+    account: str | None = Field(default=None, pattern=ACCOUNT_PATTERN)
+    cycle: str | None = Field(default=None, min_length=1, max_length=80)
 
     @field_validator("expiry")
     @classmethod
@@ -55,6 +60,7 @@ class ClosedOptionRequest(BaseModel):
     fees: Decimal = Field(default=Decimal("0"), ge=0, max_digits=14, decimal_places=2)
     notes: str = Field(default="", max_length=1000)
     idempotency_key: str = Field(min_length=8, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
+    account: str | None = Field(default=None, pattern=ACCOUNT_PATTERN)
 
     @field_validator("ticker")
     @classmethod
@@ -70,6 +76,11 @@ class ClosedOptionRequest(BaseModel):
         if self.closed_at > self.expiry:
             raise ValueError("Closing date cannot be after expiry")
         return self
+
+
+class LifecycleRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    cycle: str | None = Field(default=None, min_length=1, max_length=80)
 
 
 class AccountingEntryRequest(BaseModel):

@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from './AuthContext';
 import { ThemeProvider, useTheme } from './ThemeContext';
 import LoginPage from './components/LoginPage';
 import SearchBar from './components/SearchBar';
+import Skeleton from './components/Skeleton';
 import KeyMetrics from './components/KeyMetrics';
 const PriceChart = lazy(() => import('./components/CandleChart'));
 import NewsSentiment from './components/NewsSentiment';
@@ -77,6 +78,27 @@ function AppShell() {
     };
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  useEffect(() => {
+    const onKey = (event) => {
+      const target = event.target;
+      const typing = target instanceof HTMLElement
+        && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName));
+      const palette = event.key.toLowerCase() === 'k' && (event.ctrlKey || event.metaKey);
+      if (!palette && (event.key !== '/' || typing || event.altKey || event.ctrlKey || event.metaKey)) return;
+      if (document.querySelector('dialog[open]')) return;
+      event.preventDefault();
+      setActiveTab('dashboard');
+      if (window.location.hash !== '#dashboard') window.history.pushState(null, '', '#dashboard');
+      requestAnimationFrame(() => {
+        const input = document.getElementById('ticker-search');
+        input?.focus();
+        input?.select();
+      });
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, []);
 
   if (authLoading) return <div className="app"><p className="loading-text">Loading...</p></div>;
@@ -196,12 +218,13 @@ function AppShell() {
         </nav>
       </header>
 
-      <Suspense fallback={<p className="loading-text">Loading workspace...</p>}>
+      <Suspense fallback={<Skeleton label="Loading workspace" lines={1} chart />}>
       {activeTab === 'dashboard' && (
         <div className="dashboard-layout">
           <div className="dashboard-main">
             <SearchBar onSearch={(t) => handleSearch(t)} loading={loading} activeTicker={ticker} />
             {error && <div className="error-banner">{error}</div>}
+            {loading && !metrics && <Skeleton label={`Loading ${ticker || 'ticker'}`} lines={1} tiles={8} chart />}
             {!ticker && !loading && (
               <>
                 {user && <DailyBriefing onSelect={(t) => handleSearch(t)} />}

@@ -167,8 +167,9 @@ function WeeklyReview() {
   );
 }
 
-export function ImportCsv({ onImported }) {
+export function ImportCsv({ onImported, account = '' }) {
   const [text, setText] = useState('');
+  const [kind, setKind] = useState('positions');
   const [preview, setPreview] = useState(null);
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -183,35 +184,55 @@ export function ImportCsv({ onImported }) {
   const run = async (commit) => {
     setBusy(true); setMsg(null);
     try {
-      const r = await importPortfolioCsv(text, commit);
+      const r = await importPortfolioCsv(text, commit, kind, account);
       setPreview(r);
-      if (commit) { setMsg(`Imported ${r.imported} lots.`); setText(''); onImported?.(); }
+      if (commit) {
+        const failed = r.result?.failed || [];
+        setMsg(kind === 'history'
+          ? `Imported ${r.result.imported} closed trade(s); ${r.result.duplicates} already recorded${failed.length ? `; ${failed.length} rejected: ${failed.map(f => `${f.symbol} (${f.reason})`).join('; ')}` : ''}.`
+          : `Imported ${r.imported} position(s).`);
+        setText(''); onImported?.();
+      }
     } catch (e) { setMsg(e.message); }
     setBusy(false);
   };
+  const describe = (r) => r.kind === 'option'
+    ? `${r.position} ${r.contracts} × $${r.strike} ${r.option_type} ${r.expiry}` : `${r.shares} shares`;
 
   return (
     <>
+      <div className="chart-toggle" role="group" aria-label="Import type">
+        <button className={kind === 'positions' ? 'active' : ''} onClick={() => { setKind('positions'); setPreview(null); }}>Open positions</button>
+        <button className={kind === 'history' ? 'active' : ''} onClick={() => { setKind('history'); setPreview(null); }}>Closed trade history</button>
+      </div>
       <p className="structures-intro">
-        Export your <b>positions</b> as CSV from Fidelity, Schwab, E*TRADE, Vanguard or any broker (needs Symbol, Quantity and
-        a cost-basis column). Each row becomes a lot; cash, money-market and option rows are skipped. The file is parsed on
-        the server and not stored.
+        {kind === 'positions'
+          ? <>Export <b>positions</b> as CSV from Fidelity, Schwab, E*TRADE, Vanguard or any broker (Symbol, Quantity and a cost-basis column). Stocks/ETFs become lots; option symbols (OCC, Fidelity, Schwab or E*TRADE style) become option positions, with negative quantities recorded as short. Cash and expired options are skipped.</>
+          : <>Export <b>realized gain/loss</b> (closed lots) as CSV (Quantity, Date acquired, Date sold, Proceeds, Cost basis). Closed options are recorded through the audited history path and closed stock lots as sold trades. Re-importing the same rows adds nothing.</>}
+        {' '}Rows go into <b>{account || 'Default'}</b>. The file is parsed on the server and not stored.
       </p>
       <div className="alert-form">
-        <input type="file" accept=".csv,text/csv" onChange={onFile} />
+        <input type="file" accept=".csv,text/csv" aria-label="Broker CSV file" onChange={onFile} />
         <button className="btn-secondary btn-sm" disabled={!text || busy} onClick={() => run(false)}>Preview</button>
         <button className="btn-primary btn-sm" disabled={!preview?.rows?.length || busy} onClick={() => run(true)}>
-          Import {preview?.rows?.length || ''} lots
+          Import {preview?.rows?.length || ''} rows
         </button>
       </div>
       {msg && <p className="notif-msg">{msg}</p>}
       {preview && (
         <>
           <p className="market-sub">Detected columns: {Object.entries(preview.columns).map(([k, v]) => `${k} = "${v}"`).join(', ')}</p>
-          <table className="market-table">
-            <thead><tr><th>Ticker</th><th>Shares</th><th>Cost / share</th><th>Acquired</th></tr></thead>
-            <tbody>{preview.rows.map((r, i) => <tr key={i}><td>{r.ticker}</td><td>{r.shares}</td><td>${r.price}</td><td>{r.acquired || 'today'}</td></tr>)}</tbody>
-          </table>
+          <div className="table-scroll"><table className="market-table">
+            {kind === 'positions' ? <>
+              <thead><tr><th>Ticker</th><th>Position</th><th>Cost / share</th><th>Acquired</th></tr></thead>
+              <tbody>{preview.rows.map((r, i) => <tr key={i}><td>{r.ticker}</td><td>{describe(r)}</td><td>${r.kind === 'option' ? r.premium : r.price}</td><td>{r.kind === 'option' ? '—' : r.acquired || 'today'}</td></tr>)}</tbody>
+            </> : <>
+              <thead><tr><th>Ticker</th><th>Trade</th><th>Open</th><th>Close</th><th>Opened</th><th>Closed</th></tr></thead>
+              <tbody>{preview.rows.map((r, i) => <tr key={i}><td>{r.ticker}</td><td>{describe(r)}</td>
+                <td>${r.kind === 'option' ? r.open_premium : r.buy_price}</td><td>${r.kind === 'option' ? r.close_premium : r.sell_price}</td>
+                <td>{r.opened_at || r.acquired || '—'}</td><td>{r.closed_at}</td></tr>)}</tbody>
+            </>}
+          </table></div>
           {preview.skipped.length > 0 && (
             <p className="market-sub">Skipped: {preview.skipped.map(s => `${s.symbol} (${s.reason})`).join('; ')}</p>
           )}

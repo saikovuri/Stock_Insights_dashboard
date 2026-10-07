@@ -16,7 +16,10 @@ import Accounting from './components/Accounting';
 import WheelIdeas from './components/WheelIdeas';
 import MarketContext from './components/MarketContext';
 import PreTradeChecklist from './components/PreTradeChecklist';
-import Journal, { recordedTradeMetrics, recordedOptionStats } from './components/Journal';
+import Journal, { recordedTradeMetrics, recordedOptionStats, groupedOptionStats } from './components/Journal';
+import SearchBar from './components/SearchBar';
+import { NavHistory, SplitNotice } from './components/Accounts';
+import { ImportCsv } from './components/PortfolioInsights';
 import WheelManager from './components/WheelManager';
 import RollRepair from './components/RollRepair';
 import WheelCycles from './components/WheelCycles';
@@ -312,8 +315,43 @@ test.each([['short', '0.35', 'Buy-back price ($/share)', 'Buy to Close'],
     fireEvent.change(input, { target: { value: price } });
     expect(input.value).toBe(price);
     fireEvent.click(screen.getByRole('button', { name: action, exact: true }));
-    await waitFor(() => expect(close).toHaveBeenCalledWith('WDC', 'put', 65, '2027-01-15', Number(price), 1, position, 42));
+    await waitFor(() => expect(close).toHaveBeenCalledWith('WDC', 'put', 65, '2027-01-15', Number(price), 1, position, 42, ''));
   });
+
+test('closing links a wheel cycle and expired options record worthless expiry in the selected account', async () => {
+  localStorage.setItem('portfolio_account', 'IRA');
+  vi.spyOn(auth, 'useAuth').mockReturnValue({ user: { id: 1 }, token: 'fixture' });
+  const summary = vi.spyOn(stockApi, 'fetchPortfolioSummary').mockResolvedValue({ holdings: [], total_invested: 0, total_current: 0, total_pnl: 0, total_pnl_pct: 0 });
+  vi.spyOn(stockApi, 'fetchClosedTrades').mockResolvedValue({ trades: [] });
+  vi.spyOn(stockApi, 'fetchClosedOptions').mockResolvedValue({ trades: [] });
+  vi.spyOn(stockApi, 'fetchAccounts').mockResolvedValue({ accounts: [
+    { name: 'Default', cash: 1000, put_collateral: 0, free_cash: 1000 },
+    { name: 'IRA', cash: 9000, put_collateral: 6500, free_cash: 2500, cash_updated_at: '2026-10-06T12:00:00+00:00' }] });
+  vi.spyOn(stockApi, 'fetchCorporateActions').mockResolvedValue({ splits: [] });
+  vi.spyOn(stockApi, 'fetchOptionsSummary').mockResolvedValue({ total_cost: 240, total_value: null, total_pnl: null, options: [
+    { id: 7, ticker: 'WDC', type: 'put', position: 'short', strike: 65, expiry: '2026-10-02', dte: 0, contracts: 1,
+      premium: 1.2, market_price: null, current_price: null, pnl: null, expired: true, account: 'IRA' },
+    { id: 8, ticker: 'WDC', type: 'put', position: 'short', strike: 60, expiry: '2027-01-15', dte: 100, contracts: 1,
+      premium: 1.2, market_price: 0.6, current_price: 64, pnl: 60, expired: false, account: 'IRA' }] });
+  const close = vi.spyOn(stockApi, 'closeOption').mockResolvedValue({ cycle: 'WDC wheel' });
+  const expire = vi.spyOn(stockApi, 'expireOption').mockResolvedValue({ cycle: 'WDC wheel' });
+  vi.spyOn(window, 'prompt').mockReturnValue('WDC wheel');
+  render(<Portfolio />);
+  await waitFor(() => expect(summary).toHaveBeenCalledWith('IRA'));
+  expect(await screen.findByText('$2,500')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: /Options/ }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Expired worthless WDC 65 put' }));
+  await waitFor(() => expect(expire).toHaveBeenCalledWith(7, 'WDC wheel'));
+  expect(screen.queryByRole('button', { name: 'Expired worthless WDC 60 put' })).toBeNull();
+  screen.getByLabelText('Premium ($)').scrollIntoView = vi.fn();
+  fireEvent.click(screen.getAllByTitle('Close this option lot')[1]);
+  fireEvent.change(screen.getByLabelText('Buy-back price ($/share)'), { target: { value: '0.3' } });
+  fireEvent.change(screen.getByLabelText('Wheel cycle (optional)'), { target: { value: ' WDC wheel ' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Buy to Close', exact: true }));
+  await waitFor(() => expect(close).toHaveBeenCalledWith('WDC', 'put', 60, '2027-01-15', 0.3, 1, 'short', 8, 'WDC wheel'));
+  expect(await screen.findByText(/linked to WDC wheel/)).toBeTruthy();
+  localStorage.removeItem('portfolio_account');
+});
 
 async function openClosedOptionForm() {
   vi.spyOn(auth, 'useAuth').mockReturnValue({ user: { id: 1 } });
@@ -349,7 +387,7 @@ test('closed option journal previews net profit and retries the same canonical e
   expect(log.mock.calls[1][0]).toEqual(first);
   expect(stockJournal).not.toHaveBeenCalled();
   await screen.findByText('WDC');
-  expect(screen.getByRole('cell', { name: '$83.7', exact: true })).toBeTruthy();
+  expect(within(screen.getByRole('table', { name: 'Recorded trades' })).getByRole('cell', { name: '$83.7', exact: true })).toBeTruthy();
 });
 
 test('manual option corrections prefill the trade, retry updates and confirm deletion', async () => {
@@ -377,7 +415,7 @@ test('manual option corrections prefill the trade, retry updates and confirm del
   expect(update.mock.calls[0][0]).toBe(12);
   expect(update.mock.calls[1]).toEqual(update.mock.calls[0]);
   expect(create).toHaveBeenCalledTimes(1);
-  await screen.findByRole('cell', { name: '$92.5', exact: true });
+  await within(await screen.findByRole('table', { name: 'Recorded trades' })).findByRole('cell', { name: '$92.5', exact: true });
   const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
   fireEvent.click(screen.getByRole('button', { name: 'Delete WDC option' }));
   expect(remove).not.toHaveBeenCalled();
@@ -864,4 +902,108 @@ test('portfolio renders unavailable stock values without crashing', async () => 
   render(<Portfolio />);
   expect(await screen.findByText('AAPL')).toBeTruthy();
   expect(screen.getAllByText('Unavailable').length).toBeGreaterThanOrEqual(3);
+});
+
+test('journal groups option results by strategy, month, exit reason and account', () => {
+  const close = (overrides) => ({ position: 'short', option_type: 'put', open_premium: 1, close_premium: 0.5, ticker: 'AAPL',
+    closed_at: '2026-03-10', net_pnl: 50, ...overrides });
+  const rows = [close({}), close({ net_pnl: -30, closed_at: '2026-04-02', review: { exit_reason: 'stop' } }),
+    close({ option_type: 'call', ticker: 'MSFT', net_pnl: 25, account: 'IRA' }), { ticker: 'SPY', shares: 1, net_pnl: 999 }];
+  expect(groupedOptionStats(rows, 'strategy').map(g => [g.key, g.count, g.net])).toEqual([['Short call', 1, 25], ['Short put', 2, 20]]);
+  expect(groupedOptionStats(rows, 'month').map(g => g.key)).toEqual(['2026-04', '2026-03']);
+  expect(groupedOptionStats(rows, 'exit').find(g => g.key === 'Stop / risk limit').net).toBe(-30);
+  expect(groupedOptionStats(rows, 'account').map(g => g.key).sort()).toEqual(['Default', 'IRA']);
+});
+
+test('ticker search suggests companies and supports keyboard selection', async () => {
+  const search = vi.spyOn(stockApi, 'searchSymbols').mockResolvedValue({ results: [
+    { symbol: 'AAPL', name: 'Apple Inc.' }, { symbol: 'APP', name: 'AppLovin', exchange: 'NASDAQ' }] });
+  const onSearch = vi.fn();
+  render(<SearchBar onSearch={onSearch} loading={false} activeTicker="NVDA" />);
+  const input = screen.getByRole('combobox', { name: 'Ticker or company name' });
+  fireEvent.change(input, { target: { value: 'apple' } });
+  expect(await screen.findByRole('option', { name: /AppLovin/ })).toBeTruthy();
+  expect(search).toHaveBeenCalledWith('apple', expect.any(AbortSignal));
+  fireEvent.keyDown(input, { key: 'ArrowDown' });
+  fireEvent.keyDown(input, { key: 'ArrowDown' });
+  expect(screen.getByRole('option', { name: /AppLovin/ }).getAttribute('aria-selected')).toBe('true');
+  fireEvent.submit(input.closest('form'));
+  expect(onSearch).toHaveBeenCalledWith('APP');
+  fireEvent.change(input, { target: { value: 'apple' } });
+  await screen.findByRole('option', { name: /Apple Inc/ });
+  fireEvent.submit(input.closest('form'));
+  expect(onSearch).toHaveBeenLastCalledWith('AAPL');
+});
+
+test('signed-in watchlist filters lists, saves notes and shows next earnings', async () => {
+  vi.spyOn(auth, 'useAuth').mockReturnValue({ user: { id: 9 }, token: 'fixture' });
+  vi.spyOn(stockApi, 'authFetch').mockResolvedValue(new Response(JSON.stringify({ stocks: [
+    { ticker: 'AAPL', name: 'Apple', price: 200 }, { ticker: 'KO', name: 'Coca-Cola', price: 60 }] })));
+  vi.spyOn(stockApi, 'fetchWatchlistItems').mockResolvedValue({ items: [
+    { ticker: 'AAPL', list_name: 'Growth', note: 'Buy under 180' }, { ticker: 'KO', list_name: 'Income', note: '' }] });
+  const soon = new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10);
+  vi.spyOn(stockApi, 'fetchWatchlistEarnings').mockResolvedValue({ items: [
+    { ticker: 'AAPL', next: soon, timing: 'after close', confirmed: true }, { ticker: 'KO', next: null }] });
+  const save = vi.spyOn(stockApi, 'updateWatchlistItem').mockResolvedValue({ ok: true });
+  render(<Watchlist />);
+  expect(await screen.findByText('Buy under 180')).toBeTruthy();
+  expect(await screen.findByText(/\(5d\)/)).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('List:'), { target: { value: 'Income' } });
+  expect(screen.queryByText('Buy under 180')).toBeNull();
+  expect(screen.getByText('Coca-Cola')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'List and notes for KO' }));
+  fireEvent.change(screen.getByLabelText('Note'), { target: { value: 'Dividend raise in Feb' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  await waitFor(() => expect(save).toHaveBeenCalledWith('KO', 'Income', 'Dividend raise in Feb'));
+  expect(await screen.findByText('Dividend raise in Feb')).toBeTruthy();
+});
+
+test('account value history shows flow-adjusted return and drawdown and records on demand', async () => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+  const history = vi.spyOn(stockApi, 'fetchNavHistory').mockResolvedValue({ series: [
+    { day: '2026-10-01', nav: 100000 }, { day: '2026-10-02', nav: 95000 }, { day: '2026-10-03', nav: null }],
+    return_pct: -5, max_drawdown_pct: -5, flow_adjusted: true, note: 'Deposits and withdrawals from the Account ledger are removed from returns.' });
+  vi.spyOn(stockApi, 'recordNavSnapshot').mockResolvedValue({ snapshots: [{ account: 'IRA', complete: false }] });
+  render(<NavHistory account="" />);
+  expect(await screen.findByText('Time-weighted return')).toBeTruthy();
+  expect(screen.getByText('$95,000')).toBeTruthy();
+  expect(screen.getAllByText('-5%').length).toBe(2);
+  fireEvent.click(screen.getByRole('button', { name: 'Record value now' }));
+  expect(await screen.findByText(/Incomplete \(missing quotes or cash\): IRA/)).toBeTruthy();
+  expect(history).toHaveBeenCalledTimes(2);
+});
+
+test('split notice applies a pending split only after confirmation', async () => {
+  vi.spyOn(stockApi, 'fetchCorporateActions').mockResolvedValue({ splits: [
+    { ticker: 'NVDA', split_date: '2024-06-10', ratio: 10, label: '10-for-1', lots: 2, options: 1, options_adjustable: true }] });
+  const apply = vi.spyOn(stockApi, 'applySplit').mockResolvedValue({ ticker: 'NVDA', lots: 2, options: 1, options_skipped: 0 });
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
+  const onApplied = vi.fn();
+  render(<SplitNotice version={0} onApplied={onApplied} />);
+  const button = await screen.findByRole('button', { name: 'Apply adjustment' });
+  fireEvent.click(button);
+  expect(apply).not.toHaveBeenCalled();
+  fireEvent.click(button);
+  await screen.findByText(/NVDA: adjusted 2 lot\(s\) and 1 option/);
+  expect(apply).toHaveBeenCalledWith('NVDA', '2024-06-10');
+  expect(confirm).toHaveBeenCalledTimes(2);
+  expect(onApplied).toHaveBeenCalled();
+});
+
+test('broker import previews closed trade history into the selected account', async () => {
+  const run = vi.spyOn(stockApi, 'importPortfolioCsv')
+    .mockResolvedValueOnce({ columns: { symbol: 'Symbol' }, skipped: [], rows: [
+      { kind: 'option', ticker: 'MSFT', option_type: 'put', position: 'short', contracts: 1, strike: 380, expiry: '2025-03-21',
+        open_premium: 2.5, close_premium: 0.4, opened_at: '2025-02-03', closed_at: '2025-03-03' }] })
+    .mockResolvedValueOnce({ columns: {}, skipped: [], rows: [], result: { imported: 1, duplicates: 0, failed: [] } });
+  const refresh = vi.fn();
+  render(<ImportCsv account="Roth" onImported={refresh} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Closed trade history' }));
+  fireEvent.change(screen.getByLabelText('Broker CSV file'), { target: { files: [{ size: 100, text: async () => 'Symbol,Quantity\nX,1' }] } });
+  fireEvent.click(await screen.findByRole('button', { name: 'Preview' }));
+  expect(await screen.findByText('short 1 × $380 put 2025-03-21')).toBeTruthy();
+  expect(run).toHaveBeenCalledWith('Symbol,Quantity\nX,1', false, 'history', 'Roth');
+  fireEvent.click(screen.getByRole('button', { name: /Import 1 rows/ }));
+  expect(await screen.findByText(/Imported 1 closed trade\(s\); 0 already recorded/)).toBeTruthy();
+  expect(refresh).toHaveBeenCalled();
 });

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../AuthContext';
 import { useProfile } from '../ProfileContext';
 import { fetchMarketOverview, fetchMovers, fetchMyEarnings } from '../api/stockApi';
+import Skeleton from './Skeleton';
 
 function pct(v, digits = 2) {
   if (v == null) return '—';
@@ -31,7 +32,7 @@ function Movers({ onSelect }) {
           ))}
         </div>
       </div>
-      {!items ? <p className="loading-text">Loading…</p> : items.length === 0 ? <p className="empty-state">No data (market may be closed).</p> : (
+      {!items ? <Skeleton label="Loading movers" /> : items.length === 0 ? <p className="empty-state">No data (market may be closed).</p> : (
         <table className="market-table">
           <thead><tr><th>Symbol</th><th>Price</th><th>Change</th><th title="Volume vs 3-month average">Rel. vol</th></tr></thead>
           <tbody>
@@ -95,7 +96,7 @@ export default function MarketOverview({ onSelect }) {
   }, [user]);
 
   if (error && !data) return <div className="card"><p className="error-text">{error}</p></div>;
-  if (!data) return <div className="card"><p className="loading-text">Loading market overview…</p></div>;
+  if (!data) return <Skeleton label="Loading market overview" lines={1} tiles={6} card />;
 
   const regimeCls = data.regime.trend === 'uptrend' ? 'positive' : data.regime.trend === 'downtrend' ? 'negative' : '';
   const movers = <Movers key="movers" onSelect={onSelect} />;
@@ -107,6 +108,7 @@ export default function MarketOverview({ onSelect }) {
         <div className="market-status">
           <span className={`market-dot market-${data.status.state.replace(' ', '-')}`} />
           Market {data.status.state} · {data.status.time_et}
+          {data.updated_at && <span className="as-of"> · quotes updated {new Date(data.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}
         </div>
         <p className={`market-regime-text ${regimeCls}`}>{data.regime.summary}</p>
         <div className="market-tiles">

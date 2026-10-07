@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAuth } from '../AuthContext';
 import PriceAlerts from './PriceAlerts';
-import { authFetch } from '../api/stockApi';
+import { authFetch, fetchWatchlistItems, fetchWatchlistEarnings, updateWatchlistItem } from '../api/stockApi';
 
 import { API_BASE } from '../api/config';
 const BASE = API_BASE;
@@ -50,6 +50,11 @@ function AccountWatchlist({ onSelect, onSignIn, session }) {
   const [lastUpdated, setLastUpdated] = useState(null);
   const [customOrder, setCustomOrder] = useState([]);
   const [alertPanelTicker, setAlertPanelTicker] = useState(null);
+  const [items, setItems] = useState({});
+  const [earnings, setEarnings] = useState({});
+  const [group, setGroup] = useState('');
+  const [notePanel, setNotePanel] = useState(null);
+  const [draft, setDraft] = useState({ list_name: '', note: '' });
   const active = useRef(false);
   const loadGeneration = useRef(0);
 
@@ -128,6 +133,43 @@ function AccountWatchlist({ onSelect, onSignIn, session }) {
     else fetchScreenerAuth();
   }, [isGuest, fetchScreenerAuth, fetchScreenerGuest]);
 
+  const tickerKey = stocks.map(s => s.ticker).sort().join(',');
+  useEffect(() => {
+    if (isGuest || !tickerKey) return undefined;
+    let current = true;
+    fetchWatchlistItems().then(data => {
+      if (current) setItems(Object.fromEntries((data.items || []).map(item => [item.ticker, item])));
+    }).catch(() => {});
+    fetchWatchlistEarnings().then(data => {
+      if (current) setEarnings(Object.fromEntries((data.items || []).map(item => [item.ticker, item])));
+    }).catch(() => {});
+    return () => { current = false; };
+  }, [isGuest, tickerKey]);
+
+  const groups = [...new Set(Object.values(items).map(item => item.list_name || 'Main'))].sort();
+
+  const openNotes = (ticker) => {
+    setNotePanel(prev => (prev === ticker ? null : ticker));
+    setDraft({ list_name: items[ticker]?.list_name || 'Main', note: items[ticker]?.note || '' });
+  };
+
+  const saveNotes = async (ticker) => {
+    try {
+      await updateWatchlistItem(ticker, draft.list_name.trim() || 'Main', draft.note);
+      setItems(prev => ({ ...prev, [ticker]: { ticker, list_name: draft.list_name.trim() || 'Main', note: draft.note.trim() } }));
+      setNotePanel(null);
+    } catch (error) { setAddMsg(error.message); }
+  };
+
+  const earningsCell = (ticker) => {
+    const next = earnings[ticker]?.next;
+    if (!next) return '—';
+    const days = Math.round((Date.parse(`${next}T12:00:00`) - Date.now()) / 86400000);
+    const label = new Date(`${next}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    return <span className={days <= 14 ? 'earnings-soon' : ''} title={`${earnings[ticker].timing || 'time unknown'}${earnings[ticker].confirmed ? '' : ' · unconfirmed'}`}>
+      {label}{days >= 0 && days <= 14 ? ` (${days}d)` : ''}{earnings[ticker].confirmed ? '' : '*'}</span>;
+  };
+
   // ── Add ticker ─────────────────────────────────────────────────
 
   const handleAdd = async (e) => {
@@ -152,7 +194,7 @@ function AccountWatchlist({ onSelect, onSignIn, session }) {
         const res = await authFetch(`${BASE}/watchlist`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ticker: t }),
+          body: JSON.stringify({ ticker: t, ...(group ? { list_name: group } : {}) }),
         });
         if (!active.current) return;
         if (res.ok) { setAddTicker(''); sessionStorage.removeItem(cacheKey); fetchScreenerAuth(true); }
@@ -259,19 +301,20 @@ function AccountWatchlist({ onSelect, onSignIn, session }) {
   ];
 
   const sorted = useMemo(() => {
+    const visible = group ? stocks.filter(s => (items[s.ticker]?.list_name || 'Main') === group) : stocks;
     if (sortCol === 'custom') {
       const orderMap = {};
       customOrder.forEach((t, i) => { orderMap[t] = i; });
-      return [...stocks].sort((a, b) => (orderMap[a.ticker] ?? 999) - (orderMap[b.ticker] ?? 999));
+      return [...visible].sort((a, b) => (orderMap[a.ticker] ?? 999) - (orderMap[b.ticker] ?? 999));
     }
-    return [...stocks].sort((a, b) => {
+    return [...visible].sort((a, b) => {
       let va = a[sortCol], vb = b[sortCol];
       if (va == null) return 1;
       if (vb == null) return -1;
       if (typeof va === 'string') return va.localeCompare(vb) * sortDir;
       return (va - vb) * sortDir;
     });
-  }, [stocks, sortCol, sortDir, customOrder]);
+  }, [stocks, sortCol, sortDir, customOrder, group, items]);
 
   // Broadcast order to WatchlistRail (must be in useEffect, not useMemo, to avoid
   // triggering setState in WatchlistRail during Screener's render phase)
@@ -310,6 +353,15 @@ function AccountWatchlist({ onSelect, onSignIn, session }) {
           >
             {loading ? '⟳' : '↻'} Refresh
           </button>
+          {!isGuest && groups.length > 0 && (
+            <div className="screener-sort-dropdown">
+              <label htmlFor="watchlist-group">List:</label>
+              <select id="watchlist-group" value={group} onChange={e => setGroup(e.target.value)}>
+                <option value="">All lists</option>
+                {groups.map(name => <option key={name} value={name}>{name}</option>)}
+              </select>
+            </div>
+          )}
           <div className="screener-sort-dropdown">
             <label>Sort:</label>
             <select
@@ -369,6 +421,7 @@ function AccountWatchlist({ onSelect, onSignIn, session }) {
                 <th onClick={() => doSort('volume')}>Volume{arrow('volume')}</th>
                 <th onClick={() => doSort('dividend_yield')}>Div%{arrow('dividend_yield')}</th>
                 <th onClick={() => doSort('sector')}>Sector{arrow('sector')}</th>
+                {!isGuest && <th title="Next earnings date (* = providers disagree / unconfirmed)">Earnings</th>}
                 <th></th>
               </tr>
             </thead>
@@ -387,7 +440,7 @@ function AccountWatchlist({ onSelect, onSignIn, session }) {
                     >
                       <td className="drag-handle" title="Drag to reorder">⠿</td>
                       <td><button className="link-btn" onClick={() => onSelect?.(s.ticker)} title="Open on dashboard"><strong>{s.ticker}</strong></button></td>
-                      <td className="screener-name">{s.name}</td>
+                      <td className="screener-name">{s.name}{items[s.ticker]?.note && <div className="market-sub watchlist-note">{items[s.ticker].note}</div>}</td>
                       <td>${s.price?.toFixed(2) ?? '—'}</td>
                       <td className={s.change_pct >= 0 ? 'positive' : 'negative'}>
                         {s.change_pct >= 0 ? '+' : ''}{s.change_pct?.toFixed(2) ?? '—'}%
@@ -405,7 +458,10 @@ function AccountWatchlist({ onSelect, onSignIn, session }) {
                       <td>{formatVol(s.volume)}</td>
                       <td>{s.dividend_yield != null ? `${s.dividend_yield.toFixed(2)}%` : '—'}</td>
                       <td className="screener-sector">{s.sector || '—'}</td>
+                      {!isGuest && <td>{earningsCell(s.ticker)}</td>}
                       <td className="action-cell">
+                        {!isGuest && <button className="btn-icon" onClick={() => openNotes(s.ticker)}
+                          title="List and notes" aria-label={`List and notes for ${s.ticker}`}>📝</button>}
                         <button
                           className="btn-icon btn-alert"
                           onClick={() => setAlertPanelTicker(prev => prev === s.ticker ? null : s.ticker)}
@@ -414,9 +470,24 @@ function AccountWatchlist({ onSelect, onSignIn, session }) {
                         <button className="btn-icon btn-remove" onClick={() => handleRemove(s.ticker)} title="Remove">✕</button>
                       </td>
                     </tr>
+                    {notePanel === s.ticker && (
+                      <tr className="alert-panel-row">
+                        <td colSpan={16}>
+                          <div className="watchlist-note-editor">
+                            <label>List<input className="tool-input" value={draft.list_name} maxLength={40} list="watchlist-groups"
+                              onChange={e => setDraft(d => ({ ...d, list_name: e.target.value }))} /></label>
+                            <datalist id="watchlist-groups">{groups.map(name => <option key={name} value={name} />)}</datalist>
+                            <label>Note<textarea className="tool-input" value={draft.note} maxLength={500} rows={2}
+                              onChange={e => setDraft(d => ({ ...d, note: e.target.value }))} /></label>
+                            <button className="btn-primary btn-sm" onClick={() => saveNotes(s.ticker)}>Save</button>
+                            <button className="btn-secondary btn-sm" onClick={() => setNotePanel(null)}>Cancel</button>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
                     {panelOpen && (
                       <tr className="alert-panel-row">
-                        <td colSpan={15}>
+                        <td colSpan={16}>
                           <PriceAlerts ticker={s.ticker} price={s.price} onSignIn={onSignIn} />
                         </td>
                       </tr>

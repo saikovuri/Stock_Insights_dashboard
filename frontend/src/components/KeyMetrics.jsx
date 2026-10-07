@@ -37,6 +37,7 @@ export default function KeyMetrics({ metrics }) {
         <span className="subtitle">
           {metrics.sector}{metrics.industry && metrics.industry !== metrics.sector && metrics.industry !== 'N/A' ? ` · ${metrics.industry}` : ''}
         </span>
+        {metrics.as_of && <span className="as-of" title="When this quote was fetched; provider data can itself be delayed">Quote as of {new Date(metrics.as_of).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}
       </div>
 
       <div className="metrics-grid">

@@ -316,7 +316,7 @@ test('journal review and explicit wheel cycles work on desktop and mobile', asyn
   await expect(dialog.getByLabel('Target capture (%)')).toHaveValue('50');
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
-  const table = page.locator('.journal-workspace .table-scroll');
+  const table = page.locator('.journal-workspace .table-scroll').filter({ has: page.getByRole('table', { name: 'Recorded trades' }) });
   expect(await table.evaluate(element => element.scrollWidth >= element.clientWidth)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath('journal-capture-history.png'), fullPage: true });
   await page.getByRole('button', { name: 'Wheel cycles', exact: true }).click();
@@ -431,7 +431,7 @@ test('journal records historical options with fees and safe retry', async ({ pag
   expect(submissions).toHaveLength(2);
   expect(submissions[1]).toEqual(submissions[0]);
   await expect(page.getByRole('cell', { name: 'WDC', exact: true })).toHaveCount(1);
-  await expect(page.getByRole('cell', { name: '$83.7', exact: true })).toBeAttached();
+  await expect(page.getByRole('table', { name: 'Recorded trades' }).getByRole('cell', { name: '$83.7', exact: true })).toBeAttached();
   await page.getByRole('button', { name: 'Trade history', exact: true }).click();
   await expect(page.getByRole('cell', { name: 'WDC', exact: true })).toHaveCount(1);
   await expect(page.getByRole('cell', { name: '2025-09-10', exact: true })).toBeAttached();
@@ -455,7 +455,7 @@ test('journal records historical options with fees and safe retry', async ({ pag
   await form.getByRole('button', { name: 'Save option changes', exact: true }).click();
   await expect(page.getByRole('status')).toHaveText('WDC closed option updated.');
   await expect(page.getByRole('cell', { name: 'WDC', exact: true })).toHaveCount(1);
-  await expect(page.getByRole('cell', { name: '$92.5', exact: true })).toBeAttached();
+  await expect(page.getByRole('table', { name: 'Recorded trades' }).getByRole('cell', { name: '$92.5', exact: true })).toBeAttached();
   await page.locator('.closed-option-journal').screenshot({ path: testInfo.outputPath('option-edit-actions.png') });
   page.once('dialog', dialog => dialog.dismiss());
   await page.getByRole('button', { name: 'Delete WDC option', exact: true }).click();
@@ -495,7 +495,7 @@ test('income candidate stays visible with liquidity warnings and blocked sizing'
       effective_buy_price: 49.64, discount_pct: 6 }],
   } }));
   await page.goto('/#dashboard');
-  await page.getByPlaceholder('Enter ticker (e.g. AAPL)').fill('PYPL');
+  await page.getByRole('combobox', { name: 'Ticker or company name' }).fill('PYPL');
   await page.getByRole('button', { name: 'Analyze', exact: true }).click();
   await page.getByRole('button', { name: /Analysis/, exact: false }).click();
   const income = page.locator('.income-ideas');
@@ -614,4 +614,29 @@ test('account ledger records and reverses fees without page overflow', async ({ 
   await page.screenshot({ path: testInfo.outputPath('accounting.png'), fullPage: true });
   await page.getByRole('button', { name: 'Reverse #1', exact: true }).click();
   await expect(page.getByRole('cell', { name: 'fee', exact: true })).toHaveCount(0);
+});
+
+test('slash focuses company search and the account bar fits the viewport', async ({ page }, testInfo) => {
+  await page.route('**/api/search?*', route => route.fulfill({ json: { results: [
+    { symbol: 'AAPL', name: 'Apple Inc.', exchange: 'NASDAQ' }, { symbol: 'APLE', name: 'Apple Hospitality REIT', exchange: 'NYSE' }] } }));
+  await page.route('**/api/portfolio/accounts', route => route.fulfill({ json: { default: 'Default', accounts: [
+    { name: 'Default', cash: 25000, put_collateral: 6500, free_cash: 18500, cash_updated_at: '2026-10-06T14:00:00Z' },
+    { name: 'Roth IRA', cash: null, put_collateral: 0, free_cash: null }] } }));
+  await page.route('**/api/portfolio/corporate-actions', route => route.fulfill({ json: { splits: [] } }));
+  await page.goto('/#watchlist');
+  await page.locator('body').press('/');
+  const search = page.getByRole('combobox', { name: 'Ticker or company name' });
+  await expect(search).toBeFocused();
+  await expect(page).toHaveURL(/#dashboard/);
+  await search.fill('apple');
+  await expect(page.getByRole('option', { name: /Apple Hospitality REIT/ })).toBeVisible();
+  const list = page.getByRole('listbox');
+  expect(await list.evaluate(element => element.getBoundingClientRect().right <= window.innerWidth + 1)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('company-search.png') });
+  await page.goto('/#portfolio');
+  const bar = page.getByRole('region', { name: 'Brokerage accounts' });
+  await expect(bar.getByRole('cell', { name: '$18,500' })).toBeVisible();
+  await expect(bar.getByRole('cell', { name: 'Enter cash' })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+  await bar.screenshot({ path: testInfo.outputPath('account-bar.png') });
 });

@@ -103,6 +103,23 @@ def main():
     with ThreadPoolExecutor(max_workers=2) as executor:
         consumed = list(executor.map(lambda _: consume(), range(2)))
     assert sum(row is not None for row in consumed) == 1, "Refresh token was reusable concurrently"
+    import accounts
+    import corporate_actions
+    from unittest.mock import patch
+    accounts.set_cash(user, "IRA", 1000)
+    accounts.set_cash(user, "IRA", 2500)
+    ira = next(a for a in accounts.list_accounts(user)["accounts"] if a["name"] == "IRA")
+    assert ira["cash"] == 2500, ira
+    labeled = database.add_user_option(user, "KO", "put", 60, "2027-01-15", 1, 1, "short", account="IRA")
+    closed = database.close_user_option(user, "KO", "put", 60, "2027-01-15", 0.2, 1, "short", option_id=labeled["id"])
+    accounts.link_closed_option(user, closed["closed_id"], 1, "PG KO cycle")
+    assert next(c for c in accounting.report(user)["cycles"] if c["name"] == "PG KO cycle")["realized_pnl"] == 80
+    assert next(r for r in database.get_closed_options(user) if r["id"] == closed["closed_id"])["account"] == "IRA"
+    database.add_user_holding(user, "SPLT", 10, 50, "2024-01-02 00:00:00", account="IRA")
+    with patch.object(corporate_actions, "_splits", return_value=[("2024-06-10", 2.0)]):
+        corporate_actions.apply_split(user, "SPLT", "2024-06-10")
+        assert corporate_actions.pending_splits(user) == []
+    assert [(h["shares"], h["buy_price"]) for h in database.get_user_holdings(user) if h["ticker"] == "SPLT"] == [(20, 25)]
     transferred = next(row for row in database.get_closed_options(destination) if row["ticker"] == "WDC")
     assert transferred["net_pnl"] == 92.5 and transferred["is_manual"]
     assert transferred["review"]["target_capture_pct"] == 50
