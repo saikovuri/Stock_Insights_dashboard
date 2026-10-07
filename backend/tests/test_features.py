@@ -379,6 +379,41 @@ class FeatureTests(unittest.TestCase):
                          [("alert", 700), ("short_call", 580), ("cost", 70), ("cost", 50)], "RSI alerts are not price levels")
         self.assertEqual(self.client.get("/api/stock/AMD/mine").status_code, 401)
 
+    def test_buy_zones_suggest_a_put_to_wait_and_event_week_lists_dates(self):
+        import buy_zones
+        uid = new_user()
+        database.add_to_watchlist(uid, "NVDA", None)
+        with self.as_user(uid):
+            self.assertEqual(self.client.put("/api/watchlist/buy-zones/NVDA", json={"price": 0}).status_code, 422)
+            self.assertEqual(self.client.put("/api/watchlist/buy-zones/NVDA", json={"price": 170}).status_code, 200)
+            self.assertEqual(self.client.put("/api/watchlist/buy-zones/KO", json={"price": 80}).status_code, 200)
+        self.assertEqual(buy_zones.get_zones(uid), {"NVDA": 170, "KO": 80})
+        soon = (date.today() + timedelta(days=5)).isoformat()
+        rows = [dict(strike=k, mid=m, bid=m - 0.1, ask=m + 0.1, delta=0.2, p_itm=0.18, oi=oi)
+                for k, m, oi in ((175, 6.0, 50), (170, 4.0, 900), (160, 2.0, 900), (180, 8.0, 900))]
+        with patch.object(buy_zones, "get_quote", side_effect=lambda t: {"price": {"NVDA": 190, "KO": 70}[t]}), \
+             patch.object(buy_zones, "get_or_fetch", side_effect=lambda key, fetch, ttl: fetch()), \
+             patch.object(buy_zones.oa, "_expirations", return_value=["2099-01-01", "2099-02-01"]), \
+             patch.object(buy_zones.oa, "_live", return_value=True), \
+             patch.object(buy_zones.oa, "_dte", side_effect=lambda e: {"2099-01-01": 30, "2099-02-01": 60}[e]), \
+             patch.object(buy_zones.oa, "_years", return_value=30 / 365), \
+             patch.object(buy_zones.oa, "_chain", return_value=([], [])), \
+             patch.object(buy_zones.oa, "_otm_rows", return_value=rows), \
+             patch.object(buy_zones, "_ex_dividend", side_effect=lambda t: soon if t == "NVDA" else None), \
+             patch.object(buy_zones.oa, "earnings_info", side_effect=lambda t: {"next": soon if t == "NVDA" else None}):
+            zones = buy_zones.overview(uid)["items"]
+            with self.as_user(uid):
+                events = self.client.get("/api/watchlist/events").json()["events"]
+        ko, nvda = zones
+        self.assertTrue(ko["in_zone"])
+        self.assertIsNone(ko["put"])
+        self.assertEqual((nvda["put"]["strike"], nvda["put"]["expiry"]), (170, "2099-01-01"), "highest liquid strike <= target")
+        self.assertEqual((nvda["put"]["effective_entry"], nvda["put"]["cash_needed"]), (166, 17000))
+        self.assertEqual([(e["ticker"], e["kind"], e["watching"]) for e in events], [("NVDA", "earnings", True), ("NVDA", "ex_dividend", True)])
+        with self.as_user(uid):
+            self.client.put("/api/watchlist/buy-zones/KO", json={"price": None})
+        self.assertEqual(buy_zones.get_zones(uid), {"NVDA": 170})
+
     def test_next_steps_flag_cash_concentration_and_covered_calls(self):
         import accounts as accounts_module
         import next_steps

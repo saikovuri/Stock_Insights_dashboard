@@ -91,6 +91,39 @@ def watchlist_earnings(request: Request, user: dict = Depends(get_current_user))
                        "confirmed": i.get("next_confirmed", False)} for t, i in zip(tickers, infos)]}
 
 
+class BuyZoneRequest(BaseModel):
+    price: Optional[float] = Field(None, gt=0, le=1_000_000)
+
+
+@router.get("/api/watchlist/buy-zones")
+@limiter.limit("10/minute")
+def watchlist_buy_zones(request: Request, user: dict = Depends(get_current_user)):
+    import buy_zones
+    try:
+        return buy_zones.overview(int(user["user_id"]))
+    except Exception as e:
+        raise upstream_error(e)
+
+
+@router.put("/api/watchlist/buy-zones/{ticker}")
+def watchlist_set_buy_zone(ticker: str, req: BuyZoneRequest, user: dict = Depends(get_current_user)):
+    import buy_zones
+    ticker = valid_ticker(ticker)
+    buy_zones.set_zone(int(user["user_id"]), ticker, req.price)
+    return {"ticker": ticker, "price": req.price}
+
+
+@router.get("/api/watchlist/events")
+@limiter.limit("10/minute")
+def watchlist_events(request: Request, days: int = Query(14, ge=1, le=60), user: dict = Depends(get_current_user)):
+    """Earnings and ex-dividend dates ahead for watchlist and held tickers."""
+    import buy_zones
+    try:
+        return buy_zones.event_week(int(user["user_id"]), days)
+    except Exception as e:
+        raise upstream_error(e)
+
+
 @router.post("/api/watchlist")
 def watchlist_add(req: WatchlistRequest, user: dict = Depends(get_current_user)):
     ticker = valid_ticker(req.ticker)

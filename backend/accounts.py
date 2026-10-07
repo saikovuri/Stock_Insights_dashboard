@@ -33,9 +33,12 @@ def install_schema(conn, postgres=False):
         details TEXT NOT NULL, applied_at TEXT NOT NULL, PRIMARY KEY(user_id, kind, ticker, action_date))""")
     cursor.execute("""CREATE TABLE IF NOT EXISTS user_rules (
         user_id INTEGER PRIMARY KEY REFERENCES users(id), rules TEXT NOT NULL, updated_at TEXT NOT NULL)""")
+    cursor.execute(f"""CREATE TABLE IF NOT EXISTS buy_zones (
+        user_id INTEGER NOT NULL REFERENCES users(id), ticker TEXT NOT NULL, price {real} NOT NULL,
+        updated_at TEXT NOT NULL, PRIMARY KEY(user_id, ticker))""")
     if postgres:
         for table in ("account_cash", "nav_snapshots", "applied_splits", "watchlist_lists", "watchlist_groups", "applied_actions",
-                      "user_rules"):
+                      "user_rules", "buy_zones"):
             cursor.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
             for role in ("anon", "authenticated"):
                 cursor.execute("SELECT 1 FROM pg_roles WHERE rolname=%s", (role,))

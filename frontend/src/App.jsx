@@ -33,6 +33,7 @@ import EconomicCalendar from './components/EconomicCalendar';
 import Tour, { TOUR_KEY } from './components/Tour';
 import SystemStatus from './components/SystemStatus';
 import MyStock from './components/MyStock';
+import { BuyZones, EventWeek } from './components/WatchlistExtras';
 import { ProfileProvider, useProfile, PROFILES, ALL_OPTION_TABS } from './ProfileContext';
 import { fetchMetrics, fetchHistory, fetchNews, fetchAlerts, fetchEvents } from './api/stockApi';
 
@@ -325,6 +326,8 @@ function AppShell() {
       {activeTab === 'watchlist' && (
         <>
           <Watchlist onSelect={openTicker} onSignIn={() => setShowLogin(true)} />
+          {user && <BuyZones onSelect={openTicker} />}
+          {user && <EventWeek onSelect={openTicker} />}
           {user && <PriceAlerts />}
         </>
       )}

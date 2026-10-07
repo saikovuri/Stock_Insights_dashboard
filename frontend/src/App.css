@@ -4330,6 +4330,9 @@ tr.alert-triggered {
 .edge-report { margin-bottom: 0.8rem; }
 .ladder-lots { margin: 0.25rem 0 0.2rem 0.4rem; font-size: 0.8rem; color: var(--text-secondary); }
 .risk-tool summary { cursor: pointer; }
+.event-days { display: grid; grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); gap: 0.6rem; font-size: 0.85rem; }
+.event-day ul { margin: 0.2rem 0 0; padding-left: 1rem; }
+.buy-zones .trade-sub { display: block; }
 .risk-tool summary h3 { display: inline; }
 .trading-rules { display: grid; gap: 0.5rem; max-width: 34rem; font-size: 0.85rem; }
 .trading-rules label { display: grid; gap: 0.2rem; }

@@ -590,7 +590,21 @@ Signed-in users can also:
 - **Keep a note** (up to 500 characters) per symbol with the 📝 button; the note shows under the company name.
 - **See next earnings** in the Earnings column, using the canonical Finnhub + Yahoo dates (earlier date wins). Dates within 14 days are highlighted with a day count; `*` marks dates the providers do not confirm. Unknown dates show `—`, which is not evidence that no report is scheduled. Up to 60 symbols are checked.
 
-Source: [frontend/src/components/Watchlist.jsx](frontend/src/components/Watchlist.jsx), [backend/routes_watchlist.py](backend/routes_watchlist.py), [backend/watchlists.py](backend/watchlists.py).
+### Buy Zones
+
+Signed-in users can set a **buy price** per ticker below the watchlist. The table lists each zone sorted by distance and shows the current price, how far above the zone it is, or **In zone** when the price is at or below it.
+
+While the price is above the zone, it suggests one cash-secured put to "get paid to wait":
+- **Which put:** the highest strike at or below the buy price with a positive non-crossed quote and open interest of at least 100, on the listed expiry closest to 35 days (21-50 days).
+- **What's shown:** the premium per contract at the midpoint, cash needed (strike × 100), buy-in if assigned (strike minus premium), annualized yield on the strike, and the model chance of assignment.
+
+Puts are cached for 10 minutes per ticker and target, and up to 30 zones are checked. No suitable put shows "No liquid put at or below your price". Selling a put obliges you to buy at the strike even after a large fall. Zones are stored per user, can be set for any valid ticker, and are cleared with ✕.
+
+### Earnings and Ex-Dividend Week
+
+Below buy zones, a two-week view groups upcoming earnings (canonical Finnhub + Yahoo dates, with timing and `*` when unconfirmed) and ex-dividend dates (Yahoo calendar, cached 12 hours) by day. It covers up to 60 tickers from the watchlist plus held stocks and option underlyings, and marks held tickers. Click a ticker to open it. Missing dates are not evidence that nothing is scheduled.
+
+Source: [frontend/src/components/Watchlist.jsx](frontend/src/components/Watchlist.jsx), [frontend/src/components/WatchlistExtras.jsx](frontend/src/components/WatchlistExtras.jsx), [backend/routes_watchlist.py](backend/routes_watchlist.py), [backend/watchlists.py](backend/watchlists.py), [backend/buy_zones.py](backend/buy_zones.py).
 
 ## Portfolio: Holdings
 

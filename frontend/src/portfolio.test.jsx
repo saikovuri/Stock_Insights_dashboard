@@ -27,6 +27,7 @@ import AccountTransfer from './components/AccountTransfer';
 import PnlCalendar, { dailyPnl, compactMoney } from './components/PnlCalendar';
 import ExpiryLadder from './components/ExpiryLadder';
 import { TradingRules, TrimPlanner } from './components/RiskTools';
+import { BuyZones, EventWeek } from './components/WatchlistExtras';
 
 beforeEach(() => {
   localStorage.clear(); sessionStorage.clear();
@@ -465,6 +466,32 @@ test('trading rules save blanks as off, and the trim planner shows the sale step
   expect(plan).toHaveBeenCalledWith('AMD', 30, 4, 5);
   expect(within(table).getByText('1 × $672 call')).toBeTruthy();
   expect(screen.getByText('380.5')).toBeTruthy();
+});
+
+test('buy zones save a target and show the put that pays you to wait; event week groups dates', async () => {
+  const zones = vi.spyOn(stockApi, 'fetchBuyZones')
+    .mockResolvedValueOnce({ items: [], note: '' })
+    .mockResolvedValueOnce({ note: 'Note.', items: [{ ticker: 'NVDA', target: 200, price: 237.47, distance_pct: 15.8, in_zone: false,
+      put: { strike: 200, expiry: '2026-11-13', premium: 79, effective_entry: 199.21, cash_needed: 20000, annualized_pct: 3.9, chance_assigned_pct: 8 } }] });
+  const save = vi.spyOn(stockApi, 'saveBuyZone').mockResolvedValue({});
+  render(<BuyZones />);
+  expect(await screen.findByText('No buy zones yet.')).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('Buy zone ticker'), { target: { value: 'nvda' } });
+  fireEvent.change(screen.getByLabelText('Buy price'), { target: { value: '200' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Set buy zone' }));
+  await waitFor(() => expect(save).toHaveBeenCalledWith('NVDA', 200));
+  expect(await screen.findByText(/Sell \$200 put 2026-11-13/)).toBeTruthy();
+  expect(screen.getByText(/Buy-in \$199\.21 if assigned/)).toBeTruthy();
+  expect(zones).toHaveBeenCalledTimes(2);
+  cleanup();
+  vi.spyOn(stockApi, 'fetchWatchlistEvents').mockResolvedValue({ checked: 3, events: [
+    { date: '2026-10-08', ticker: 'ORCL', kind: 'ex_dividend', held: true },
+    { date: '2026-10-20', ticker: 'NFLX', kind: 'earnings', timing: 'after close', confirmed: false, held: true }] });
+  const onSelect = vi.fn();
+  render(<EventWeek onSelect={onSelect} />);
+  expect(await screen.findByText(/earnings \(after close\)\*/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'ORCL' }));
+  expect(onSelect).toHaveBeenCalledWith('ORCL');
 });
 
 test('editing a stock lot can correct its purchase date', async () => {
