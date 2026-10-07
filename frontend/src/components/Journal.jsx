@@ -8,6 +8,7 @@ import WheelCycles from './WheelCycles';
 import AccountTransfer from './AccountTransfer';
 import Skeleton from './Skeleton';
 import TabStrip from './TabStrip';
+import PnlCalendar from './PnlCalendar';
 import {
   fetchJournal, addJournalEntry, updateJournalEntry, deleteJournalEntry, fetchJournalCoach, fetchClosedTrades, fetchClosedOptions, logClosedOption, updateClosedOption, deleteClosedOption,
   recordAccountingEntry,
@@ -305,6 +306,7 @@ function RecordedHistory({ optionsOnly = false, version = 0, onEdit, onDelete, b
     {filtered.length > visible.length && <button type="button" className="btn-secondary btn-sm trade-history-more" onClick={() => setLimit(value => value + PAGE)}>
       Show {Math.min(PAGE, filtered.length - visible.length)} more ({visible.length} of {filtered.length} shown)</button>}
     </>}
+    {filtered.length > 0 && <PnlCalendar rows={filtered} />}
   </section>;
 }
 

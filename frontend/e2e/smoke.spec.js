@@ -319,6 +319,11 @@ test('journal review and explicit wheel cycles work on desktop and mobile', asyn
   const table = page.locator('.journal-workspace .table-scroll').filter({ has: page.getByRole('table', { name: 'Recorded trades' }) });
   expect(await table.evaluate(element => element.scrollWidth >= element.clientWidth)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath('journal-capture-history.png'), fullPage: true });
+  const calendar = page.locator('.pnl-calendar');
+  await expect(calendar.getByRole('group', { name: /Realized P&L calendar/ })).toBeVisible();
+  expect(await calendar.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+  await calendar.screenshot({ path: testInfo.outputPath('journal-pnl-calendar.png') });
   await page.getByRole('button', { name: 'Wheel cycles', exact: true }).click();
   await page.getByRole('combobox', { name: 'Closed trade' }).selectOption('42');
   await page.getByLabel('Cycle name').fill('AAPL wheel');

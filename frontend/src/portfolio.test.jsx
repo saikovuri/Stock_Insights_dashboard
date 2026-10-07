@@ -24,6 +24,7 @@ import WheelManager from './components/WheelManager';
 import RollRepair from './components/RollRepair';
 import WheelCycles from './components/WheelCycles';
 import AccountTransfer from './components/AccountTransfer';
+import PnlCalendar, { dailyPnl, compactMoney } from './components/PnlCalendar';
 
 beforeEach(() => {
   localStorage.clear(); sessionStorage.clear();
@@ -374,6 +375,46 @@ test('closing links a wheel cycle and expired options record worthless expiry in
   await waitFor(() => expect(close).toHaveBeenCalledWith('WDC', 'put', 60, '2027-01-15', 0.3, 1, 'short', 8, 'WDC wheel'));
   expect(await screen.findByText(/linked to WDC wheel/)).toBeTruthy();
   localStorage.removeItem('portfolio_account');
+});
+
+test('P&L calendar totals each close day, shades wins and losses, and pages back to earlier months', () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date(2026, 9, 7, 12));
+  try {
+    const rows = [
+      { key: 'option:1', ticker: 'AMD', kind: 'short put', closed_at: '2026-10-05 20:00:00', pnl: 310, net_pnl: 300 },
+      { key: 'stock:2', ticker: 'PYPL', kind: 'Stock', closed_at: '2026-10-05', pnl: -100, net_pnl: null },
+      { key: 'option:3', ticker: 'TSLA', kind: 'short call', closed_at: '2026-10-01', pnl: -450, net_pnl: -452 },
+      { key: 'option:4', ticker: 'WDC', kind: 'short put', closed_at: '2026-09-29', pnl: 1200, net_pnl: 1195 },
+      { key: 'option:5', ticker: 'BAD', kind: 'short put', closed_at: null, pnl: 5 },
+    ];
+    const days = dailyPnl(rows);
+    expect(days.get('2026-10-05').pnl).toBe(200);
+    expect(days.get('2026-10-05').trades).toHaveLength(2);
+    expect(days.size).toBe(3);
+    expect(compactMoney(1195)).toBe('+$1.2K');
+    expect(compactMoney(-452)).toBe('-$452');
+    render(<PnlCalendar rows={rows} />);
+    expect(screen.getByText('October 2026')).toBeTruthy();
+    expect(screen.getByText('-$252.00')).toBeTruthy();
+    expect(screen.getByText(/1 green \/ 1 red day/)).toBeTruthy();
+    const win = screen.getByRole('button', { name: 'October 5: $200.00 realized across 2 closed trades' });
+    expect(win.style.background).toContain('34, 197, 94');
+    expect(screen.getByRole('button', { name: 'October 1: -$452.00 realized across 1 closed trade' }).style.background).toContain('239, 68, 68');
+    expect(screen.getByRole('button', { name: 'Next month' }).disabled).toBe(true);
+    fireEvent.click(win);
+    expect(screen.getByText('PYPL')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Previous month' }));
+    expect(screen.getByText('September 2026')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'September 29: $1,195.00 realized across 1 closed trade' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Previous month' }).disabled).toBe(true);
+    const grid = screen.getByRole('group', { name: 'Realized P&L calendar, September 2026' });
+    fireEvent.touchStart(grid, { touches: [{ clientX: 200 }] });
+    fireEvent.touchEnd(grid, { changedTouches: [{ clientX: 100 }] });
+    expect(screen.getByText('October 2026')).toBeTruthy();
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test('editing a stock lot can correct its purchase date', async () => {

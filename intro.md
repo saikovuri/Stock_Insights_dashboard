@@ -925,6 +925,14 @@ The recorded-option summary shows sample count, net P&L, net expectancy per clos
 
 Saving appends an audited review and records the server timestamp, without changing fills, fees or P&L. The latest active review is shown; revisions remain in Account ledger and can be reversed there. Clearing a field saves it as unrecorded. Unchanged retries reuse the same request key. Close/Escape discards the unsaved review draft; dismissal is disabled during save. Notes expose the latest review and its recorded-at timestamp.
 
+**Daily realized P&L** (below the table) is a month calendar.
+- Each day sums the closing records dated that day, net of recorded fees where known and gross otherwise. A day appears in green or red, more intense the larger it is relative to the month's biggest day. Days without closes are blank.
+- The header shows the month total, green/red day counts, and the best and worst days. A **Week** column totals each row.
+- It opens on the current month and today's date is outlined. Use ‹ / › (or swipe on a phone) to move back as far as the first recorded close; it never goes past the current month.
+- Tapping a day lists that day's closes.
+- It follows the ticker and Options/Stocks filters above it.
+- Dates are the recorded close dates, not settlement dates. Open positions and unrealized marks are not included.
+
 ### Wheel Cycles
 
 Select an unallocated **closed trade**, enter a cycle name (existing names are suggested) and the shares/contracts to link. Whole contracts are required for options; fractional shares are supported. Only the remaining quantity can be allocated, with ownership and quantity rechecked on the server. Ticker matches never create automatic links. Removing an allocation requires confirmation and appends a reversal, preserving both the trade and audit trail.
