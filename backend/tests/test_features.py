@@ -257,6 +257,36 @@ class FeatureTests(unittest.TestCase):
         self.assertIn("2026-10-06", checks["Yahoo price history"]["detail"])
         self.assertIn("jobs", body["scheduler"])
 
+    def test_sync_import_reconciles_an_account_and_keeps_matching_lots(self):
+        import accounts as accounts_module
+        uid = new_user()
+        amd = database.add_user_holding(uid, "AMD", 100, 59.38, "2019-03-15 00:00:00", account="Etrade")
+        database.add_user_holding(uid, "MSFT", 50, 300, account="Etrade")
+        database.add_user_holding(uid, "MSFT", 5, 300, account="IRA")
+        database.add_user_option(uid, "AMD", "call", 580, "2099-06-17", 10, 1, "short", account="Etrade")
+        accounts_module.set_cash(uid, "Etrade", 999)
+        csv_text = ("Symbol,Quantity,Price Paid,Value\nAMD,100,59.38,64000\nMSFT,60,310,25000\nNVDA,10,180,2000\n"
+                    "VUSXX,500,1,500\n")
+        with self.as_user(uid):
+            preview = self.client.post("/api/portfolio/import", json={"csv": csv_text, "account": "Etrade", "mode": "sync"}).json()
+            diff = {s["ticker"]: s["status"] for s in preview["reconcile"]["stocks"]}
+            self.assertEqual(diff, {"AMD": "match", "MSFT": "changed", "NVDA": "new"})
+            self.assertEqual([o["status"] for o in preview["reconcile"]["options"]], ["missing"])
+            self.assertEqual(preview["reconcile"]["changes"], 3)
+            self.assertEqual(len(database.get_user_holdings(uid)), 3, "preview changes nothing")
+            done = self.client.post("/api/portfolio/import", json={"csv": csv_text, "account": "Etrade", "mode": "sync", "commit": True}).json()
+        self.assertEqual((done["sync"]["kept"], done["cash"]["cash"]), (1, 500), "money-market cash is set, not added")
+        lots = {(h["ticker"], h["account"]): h for h in database.get_user_holdings(uid)}
+        self.assertEqual(lots[("AMD", "Etrade")]["id"], amd["id"], "matching lot untouched")
+        self.assertTrue(str(lots[("AMD", "Etrade")]["date_added"]).startswith("2019-03-15"))
+        self.assertEqual(lots[("MSFT", "Etrade")]["shares"], 60)
+        self.assertEqual(lots[("MSFT", "IRA")]["shares"], 5, "other accounts are not touched")
+        self.assertIn(("NVDA", "Etrade"), lots)
+        self.assertEqual(database.get_user_options(uid), [])
+        with self.as_user(uid):
+            again = self.client.post("/api/portfolio/import", json={"csv": csv_text, "account": "Etrade", "mode": "sync"}).json()
+        self.assertEqual(again["reconcile"]["changes"], 0, "re-syncing the same file is a no-op")
+
     def test_next_steps_flag_cash_concentration_and_covered_calls(self):
         import accounts as accounts_module
         import next_steps

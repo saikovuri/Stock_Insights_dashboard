@@ -1224,7 +1224,7 @@ test('broker import previews closed trade history into the selected account', as
   fireEvent.change(screen.getByLabelText('Broker CSV file'), { target: { files: [{ size: 100, text: async () => 'Symbol,Quantity\nX,1' }] } });
   fireEvent.click(await screen.findByRole('button', { name: 'Preview' }));
   expect(await screen.findByText('short 1 × $380 put 2025-03-21')).toBeTruthy();
-  expect(run).toHaveBeenCalledWith('Symbol,Quantity\nX,1', false, 'history', 'Roth', '');
+  expect(run).toHaveBeenCalledWith('Symbol,Quantity\nX,1', false, 'history', 'Roth', '', 'append');
   fireEvent.click(screen.getByRole('button', { name: /Import 1 rows/ }));
   expect(await screen.findByText(/Imported 1 closed trade\(s\); 0 already recorded/)).toBeTruthy();
   expect(refresh).toHaveBeenCalled();
@@ -1243,8 +1243,32 @@ test('transaction history import summarizes the replay and filters to one broker
   expect(await screen.findByText(/6 trade\(s\) from 2026-01-02 to 2026-03-10 rebuild 2 open position\(s\)\. Not trades \(ignored\): CDIV ×2/)).toBeTruthy();
   expect(screen.getAllByText('2026-01-05', { selector: 'td' })).toHaveLength(2);
   fireEvent.change(screen.getByLabelText('Broker account in file'), { target: { value: 'Roth · Z2' } });
-  await waitFor(() => expect(run).toHaveBeenLastCalledWith('csv', false, 'activity', 'Robinhood', 'Roth · Z2'));
+  await waitFor(() => expect(run).toHaveBeenLastCalledWith('csv', false, 'activity', 'Robinhood', 'Roth · Z2', 'append'));
   expect(await screen.findByRole('button', { name: /Import 1 rows/ })).toBeTruthy();
+});
+
+test('sync import previews differences and applies them to the selected account', async () => {
+  const reconcile = { changes: 2, counts: { match: 1, changed: 1, missing: 1 }, stocks: [
+    { ticker: 'AMD', recorded: 100, file: 100, status: 'match' }, { ticker: 'MSFT', recorded: 50, file: 60, status: 'changed' }],
+    options: [{ label: 'AMD short $580 call 2027-06-17', recorded: 1, file: 0, status: 'missing' }] };
+  const run = vi.spyOn(stockApi, 'importPortfolioCsv')
+    .mockResolvedValueOnce({ columns: {}, skipped: [], rows: [], reconcile, money_market: [{ ticker: 'VUSXX', amount: 500 }], money_market_total: 500 })
+    .mockResolvedValueOnce({ columns: {}, skipped: [], rows: [], reconcile, sync: { kept: 1, removed_records: 2, added_records: 1, cash: { cash: 500 } }, cash: { cash: 500 } });
+  const refresh = vi.fn();
+  render(<ImportCsv account="Etrade" onImported={refresh} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Sync account to this file' }));
+  expect(screen.getByText(/removed without recording a sale/)).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('Broker CSV file'), { target: { files: [{ size: 100, text: async () => 'csv' }] } });
+  fireEvent.click(await screen.findByRole('button', { name: 'Preview' }));
+  const table = await screen.findByRole('table', { name: 'Differences' });
+  expect(within(table).queryByText('AMD')).toBeNull();
+  expect(within(table).getByText('Replace lots')).toBeTruthy();
+  expect(within(table).getByText('Remove')).toBeTruthy();
+  expect(screen.getByText(/Syncing sets \$500 as the/)).toBeTruthy();
+  expect(run).toHaveBeenLastCalledWith('csv', false, 'positions', 'Etrade', '', 'sync');
+  fireEvent.click(screen.getByRole('button', { name: 'Apply 2 change(s)' }));
+  expect(await screen.findByText(/Synced Etrade: 1 unchanged, 2 record\(s\) removed, 1 added; cash set to \$500\./)).toBeTruthy();
+  expect(refresh).toHaveBeenCalled();
 });
 
 test('next steps list suggestions and open covered calls inline', async () => {

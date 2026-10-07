@@ -701,6 +701,98 @@ def parse_activity_csv(text: str, source_account: str | None = None) -> dict:
             "columns": {k: rows[header_i][v] for k, v in cols.items() if v is not None}}
 
 
+def _option_key(row: dict) -> tuple:
+    return (row["ticker"], str(row["expiry"])[:10], row["option_type"], float(row["strike"]), row["position"])
+
+
+def _option_label(key: tuple) -> str:
+    ticker, expiry, kind, strike, position = key
+    return f"{ticker} {position} ${strike:g} {kind} {expiry}"
+
+
+def _recorded(user_id: int, account: str | None):
+    import database
+    target = database.account_name(account) and account or database.DEFAULT_ACCOUNT
+    lots = [h for h in get_user_holdings(user_id) if h["shares"] > 0 and database.in_account(h, target)]
+    options = [o for o in database.get_user_options(user_id) if database.in_account(o, target)]
+    return lots, options
+
+
+def reconcile(user_id: int, rows: list[dict], account: str | None = None) -> dict:
+    """Compare a broker positions file with what is recorded in one account, per stock ticker and option contract."""
+    lots, options = _recorded(user_id, account)
+    rec_stock, file_stock = defaultdict(float), defaultdict(float)
+    for h in lots:
+        rec_stock[h["ticker"]] += h["shares"]
+    for r in rows:
+        if r["kind"] == "stock":
+            file_stock[r["ticker"]] += r["shares"]
+    rec_opt, file_opt = defaultdict(int), defaultdict(int)
+    for o in options:
+        rec_opt[_option_key(o)] += o["contracts"]
+    for r in rows:
+        if r["kind"] == "option":
+            file_opt[_option_key(r)] += r["contracts"]
+
+    def status(recorded, in_file):
+        if not recorded:
+            return "new"
+        if not in_file:
+            return "missing"
+        return "match" if abs(recorded - in_file) < 1e-6 else "changed"
+
+    stocks = [{"ticker": t, "recorded": round(rec_stock[t], 6), "file": round(file_stock[t], 6),
+               "status": status(rec_stock[t], file_stock[t])} for t in sorted(set(rec_stock) | set(file_stock))]
+    opts = [{"label": _option_label(k), "recorded": rec_opt[k], "file": file_opt[k], "status": status(rec_opt[k], file_opt[k])}
+            for k in sorted(set(rec_opt) | set(file_opt))]
+    counts = defaultdict(int)
+    for item in stocks + opts:
+        counts[item["status"]] += 1
+    return {"stocks": stocks, "options": opts, "counts": dict(counts),
+            "changes": sum(n for s, n in counts.items() if s != "match")}
+
+
+def apply_reconcile(user_id: int, rows: list[dict], account: str | None = None, money_market_total: float = 0) -> dict:
+    """Make one account match the file. Matching tickers/contracts are left untouched (keeping their lot dates);
+    changed ones are replaced by the file's rows; ones missing from the file are removed without recording a sale."""
+    import accounts
+    import database
+    from database import add_user_option, delete_user_holding, delete_user_option
+    diff = reconcile(user_id, rows, account)
+    lots, options = _recorded(user_id, account)
+    stale_stocks = {s["ticker"] for s in diff["stocks"] if s["status"] != "match"}
+    rec_opt, file_opt = defaultdict(int), defaultdict(int)
+    for o in options:
+        rec_opt[_option_key(o)] += o["contracts"]
+    for r in rows:
+        if r["kind"] == "option":
+            file_opt[_option_key(r)] += r["contracts"]
+    stale_opts = {k for k in set(rec_opt) | set(file_opt) if rec_opt[k] != file_opt[k]}
+    removed = 0
+    for h in lots:
+        if h["ticker"] in stale_stocks:
+            delete_user_holding(user_id, h["id"])
+            removed += 1
+    for o in options:
+        if _option_key(o) in stale_opts:
+            delete_user_option(user_id, o["id"])
+            removed += 1
+    added = 0
+    for r in rows:
+        if r["kind"] == "stock" and r["ticker"] in stale_stocks:
+            add_user_holding(user_id, r["ticker"], r["shares"], r["price"],
+                             f"{r['acquired']} 00:00:00" if r.get("acquired") else None, account=account)
+            added += 1
+        elif r["kind"] == "option" and _option_key(r) in stale_opts:
+            add_user_option(user_id, r["ticker"], r["option_type"], r["strike"], r["expiry"], r["premium"],
+                            r["contracts"], r["position"], account=account)
+            added += 1
+    cash = None
+    if money_market_total and money_market_total > 0:
+        cash = accounts.set_cash(user_id, database.account_name(account) or database.DEFAULT_ACCOUNT, round(money_market_total, 2))
+    return {"kept": diff["counts"].get("match", 0), "removed_records": removed, "added_records": added, "cash": cash}
+
+
 def import_rows(user_id: int, rows: list[dict], account: str | None = None) -> int:
     from database import add_user_option
     for r in rows:

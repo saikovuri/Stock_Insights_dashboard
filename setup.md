@@ -332,12 +332,7 @@ Ordered by value for effort. Each item names where to start.
    - import E*TRADE's transaction history with **Transaction history**, which records real dates.
 
    After changing dates, check Holdings for any newly offered split adjustment.
-3. **Make positions import replace instead of append** (avoid duplicates on re-import).
-   - Add a "Replace this account's open positions" checkbox in `ImportCsv` (`PortfolioInsights.jsx`).
-   - Add a `replace: bool` field to `ImportRequest` in `main.py`.
-   - In `portfolio_insights.import_rows`, delete that account's open lots and options inside the same transaction before inserting.
-   - Have it set cash to the file's money-market total instead of adding to it.
-   - Add a test next to `test_fidelity_accounts_and_activity_history_rebuild_positions`.
+3. **Use Sync for repeat imports** (built). Holdings → Import from broker CSV → **Sync account to this file** compares the file with an account, shows the differences, and only changes what differs. Possible follow-up: also flag cost-basis differences (sync currently compares quantities only), in `portfolio_insights.reconcile`.
 4. **Test the Robinhood / Webull / Fidelity importers with real files.**
    - They were built from the brokers' published column layouts and tested with sample files only.
    - If a real file fails, the preview shows "Detected columns". Add the missing header spelling to `_COLS` or `_ACTIVITY_COLS` in `portfolio_insights.py`, then add that file's header to the test.

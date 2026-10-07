@@ -1655,6 +1655,7 @@ class ImportRequest(BaseModel):
     kind: Literal["positions", "history", "activity"] = "positions"
     account: Optional[str] = Field(None, pattern=ACCOUNT_PATTERN)
     source_account: Optional[str] = Field(None, max_length=120)
+    mode: Literal["append", "sync"] = "append"
 
 
 @app.post("/api/portfolio/import")
@@ -1669,11 +1670,17 @@ def portfolio_import(request: Request, req: ImportRequest, user: dict = Depends(
             parsed = portfolio_insights.parse_broker_csv(req.csv, req.source_account)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    uid = int(user["user_id"])
+    sync = req.mode == "sync" and req.kind != "history"
+    if sync:
+        parsed["reconcile"] = portfolio_insights.reconcile(uid, parsed["rows"], req.account)
     if req.commit:
-        uid = int(user["user_id"])
         if req.kind == "history":
             parsed["result"] = portfolio_insights.import_history(uid, parsed["rows"], req.account)
             parsed["imported"] = parsed["result"]["imported"]
+        elif sync:
+            parsed["sync"] = portfolio_insights.apply_reconcile(uid, parsed["rows"], req.account, parsed.get("money_market_total"))
+            parsed["cash"] = parsed["sync"]["cash"]
         else:
             parsed["imported"] = portfolio_insights.import_rows(uid, parsed["rows"], req.account)
             parsed["cash"] = portfolio_insights.add_money_market_cash(uid, req.account, parsed.get("money_market_total"))

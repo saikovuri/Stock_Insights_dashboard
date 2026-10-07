@@ -175,6 +175,8 @@ export function ImportCsv({ onImported, account = '' }) {
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
   const [source, setSource] = useState('');
+  const [mode, setMode] = useState('append');
+  const syncing = mode === 'sync' && kind !== 'history';
 
   const onFile = async (e) => {
     const f = e.target.files?.[0];
@@ -186,13 +188,15 @@ export function ImportCsv({ onImported, account = '' }) {
   const run = async (commit, sourceAccount = source) => {
     setBusy(true); setMsg(null);
     try {
-      const r = await importPortfolioCsv(text, commit, kind, account, sourceAccount);
+      const r = await importPortfolioCsv(text, commit, kind, account, sourceAccount, syncing ? 'sync' : 'append');
       setPreview(r);
       if (commit) {
         const failed = r.result?.failed || [];
         setMsg(kind === 'history'
           ? `Imported ${r.result.imported} closed trade(s); ${r.result.duplicates} already recorded${failed.length ? `; ${failed.length} rejected: ${failed.map(f => `${f.symbol} (${f.reason})`).join('; ')}` : ''}.`
-          : `Imported ${r.imported} position(s)${r.cash ? `; added ${usd(r.money_market_total)} of money-market funds to ${r.cash.account} cash (now ${usd(r.cash.cash)})` : ''}.`);
+          : r.sync
+            ? `Synced ${account || 'Default'}: ${r.sync.kept} unchanged, ${r.sync.removed_records} record(s) removed, ${r.sync.added_records} added${r.cash ? `; cash set to ${usd(r.cash.cash)}` : ''}.`
+            : `Imported ${r.imported} position(s)${r.cash ? `; added ${usd(r.money_market_total)} of money-market funds to ${r.cash.account} cash (now ${usd(r.cash.cash)})` : ''}.`);
         setText(''); onImported?.();
       }
     } catch (e) { setMsg(e.message); }
@@ -217,11 +221,18 @@ export function ImportCsv({ onImported, account = '' }) {
             : <>Export <b>realized gain/loss</b> (closed lots) as CSV (Quantity, Date acquired, Date sold, Proceeds, Cost basis). Closed options are recorded through the audited history path and closed stock lots as sold trades. Re-importing the same rows adds nothing.</>}
         {' '}Rows go into <b>{account || 'Default'}</b>. The file is parsed on the server and not stored.
       </p>
+      {kind !== 'history' && <div className="chart-toggle import-kind" role="group" aria-label="Import mode">
+        <button className={mode === 'append' ? 'active' : ''} aria-pressed={mode === 'append'} onClick={() => { setMode('append'); setPreview(null); }}>Add to recorded positions</button>
+        <button className={mode === 'sync' ? 'active' : ''} aria-pressed={mode === 'sync'} onClick={() => { setMode('sync'); setPreview(null); }}>Sync account to this file</button>
+      </div>}
+      {syncing && <p className="market-sub">Sync makes <b>{account || 'Default'}</b> match the file: matching tickers and contracts are left alone (keeping your lot dates),
+        changed ones are replaced with the file&apos;s lots, and positions not in the file are <b>removed without recording a sale</b>. Record real sales first if you want their realized P&amp;L.
+        Money-market funds set the cash balance instead of adding to it. Other accounts are not touched.</p>}
       <div className="alert-form">
         <input type="file" accept=".csv,text/csv" aria-label="Broker CSV file" onChange={onFile} />
         <button className="btn-secondary btn-sm" disabled={!text || busy} onClick={() => run(false)}>Preview</button>
-        <button className="btn-primary btn-sm" disabled={!(preview?.rows?.length || preview?.money_market?.length) || busy} onClick={() => run(true)}>
-          Import {preview?.rows?.length || ''} rows
+        <button className="btn-primary btn-sm" disabled={busy || !(syncing ? (preview?.reconcile?.changes || preview?.money_market?.length) : (preview?.rows?.length || preview?.money_market?.length))} onClick={() => run(true)}>
+          {syncing ? `Apply ${preview?.reconcile?.changes ?? ''} change(s)` : `Import ${preview?.rows?.length || ''} rows`}
         </button>
       </div>
       {msg && <p className="notif-msg">{msg}</p>}
@@ -239,7 +250,19 @@ export function ImportCsv({ onImported, account = '' }) {
           {kind === 'activity' && <p className="market-sub">{preview.trades} trade(s){preview.first_date ? ` from ${preview.first_date} to ${preview.last_date}` : ''} rebuild {preview.rows.length} open position(s).
             {Object.keys(preview.ignored || {}).length > 0 && ` Not trades (ignored): ${Object.entries(preview.ignored).map(([k, n]) => `${k} ×${n}`).join(', ')}.`}</p>}
           <p className="market-sub">Detected columns: {Object.entries(preview.columns).map(([k, v]) => `${k} = "${v}"`).join(', ')}</p>
-          <div className="table-scroll"><table className="market-table">
+          {syncing && preview.reconcile && <>
+            <p className="market-sub">{preview.reconcile.changes ? `${preview.reconcile.changes} difference(s)` : 'Already in sync: nothing to change'}
+              {preview.reconcile.counts.match ? ` · ${preview.reconcile.counts.match} matching` : ''}</p>
+            <div className="table-scroll"><table className="market-table" aria-label="Differences">
+              <thead><tr><th>Position</th><th>Recorded</th><th>In file</th><th>Result</th></tr></thead>
+              <tbody>{[...preview.reconcile.stocks.map(s => ({ ...s, label: s.ticker, unit: 'sh' })), ...preview.reconcile.options.map(o => ({ ...o, unit: 'ct' }))]
+                .filter(item => item.status !== 'match').map(item => <tr key={item.label} className="no-click">
+                  <td>{item.label}</td><td>{item.recorded ? `${item.recorded} ${item.unit}` : '—'}</td><td>{item.file ? `${item.file} ${item.unit}` : '—'}</td>
+                  <td className={item.status === 'missing' ? 'negative' : item.status === 'new' ? 'positive' : ''}>
+                    {{ new: 'Add', missing: 'Remove', changed: 'Replace lots' }[item.status]}</td></tr>)}</tbody>
+            </table></div>
+          </>}
+          {!syncing && <div className="table-scroll"><table className="market-table">
             {kind !== 'history' ? <>
               <thead><tr><th>Ticker</th><th>Position</th><th>Cost / share</th><th>Acquired</th></tr></thead>
               <tbody>{preview.rows.map((r, i) => <tr key={i}><td>{r.ticker}</td><td>{describe(r)}</td><td>${r.kind === 'option' ? r.premium : r.price}</td><td>{r.kind === 'option' ? '—' : r.acquired || 'today'}</td></tr>)}</tbody>
@@ -249,10 +272,10 @@ export function ImportCsv({ onImported, account = '' }) {
                 <td>${r.kind === 'option' ? r.open_premium : r.buy_price}</td><td>${r.kind === 'option' ? r.close_premium : r.sell_price}</td>
                 <td>{r.opened_at || r.acquired || '—'}</td><td>{r.closed_at}</td></tr>)}</tbody>
             </>}
-          </table></div>
+          </table></div>}
           {preview.money_market?.length > 0 && (
             <p className="market-sub">Money-market funds are counted as cash, not stock: {preview.money_market.map(m => `${m.ticker} ${usd(m.amount)}`).join(', ')}.
-              {' '}Importing adds {usd(preview.money_market_total)} to the <b>{account || 'Default'}</b> cash balance.</p>
+              {' '}{syncing ? 'Syncing sets' : 'Importing adds'} {usd(preview.money_market_total)} {syncing ? 'as' : 'to'} the <b>{account || 'Default'}</b> cash balance.</p>
           )}
           {preview.skipped.length > 0 && (
             <p className="market-sub">Skipped: {preview.skipped.map(s => `${s.symbol} (${s.reason})`).join('; ')}</p>

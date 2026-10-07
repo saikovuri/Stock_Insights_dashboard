@@ -627,7 +627,14 @@ These layouts were implemented from the brokers' published column names and chec
 - Option symbols are recognized in OCC (`AAPL  250117C00150000`), Fidelity (`-AAPL250117C150`), Schwab (`AAPL 01/17/2025 150.00 C`) and E*TRADE (`AAPL Jan 17 '25 $150 Call`) styles. Negative quantity records a short; whole contracts are required. Premium per share is |total cost| / (contracts × 100), or the per-share average when no total is given. Brokers that report per-contract averages without a total will be misread by 100×, so check the preview. Already-expired options are skipped.
 - Cash summary rows are skipped. Money-market fund symbols (three letters followed by `XX`, such as `VUSXX` or `SPAXX`) and Fidelity core positions marked `**` (such as `SPAXX**` or `FCASH**`) are not imported as shares. Their market value (or quantity × cost, or quantity at $1) is added to the selected account's cash balance, and the preview shows the total. Re-importing adds the amount again. Missing, future or unrecognized acquisition dates fall back to the import date; E*TRADE's positions export has no purchase dates, so its lots are dated on the import day. Correct this before relying on holding-period/benchmark analytics.
 - When the file has an Account Number/Account Name column with more than one account (Fidelity, Vanguard), the preview offers a picker: import all of them into the selected app account, or one broker account at a time into different app accounts.
-- Positions import is an **append**, not broker synchronization or duplicate detection; reimporting the same positions duplicates lots.
+- Positions import is an **append**, not broker synchronization or duplicate detection; reimporting the same positions duplicates lots. Use **Sync account to this file** instead for repeat imports (below).
+
+**Sync account to this file** (Open positions and Transaction history) reconciles the selected app account against the file instead of appending.
+- The preview lists every difference per stock ticker (total shares) and per option contract (ticker, side, strike, type, expiry, total contracts): **Add** when only in the file, **Replace lots** when the amounts differ, and **Remove** when only recorded. It also shows how many already match.
+- Applying leaves matching tickers and contracts untouched, so corrected lot dates survive. It deletes and re-imports the lots of changed tickers or contracts, and deletes positions missing from the file **without recording a sale**: record real sales first to keep their realized P&L.
+- Money-market totals **set** the account's cash instead of adding to it.
+- Other app accounts are never touched. Every change is captured by the audit trail.
+- Re-syncing the same file reports "Already in sync". Sync compares quantities, not cost basis, so a cost-only difference is left as recorded.
 
 **Transaction history** rebuilds open positions from an activity or filled-orders export. It needs Date, Action/Side/Trans Code and Quantity columns, plus a symbol or description. Price comes from the fill price (`Avg Price` is preferred over Webull's order `Price`) or from amount ÷ quantity.
 

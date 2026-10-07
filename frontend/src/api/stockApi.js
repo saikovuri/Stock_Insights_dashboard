@@ -520,8 +520,8 @@ export const deleteClosedTrade = (id) => sendJson(`${BASE}/portfolio/closed/${id
 export const deleteClosedOption = (id) => sendJson(`${BASE}/portfolio/options/closed/${id}`, 'DELETE', null, 'Failed to delete trade');
 export const fetchPremiumIncome = () => getJson(`${BASE}/portfolio/premium-income`, 'Failed to load premium income', true);
 export const saveIncomeGoal = (goal) => sendJson(`${BASE}/portfolio/income-goal`, 'PUT', { goal }, 'Failed to save goal');
-export const importPortfolioCsv = (csv, commit, kind = 'positions', account = '', sourceAccount = '') =>
-  sendJson(`${BASE}/portfolio/import`, 'POST', { csv, commit, kind, ...(account ? { account } : {}), ...(sourceAccount ? { source_account: sourceAccount } : {}) }, 'Import failed');
+export const importPortfolioCsv = (csv, commit, kind = 'positions', account = '', sourceAccount = '', mode = 'append') =>
+  sendJson(`${BASE}/portfolio/import`, 'POST', { csv, commit, kind, mode, ...(account ? { account } : {}), ...(sourceAccount ? { source_account: sourceAccount } : {}) }, 'Import failed');
 
 // ── Accounts, cash, account value, corporate actions ──────────────────────────────────
 export const fetchAccounts = () => getJson(`${BASE}/portfolio/accounts`, 'Failed to load accounts', true);
