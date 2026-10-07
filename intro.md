@@ -576,11 +576,16 @@ Guest watchlists are local to the browser. Signed-in lists synchronize to the ac
 
 Signed-in users can also:
 
-- **Group symbols into lists.** A symbol can belong to up to ten lists (default **Main**). In the 📝 editor, type list names separated by commas or toggle existing lists with the buttons below the field; names are trimmed, matched case-insensitively and limited to 40 characters. The **List** filter shows every symbol in the chosen list, and new symbols added while a list is selected join it. Removing a symbol from the watchlist removes it from all lists.
+- **Organize symbols into lists.** Lists appear as tabs above the table: **All**, then each list with its symbol count. Choose a tab to show that list; the choice is remembered in this browser, and the arrow keys move between tabs.
+  - **+ New list** creates a list, which can stay empty until you add symbols. Names are 1-40 characters, are matched case-insensitively, collapse repeated spaces, and cannot be "All" or contain `/`. Up to 50 lists are supported.
+  - With a list tab selected, ◀ ▶ move it, **Rename** renames it everywhere, and **Delete list** removes it after confirmation. Symbols are never removed from the watchlist by deleting a list; any that were only in that list move to **Main**. Main is the default list and cannot be renamed or deleted.
+  - The 🏷️ button on a row lists every list as a checkbox; changes save immediately. A symbol can be in up to ten lists and always stays in at least one. Adding a ticker while a list tab is open puts it in that list; from All it goes to Main.
+  - Lists and memberships saved before named lists existed are carried over automatically on first load. Drag-to-reorder still sets one order shared by every list.
+  - Removing a symbol from the watchlist removes it from all lists.
 - **Keep a note** (up to 500 characters) per symbol with the 📝 button; the note shows under the company name.
 - **See next earnings** in the Earnings column, using the canonical Finnhub + Yahoo dates (earlier date wins). Dates within 14 days are highlighted with a day count; `*` marks dates the providers do not confirm. Unknown dates show `—`, which is not evidence that no report is scheduled. Up to 60 symbols are checked.
 
-Source: [frontend/src/components/Watchlist.jsx](frontend/src/components/Watchlist.jsx), [backend/routes_watchlist.py](backend/routes_watchlist.py).
+Source: [frontend/src/components/Watchlist.jsx](frontend/src/components/Watchlist.jsx), [backend/routes_watchlist.py](backend/routes_watchlist.py), [backend/watchlists.py](backend/watchlists.py).
 
 ## Portfolio: Holdings
 
@@ -765,7 +770,7 @@ When a destination already has financial ledger history, the merged report leave
 
 Files are authenticated with a domain-separated HMAC derived from the installation's `JWT_SECRET`, versioned, and limited to 10 MB. The signed payload is opaque JSON text within the outer JSON document to preserve exact numeric serialization across browsers. Edited files, accounting-report exports and unsupported formats are rejected. Imports require authentication and explicit confirmation; endpoints use the authenticated destination ID, never a client-selected destination. Export and preview/import responses are marked `Cache-Control: no-store`.
 
-The file is **not encrypted** and contains private financial information. Keep it private; do not edit it. Exports contain no account passwords, authentication tokens or session data. Alerts, push subscriptions, account settings, cash balances, account value snapshots, local planning drafts and shared paper-idea logs are outside this transfer. Brokerage-account labels, watchlist lists/notes, applied-split markers and recorded spin-off/merger markers are included, so copied lots are not offered the same split again and the same corporate action cannot be applied twice. Symbols already on the destination watchlist keep the destination's lists. Files require the same installation/signing secret; rotating `JWT_SECRET` invalidates earlier transfer signatures. No signing secret is included in the file.
+The file is **not encrypted** and contains private financial information. Keep it private; do not edit it. Exports contain no account passwords, authentication tokens or session data. Alerts, push subscriptions, account settings, cash balances, account value snapshots, local planning drafts and shared paper-idea logs are outside this transfer. Brokerage-account labels, watchlist lists/notes, applied-split markers and recorded spin-off/merger markers are included, so copied lots are not offered the same split again and the same corporate action cannot be applied twice. Symbols already on the destination watchlist keep the destination's lists. The destination's lists keep their order; source lists with new names are added after them, and lists whose names already exist (ignoring case) are merged. Files require the same installation/signing secret; rotating `JWT_SECRET` invalidates earlier transfer signatures. No signing secret is included in the file.
 
 The existing **Export report** in Account ledger is a read-only accounting summary, not an importable transfer file. Existing stock CSV import is also separate and does not restore a complete account.
 
@@ -1145,7 +1150,7 @@ WHERE oid = 'public.idea_log'::regclass;
 
 Expect `true`, `false`, `false`, then rerun Supabase's Security Advisor and check the backend's options-track-record view. The transaction preserves records and blocks public-role table access even if legacy RLS policies remain. If the backend uses a non-owner role without `BYPASSRLS`, configure a narrowly scoped backend policy before enabling RLS rather than granting access to browser roles. The broader [Supabase RLS script](deploy/supabase_rls.sql) covers the other named StockPilot tables; verify their status separately. A warning alone does not establish that data was accessed: inspect available API/database logs to assess past exposure. Local tests do not verify production grants, policies, or historical access.
 
-The `account_cash`, `nav_snapshots`, `applied_splits`, `watchlist_lists` and `applied_actions` tables are created with RLS enabled and public-role grants revoked at PostgreSQL startup, and are included in the RLS script.
+The `account_cash`, `nav_snapshots`, `applied_splits`, `watchlist_lists`, `watchlist_groups` and `applied_actions` tables are created with RLS enabled and public-role grants revoked at PostgreSQL startup, and are included in the RLS script.
 
 ### Route Notes
 

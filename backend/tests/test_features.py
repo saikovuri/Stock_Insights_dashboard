@@ -189,14 +189,16 @@ class FeatureTests(unittest.TestCase):
             self.assertEqual(self.client.put("/api/watchlist/AAPL", json={"lists": ["Core", " Income ", "core"], "note": "Buy < 180"}).status_code, 200)
             self.assertEqual(self.client.put("/api/watchlist/MSFT", json={"lists": ["Core"]}).status_code, 404)
             self.assertEqual(self.client.put("/api/watchlist/AAPL", json={"lists": []}).status_code, 422)
-            self.assertEqual(self.client.put("/api/watchlist/AAPL", json={"lists": ["x" * 41]}).status_code, 422)
+            self.assertEqual(self.client.put("/api/watchlist/AAPL", json={"lists": ["x" * 41]}).status_code, 400)
             items = self.client.get("/api/watchlist").json()
+            self.assertEqual(items["lists"], ["Main", "Semis", "Core", "Income"])
             self.assertEqual(items["items"], [
                 {"ticker": "AAPL", "lists": ["Core", "Income"], "list_name": "Core", "note": "Buy < 180"},
                 {"ticker": "NVDA", "lists": ["Semis"], "list_name": "Semis", "note": ""}])
             self.assertEqual(items["tickers"], ["AAPL", "NVDA"])
             self.assertEqual(self.client.delete("/api/watchlist/AAPL").status_code, 200)
-            self.assertEqual(database._run(f"SELECT COUNT(*) AS n FROM watchlist_lists WHERE user_id={database.PH}", (uid,), "one")["n"], 0)
+            self.assertEqual(database._run(f"SELECT COUNT(*) AS n FROM watchlist_lists WHERE user_id={database.PH} AND ticker='AAPL'",
+                                           (uid,), "one")["n"], 0)
             database.add_to_watchlist(uid, "AAPL")
             self.assertEqual(self.client.get("/api/watchlist").json()["items"][1]["lists"], ["Main"], "removed memberships must not resurface")
             with patch.object(self.main.options_analytics, "earnings_info",
@@ -216,6 +218,48 @@ class FeatureTests(unittest.TestCase):
             results = self.client.get("/api/search", params={"q": "app"}).json()["results"]
             self.assertEqual([r["symbol"] for r in results], ["APP", "AAPL", "APPN"])
             self.assertEqual(self.client.get("/api/search", params={"q": "microsoft"}).json()["results"][0]["symbol"], "MSFT")
+
+    def test_named_watchlist_lists_create_rename_reorder_delete(self):
+        uid = new_user()
+        database.add_to_watchlist(uid, "NVDA", "Semis")
+        database.add_to_watchlist(uid, "AAPL")
+        with self.as_user(uid):
+            post = lambda name: self.client.post("/api/watchlist/lists", json={"name": name})
+            created = post("  Earnings   plays ")
+            self.assertEqual(created.status_code, 200, created.text)
+            self.assertEqual(created.json()["lists"], ["Main", "Semis", "Earnings plays"], "empty lists exist")
+            self.assertEqual(post("earnings PLAYS").status_code, 409)
+            self.assertEqual(post("All").status_code, 400)
+            self.assertEqual(post("a/b").status_code, 400)
+            rename = lambda old, new: self.client.put(f"/api/watchlist/lists/{old}", json={"name": new})
+            self.assertEqual(rename("Earnings plays", "Earnings").json()["lists"], ["Main", "Semis", "Earnings"])
+            self.assertEqual(rename("Main", "Core").status_code, 400)
+            self.assertEqual(rename("Nope", "Other").status_code, 404)
+            self.assertEqual(rename("Semis", "earnings").status_code, 409)
+            self.assertEqual(rename("semis", "Chips").json()["items"][0]["lists"], ["Chips"], "memberships follow a rename")
+            self.client.put("/api/watchlist/NVDA", json={"lists": ["Chips", "Earnings"]})
+            order = self.client.post("/api/watchlist/lists/order", json={"names": ["Earnings", "main", "Chips"]})
+            self.assertEqual(order.json()["lists"], ["Earnings", "Main", "Chips"])
+            self.assertEqual(order.json()["items"][0]["lists"], ["Earnings", "Chips"], "symbol lists follow list order")
+            self.assertEqual(self.client.post("/api/watchlist/lists/order", json={"names": ["Main"]}).status_code, 400)
+            self.assertEqual(self.client.delete("/api/watchlist/lists/Main").status_code, 400)
+            gone = self.client.delete("/api/watchlist/lists/Chips").json()
+            self.assertEqual((gone["lists"], gone["items"][0]["lists"]), (["Earnings", "Main"], ["Earnings"]))
+            self.client.put("/api/watchlist/AAPL", json={"lists": ["Solo"]})
+            solo = self.client.delete("/api/watchlist/lists/Solo").json()
+            self.assertEqual(solo["items"][1]["lists"], ["Main"], "symbols only in a deleted list move to Main")
+            self.assertEqual(self.client.post("/api/watchlist", json={"ticker": "AMD", "list_name": "All"}).status_code, 400)
+            database.add_to_watchlist(uid, "AMD", "earnings")
+            self.assertEqual(self.client.get("/api/watchlist").json()["items"][2]["lists"], ["Earnings"], "case variants join the existing list")
+        import account_transfer
+        destination = new_user()
+        database.add_to_watchlist(destination, "NVDA", "Mine")
+        account_transfer.import_account(destination, account_transfer.export_account(uid))
+        import watchlists
+        copied = watchlists.overview(destination)
+        self.assertEqual(copied["lists"], ["Main", "Mine", "Earnings"])
+        self.assertEqual({i["ticker"]: i["lists"] for i in copied["items"]},
+                         {"NVDA": ["Mine"], "AAPL": ["Main"], "AMD": ["Earnings"]})
 
     def test_spinoff_moves_basis_and_keeps_lot_date_and_account(self):
         uid = new_user()

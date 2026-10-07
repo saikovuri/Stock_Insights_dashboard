@@ -4,14 +4,13 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 import market
 import options_analytics
+import watchlists
 from api_common import get_current_user, limiter, upstream_error, valid_ticker
-from database import (
-    add_to_watchlist, get_user_watchlist, get_watchlist_items, remove_from_watchlist, update_watchlist_item,
-)
+from database import add_to_watchlist, get_user_watchlist, remove_from_watchlist
 from stock_data import get_key_metrics
 
 router = APIRouter()
@@ -23,28 +22,62 @@ class WatchlistRequest(BaseModel):
 
 
 class WatchlistItemRequest(BaseModel):
-    lists: list[str] = Field(..., min_length=1, max_length=10)
+    lists: list[str] = Field(..., min_length=1, max_length=watchlists.MAX_LISTS_PER_SYMBOL)
     note: Optional[str] = Field(None, max_length=500)
 
-    @field_validator("lists")
-    @classmethod
-    def _list_lengths(cls, value):
-        if any(len(name.strip()) > 40 for name in value):
-            raise ValueError("List names are limited to 40 characters")
-        return value
+
+class ListNameRequest(BaseModel):
+    name: str = Field(..., max_length=80)
+
+
+class ListOrderRequest(BaseModel):
+    names: list[str] = Field(..., min_length=1, max_length=watchlists.MAX_LISTS)
+
+
+def _lists_call(action):
+    try:
+        return action()
+    except watchlists.ListConflict as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/api/watchlist")
 def watchlist_get(user: dict = Depends(get_current_user)):
-    items = get_watchlist_items(user["user_id"])
-    return {"tickers": [item["ticker"] for item in items], "items": items}
+    data = watchlists.overview(int(user["user_id"]))
+    return {"tickers": [item["ticker"] for item in data["items"]], **data}
+
+
+@router.post("/api/watchlist/lists")
+def watchlist_list_create(req: ListNameRequest, user: dict = Depends(get_current_user)):
+    return _lists_call(lambda: watchlists.create(int(user["user_id"]), req.name))
+
+
+@router.post("/api/watchlist/lists/order")
+def watchlist_list_reorder(req: ListOrderRequest, user: dict = Depends(get_current_user)):
+    return _lists_call(lambda: watchlists.reorder(int(user["user_id"]), req.names))
+
+
+@router.put("/api/watchlist/lists/{name}")
+def watchlist_list_rename(name: str, req: ListNameRequest, user: dict = Depends(get_current_user)):
+    return _lists_call(lambda: watchlists.rename(int(user["user_id"]), name, req.name))
+
+
+@router.delete("/api/watchlist/lists/{name}")
+def watchlist_list_delete(name: str, user: dict = Depends(get_current_user)):
+    return _lists_call(lambda: watchlists.delete(int(user["user_id"]), name))
 
 
 @router.put("/api/watchlist/{ticker}")
 def watchlist_update(ticker: str, req: WatchlistItemRequest, user: dict = Depends(get_current_user)):
-    if not update_watchlist_item(user["user_id"], valid_ticker(ticker), req.lists, req.note):
+    ticker = valid_ticker(ticker)
+    result = _lists_call(lambda: watchlists.set_memberships(int(user["user_id"]), ticker, req.lists, req.note))
+    if result is None:
         raise HTTPException(status_code=404, detail="Not in watchlist")
-    return {"ok": True}
+    return result
 
 
 @router.get("/api/watchlist/earnings")
@@ -61,11 +94,12 @@ def watchlist_earnings(request: Request, user: dict = Depends(get_current_user))
 @router.post("/api/watchlist")
 def watchlist_add(req: WatchlistRequest, user: dict = Depends(get_current_user)):
     ticker = valid_ticker(req.ticker)
+    list_name = _lists_call(lambda: watchlists.clean_name(req.list_name)) if req.list_name else None
     try:
         get_key_metrics(ticker)
     except Exception:
         raise HTTPException(status_code=404, detail=f"Ticker '{ticker}' not found")
-    added = add_to_watchlist(user["user_id"], ticker, req.list_name)
+    added = add_to_watchlist(user["user_id"], ticker, list_name)
     if not added:
         raise HTTPException(status_code=409, detail="Already in watchlist")
     return {"message": f"{ticker} added to watchlist"}

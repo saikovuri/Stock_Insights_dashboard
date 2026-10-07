@@ -966,34 +966,83 @@ test('ticker search suggests companies and supports keyboard selection', async (
 
 test('signed-in watchlist filters lists, saves notes and shows next earnings', async () => {
   vi.spyOn(auth, 'useAuth').mockReturnValue({ user: { id: 9 }, token: 'fixture' });
+  localStorage.removeItem('watchlist_tab:9');
   vi.spyOn(stockApi, 'authFetch').mockResolvedValue(new Response(JSON.stringify({ stocks: [
     { ticker: 'AAPL', name: 'Apple', price: 200 }, { ticker: 'KO', name: 'Coca-Cola', price: 60 }] })));
-  vi.spyOn(stockApi, 'fetchWatchlistItems').mockResolvedValue({ items: [
-    { ticker: 'AAPL', lists: ['Growth', 'Income'], list_name: 'Growth', note: 'Buy under 180' }, { ticker: 'KO', list_name: 'Income', note: '' }] });
+  const overview = (koLists, note = '') => ({ lists: ['Main', 'Growth', 'Income'], items: [
+    { ticker: 'AAPL', lists: ['Growth', 'Income'], note: 'Buy under 180' }, { ticker: 'KO', lists: koLists, note }] });
+  vi.spyOn(stockApi, 'fetchWatchlistItems').mockResolvedValue(overview(['Income']));
   const ahead = new Date(Date.now() + 5 * 86400000);
   const soon = `${ahead.getFullYear()}-${String(ahead.getMonth() + 1).padStart(2, '0')}-${String(ahead.getDate()).padStart(2, '0')}`;
   vi.spyOn(stockApi, 'fetchWatchlistEarnings').mockResolvedValue({ items: [
     { ticker: 'AAPL', next: soon, timing: 'after close', confirmed: true }, { ticker: 'KO', next: null }] });
-  const save = vi.spyOn(stockApi, 'updateWatchlistItem').mockResolvedValue({ ok: true });
+  const save = vi.spyOn(stockApi, 'updateWatchlistItem')
+    .mockResolvedValueOnce(overview(['Income', 'Growth']))
+    .mockResolvedValueOnce(overview(['Income', 'Growth'], 'Dividend raise in Feb'));
   render(<Watchlist />);
   expect(await screen.findByText('Buy under 180')).toBeTruthy();
   expect(await screen.findByText(/\(5d\)/)).toBeTruthy();
-  fireEvent.change(screen.getByLabelText('List:'), { target: { value: 'Growth' } });
-  expect(screen.getByText('Buy under 180')).toBeTruthy();
+  const tabs = screen.getByRole('tablist', { name: 'Watchlist lists' });
+  expect(within(tabs).getAllByRole('tab').map(tab => tab.textContent)).toEqual(['All2', 'Main0', 'Growth1', 'Income2']);
+  fireEvent.click(within(tabs).getByRole('tab', { name: /Growth/ }));
   expect(screen.queryByText('Coca-Cola')).toBeNull();
-  fireEvent.change(screen.getByLabelText('List:'), { target: { value: 'Income' } });
-  expect(screen.getByText('Buy under 180')).toBeTruthy();
+  expect(localStorage.getItem('watchlist_tab:9')).toBe('Growth');
+  fireEvent.keyDown(tabs, { key: 'ArrowRight' });
+  expect(within(tabs).getByRole('tab', { name: /Income/ }).getAttribute('aria-selected')).toBe('true');
   expect(screen.getByText('Coca-Cola')).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: 'List and notes for KO' }));
-  expect(screen.getByLabelText('Lists (comma-separated)').value).toBe('Income');
-  fireEvent.click(screen.getByRole('button', { name: '+ Growth' }));
-  expect(screen.getByLabelText('Lists (comma-separated)').value).toBe('Income, Growth');
+  fireEvent.click(within(tabs).getByRole('tab', { name: /Main/ }));
+  expect(screen.getByText(/No symbols in Main yet/)).toBeTruthy();
+  fireEvent.click(within(tabs).getByRole('tab', { name: /All/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Lists for KO' }));
+  const picker = screen.getByRole('group', { name: 'Lists for KO' });
+  expect(within(picker).getByRole('checkbox', { name: 'Income' }).disabled).toBe(true);
+  fireEvent.click(within(picker).getByRole('checkbox', { name: 'Growth' }));
+  await waitFor(() => expect(save).toHaveBeenCalledWith('KO', ['Income', 'Growth'], ''));
+  await waitFor(() => expect(within(picker).getByRole('checkbox', { name: 'Income' }).disabled).toBe(false));
+  fireEvent.click(screen.getByRole('button', { name: 'Note for KO' }));
   fireEvent.change(screen.getByLabelText('Note'), { target: { value: 'Dividend raise in Feb' } });
   fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-  await waitFor(() => expect(save).toHaveBeenCalledWith('KO', ['Income', 'Growth'], 'Dividend raise in Feb'));
+  await waitFor(() => expect(save).toHaveBeenLastCalledWith('KO', ['Income', 'Growth'], 'Dividend raise in Feb'));
   expect(await screen.findByText('Dividend raise in Feb')).toBeTruthy();
-  fireEvent.change(screen.getByLabelText('List:'), { target: { value: 'Growth' } });
-  expect(screen.getByText('Coca-Cola')).toBeTruthy();
+});
+
+test('watchlist lists can be created, renamed, reordered and deleted', async () => {
+  vi.spyOn(auth, 'useAuth').mockReturnValue({ user: { id: 10 }, token: 'fixture' });
+  localStorage.removeItem('watchlist_tab:10');
+  vi.spyOn(stockApi, 'authFetch').mockResolvedValue(new Response(JSON.stringify({ stocks: [{ ticker: 'AAPL', name: 'Apple', price: 200 }] })));
+  const item = [{ ticker: 'AAPL', lists: ['Main'], note: '' }];
+  vi.spyOn(stockApi, 'fetchWatchlistItems').mockResolvedValue({ lists: ['Main'], items: item });
+  vi.spyOn(stockApi, 'fetchWatchlistEarnings').mockResolvedValue({ items: [] });
+  const create = vi.spyOn(stockApi, 'createWatchlistList').mockResolvedValue({ lists: ['Main', 'Earnings plays'], items: item });
+  const rename = vi.spyOn(stockApi, 'renameWatchlistList').mockResolvedValue({ lists: ['Main', 'Earnings'], items: item });
+  const reorder = vi.spyOn(stockApi, 'reorderWatchlistLists').mockResolvedValue({ lists: ['Earnings', 'Main'], items: item });
+  const remove = vi.spyOn(stockApi, 'deleteWatchlistList').mockResolvedValue({ lists: ['Main'], items: item });
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
+  render(<Watchlist />);
+  fireEvent.click(await screen.findByRole('button', { name: '+ New list' }));
+  fireEvent.change(screen.getByLabelText('New list name'), { target: { value: '  Earnings   plays ' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+  await waitFor(() => expect(create).toHaveBeenCalledWith('Earnings plays'));
+  const tab = await screen.findByRole('tab', { name: /Earnings plays/ });
+  expect(tab.getAttribute('aria-selected')).toBe('true');
+  expect(screen.getByText(/No symbols in Earnings plays yet/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
+  fireEvent.change(screen.getByLabelText('Rename "Earnings plays" to'), { target: { value: 'Earnings' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save name' }));
+  await waitFor(() => expect(rename).toHaveBeenCalledWith('Earnings plays', 'Earnings'));
+  expect((await screen.findByRole('tab', { name: /^Earnings/ })).getAttribute('aria-selected')).toBe('true');
+  expect(screen.getByRole('button', { name: 'Move list right' }).disabled).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Move list left' }));
+  await waitFor(() => expect(reorder).toHaveBeenCalledWith(['Earnings', 'Main']));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Delete list' }).disabled).toBe(false));
+  fireEvent.click(screen.getByRole('button', { name: 'Delete list' }));
+  expect(remove).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Delete list' }));
+  await waitFor(() => expect(remove).toHaveBeenCalledWith('Earnings'));
+  expect(confirm).toHaveBeenCalledTimes(2);
+  await waitFor(() => expect(screen.getByRole('tab', { name: /All/ }).getAttribute('aria-selected')).toBe('true'));
+  fireEvent.click(screen.getByRole('tab', { name: /Main/ }));
+  expect(screen.queryByRole('button', { name: 'Delete list' })).toBeNull();
 });
 
 test('account value history shows flow-adjusted return and drawdown and records on demand', async () => {

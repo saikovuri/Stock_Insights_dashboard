@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 import database
+import watchlists
 from accounting import AUDITED_TABLES
 from auth import SECRET_KEY
 
@@ -57,13 +58,15 @@ def export_account(user_id):
         applied_splits = database._fetchall(cursor)
         cursor.execute(f"SELECT ticker, list_name FROM watchlist_lists WHERE user_id={database.PH} ORDER BY ticker, list_name", (user_id,))
         watchlist_lists = database._fetchall(cursor)
+        cursor.execute(f"SELECT name, position FROM watchlist_groups WHERE user_id={database.PH} ORDER BY position, name", (user_id,))
+        watchlist_groups = database._fetchall(cursor)
         cursor.execute(f"SELECT kind, ticker, action_date, details, applied_at FROM applied_actions WHERE user_id={database.PH} ORDER BY kind, ticker, action_date", (user_id,))
         applied_actions = database._fetchall(cursor)
         payload = json.loads(json.dumps({"format": "stockpilot-account-transfer", "version": 1,
             "source_user_id": user_id, "source_name": user["display_name"], "events": events,
             "tables": tables, "counts": counts, "combined_histories": combined_histories,
             "applied_splits": applied_splits, "watchlist_lists": watchlist_lists,
-            "applied_actions": applied_actions}, default=str, allow_nan=False))
+            "watchlist_groups": watchlist_groups, "applied_actions": applied_actions}, default=str, allow_nan=False))
         encoded = _canonical(payload)
         package = {"payload": encoded, "signature": _signature(encoded), "exported_at": datetime.now(timezone.utc).isoformat()}
         if len(_canonical(package).encode()) > MAX_BYTES - 64:
@@ -215,6 +218,8 @@ def import_account(user_id, package):
                 raise ValueError("Unsupported ledger source in export")
             origin_events.append({"source_event_id": event["id"], "destination_event_id": event_ids[event["id"]],
                                   "source_recorded_at": event["recorded_at"], "source_operation": operation})
+        # The destination's own lists come first and are materialized before copied rows arrive.
+        watchlists._ensure(cursor, user_id)
         copied_tickers = set()
         for table in COPY_TABLES:
             for row in payload["tables"][table]:
@@ -228,6 +233,16 @@ def import_account(user_id, package):
                     copied_tickers.add(values["ticker"])
                 _insert(cursor, table, {"user_id": user_id, **values})
         # Symbols already on the destination watchlist keep the destination's lists.
+        cursor.execute(f"SELECT name, position FROM watchlist_groups WHERE user_id={database.PH}", (user_id,))
+        groups = database._fetchall(cursor)
+        known = {g["name"].lower() for g in groups}
+        position = max((g["position"] for g in groups), default=0)
+        for group in payload.get("watchlist_groups", []):
+            if group["name"].lower() not in known:
+                position += 1
+                known.add(group["name"].lower())
+                cursor.execute(f"INSERT INTO watchlist_groups (user_id, name, position) VALUES ({', '.join([database.PH] * 3)})",
+                               (user_id, group["name"], position))
         for membership in payload.get("watchlist_lists", []):
             if membership["ticker"] in copied_tickers:
                 cursor.execute(f"""INSERT INTO watchlist_lists (user_id, ticker, list_name) VALUES ({', '.join([database.PH] * 3)})

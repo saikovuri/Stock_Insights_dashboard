@@ -665,3 +665,45 @@ test('corporate actions flag a stale holding and record a spin-off without overf
   await expect(page.getByText(/MMM: moved \$150 of cost basis to SOLV/)).toBeVisible();
   expect(posted).toEqual({ ticker: 'MMM', new_ticker: 'SOLV', action_date: '2024-04-01', ratio: 0.25, basis_pct: 7.5 });
 });
+
+test('watchlist list tabs, list picker and new-list form fit the viewport', async ({ page }, testInfo) => {
+  let lists = ['Main', 'Growth', 'Dividend income', 'Semiconductors'];
+  const memberships = { AAPL: ['Growth'], KO: ['Dividend income'], NVDA: ['Growth', 'Semiconductors'] };
+  const overview = () => ({ lists, tickers: Object.keys(memberships),
+    items: Object.entries(memberships).map(([ticker, names]) => ({ ticker, lists: names, list_name: names[0], note: '' })) });
+  await page.route('**/api/screener', route => route.fulfill({ json: { stocks: [
+    { ticker: 'AAPL', name: 'Apple Inc.', price: 200, change_pct: 1 }, { ticker: 'KO', name: 'Coca-Cola', price: 60, change_pct: -0.5 },
+    { ticker: 'NVDA', name: 'NVIDIA', price: 120, change_pct: 2 }] } }));
+  await page.route('**/api/watchlist', route => route.fulfill({ json: overview() }));
+  await page.route('**/api/watchlist/earnings', route => route.fulfill({ json: { items: [] } }));
+  await page.route('**/api/watchlist/lists', route => {
+    lists = [...lists, route.request().postDataJSON().name];
+    return route.fulfill({ json: overview() });
+  });
+  await page.route('**/api/watchlist/KO', route => {
+    memberships.KO = route.request().postDataJSON().lists;
+    return route.fulfill({ json: overview() });
+  });
+  await page.goto('/#watchlist');
+  const tabs = page.getByRole('tablist', { name: 'Watchlist lists' });
+  await expect(tabs.getByRole('tab')).toHaveText(['All3', 'Main0', 'Growth2', 'Dividend income1', 'Semiconductors1']);
+  await tabs.getByRole('tab', { name: /Growth/ }).click();
+  const table = page.locator('.watchlist-table');
+  await expect(table.getByRole('button', { name: 'NVDA', exact: true })).toBeVisible();
+  await expect(table.getByRole('button', { name: 'KO', exact: true })).toHaveCount(0);
+  await tabs.getByRole('tab', { name: /All/ }).click();
+  await page.getByRole('button', { name: 'Lists for KO' }).click();
+  const picker = page.getByRole('group', { name: 'Lists for KO' });
+  await expect(picker).toBeInViewport();
+  await page.screenshot({ path: testInfo.outputPath('watchlist-list-picker.png') });
+  await picker.getByRole('checkbox', { name: 'Growth' }).check();
+  await expect(tabs.getByRole('tab', { name: /Growth/ })).toHaveText('Growth3');
+  await page.getByRole('button', { name: '+ New list' }).click();
+  await page.getByLabel('New list name').fill('Earnings this week');
+  await page.getByRole('button', { name: 'Create', exact: true }).click();
+  await expect(tabs.getByRole('tab', { name: /Earnings this week/ })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByText(/No symbols in Earnings this week yet/)).toBeVisible();
+  await expect(tabs.getByRole('tab', { name: /Earnings this week/ })).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+  await page.locator('.watchlist-tabs-bar').screenshot({ path: testInfo.outputPath('watchlist-tabs.png') });
+});

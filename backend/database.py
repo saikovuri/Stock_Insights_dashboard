@@ -937,16 +937,6 @@ def get_user_watchlist(user_id: int) -> list[str]:
     return [r["ticker"] for r in rows]
 
 
-def _list_names(names) -> list[str]:
-    """Trimmed, case-insensitively unique list names; a symbol always belongs to at least one list."""
-    unique: dict[str, str] = {}
-    for name in names or []:
-        name = (name or "").strip()
-        if name:
-            unique.setdefault(name.lower(), name)
-    return list(unique.values()) or ["Main"]
-
-
 def add_to_watchlist(user_id: int, ticker: str, list_name: str | None = None) -> bool:
     try:
         _run(f"INSERT INTO watchlist (user_id, ticker, list_name) VALUES ({PH}, {PH}, {PH})",
@@ -954,42 +944,6 @@ def add_to_watchlist(user_id: int, ticker: str, list_name: str | None = None) ->
         return True
     except Exception:
         return False
-
-
-def get_watchlist_items(user_id: int) -> list[dict]:
-    """Symbols with all their lists. Symbols never edited since multi-list support keep their single legacy list."""
-    rows = _run(f"SELECT ticker, list_name, note FROM watchlist WHERE user_id={PH} ORDER BY added_at", (user_id,), "all")
-    memberships: dict[str, list[str]] = {}
-    for row in _run(f"SELECT ticker, list_name FROM watchlist_lists WHERE user_id={PH} ORDER BY list_name", (user_id,), "all"):
-        memberships.setdefault(row["ticker"], []).append(row["list_name"])
-    items = []
-    for r in rows:
-        lists = memberships.get(r["ticker"]) or [r["list_name"] or "Main"]
-        items.append({"ticker": r["ticker"], "lists": lists, "list_name": lists[0], "note": r["note"] or ""})
-    return items
-
-
-def update_watchlist_item(user_id: int, ticker: str, lists: list[str] | None, note: str | None) -> bool:
-    names = _list_names(lists)
-    ticker = ticker.upper()
-    conn = get_db()
-    try:
-        cur = conn.cursor()
-        cur.execute(f"UPDATE watchlist SET list_name={PH}, note={PH} WHERE user_id={PH} AND ticker={PH}",
-                    (names[0], (note or "").strip() or None, user_id, ticker))
-        if cur.rowcount == 0:
-            conn.rollback()
-            return False
-        cur.execute(f"DELETE FROM watchlist_lists WHERE user_id={PH} AND ticker={PH}", (user_id, ticker))
-        for name in names:
-            cur.execute(f"INSERT INTO watchlist_lists (user_id, ticker, list_name) VALUES ({PH}, {PH}, {PH})", (user_id, ticker, name))
-        conn.commit()
-        return True
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        _release(conn)
 
 
 def remove_from_watchlist(user_id: int, ticker: str) -> bool:

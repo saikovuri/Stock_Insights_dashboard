@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAuth } from '../AuthContext';
 import PriceAlerts from './PriceAlerts';
-import { authFetch, fetchWatchlistItems, fetchWatchlistEarnings, updateWatchlistItem } from '../api/stockApi';
+import {
+  authFetch, fetchWatchlistItems, fetchWatchlistEarnings, updateWatchlistItem,
+  createWatchlistList, renameWatchlistList, deleteWatchlistList, reorderWatchlistLists,
+} from '../api/stockApi';
 
 import { API_BASE } from '../api/config';
 const BASE = API_BASE;
@@ -50,11 +53,16 @@ function AccountWatchlist({ onSelect, onSignIn, session }) {
   const [lastUpdated, setLastUpdated] = useState(null);
   const [customOrder, setCustomOrder] = useState([]);
   const [alertPanelTicker, setAlertPanelTicker] = useState(null);
+  const tabKey = `watchlist_tab:${user?.id ?? user?.username ?? 'guest'}`;
   const [items, setItems] = useState({});
+  const [lists, setLists] = useState([]);
   const [earnings, setEarnings] = useState({});
-  const [group, setGroup] = useState('');
+  const [group, setGroup] = useState(() => (isGuest ? '' : localStorage.getItem(tabKey) || ''));
   const [notePanel, setNotePanel] = useState(null);
-  const [draft, setDraft] = useState({ lists: '', note: '' });
+  const [listPanel, setListPanel] = useState(null);
+  const [noteDraft, setNoteDraft] = useState('');
+  const [nameForm, setNameForm] = useState(null);
+  const [listBusy, setListBusy] = useState(false);
   const active = useRef(false);
   const loadGeneration = useRef(0);
 
@@ -135,35 +143,105 @@ function AccountWatchlist({ onSelect, onSignIn, session }) {
 
   const tickerKey = stocks.map(s => s.ticker).sort().join(',');
   useEffect(() => {
-    if (isGuest || !tickerKey) return undefined;
+    if (isGuest) return undefined;
     let current = true;
     fetchWatchlistItems().then(data => {
-      if (current) setItems(Object.fromEntries((data.items || []).map(item => [item.ticker, item])));
+      if (!current) return;
+      setItems(Object.fromEntries((data.items || []).map(item => [item.ticker, item])));
+      setLists(data.lists || []);
     }).catch(() => {});
-    fetchWatchlistEarnings().then(data => {
+    if (tickerKey) fetchWatchlistEarnings().then(data => {
       if (current) setEarnings(Object.fromEntries((data.items || []).map(item => [item.ticker, item])));
     }).catch(() => {});
     return () => { current = false; };
   }, [isGuest, tickerKey]);
 
-  const listsOf = (ticker) => items[ticker]?.lists || [items[ticker]?.list_name || 'Main'];
-  const groups = [...new Set(Object.keys(items).flatMap(listsOf))].sort();
+  useEffect(() => {
+    if (group && lists.length && !lists.includes(group)) setGroup('');
+  }, [group, lists]);
+
+  const tabStrip = useRef(null);
+  useEffect(() => {
+    tabStrip.current?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  }, [group, lists]);
+
+  const listsOf = (ticker) => items[ticker]?.lists || ['Main'];
+
+  const selectGroup = (name) => {
+    setGroup(name);
+    localStorage.setItem(tabKey, name);
+  };
+
+  const applyOverview = (data) => {
+    setItems(Object.fromEntries((data.items || []).map(item => [item.ticker, item])));
+    setLists(data.lists || []);
+    return data;
+  };
+
+  const runListCall = async (call) => {
+    setListBusy(true);
+    try { return active.current ? applyOverview(await call()) : null; }
+    catch (error) { if (active.current) setAddMsg(error.message); return null; }
+    finally { if (active.current) setListBusy(false); }
+  };
+
+  const submitListName = async (event) => {
+    event.preventDefault();
+    const value = nameForm.value.replace(/\s+/g, ' ').trim();
+    if (!value) return;
+    const data = await runListCall(() => (nameForm.mode === 'new' ? createWatchlistList(value) : renameWatchlistList(group, value)));
+    if (!data) return;
+    setNameForm(null);
+    setAddMsg('');
+    selectGroup(data.lists.find(name => name.toLowerCase() === value.toLowerCase()) || '');
+  };
+
+  const moveList = (step) => {
+    const order = [...lists];
+    const from = order.indexOf(group);
+    [order[from], order[from + step]] = [order[from + step], order[from]];
+    runListCall(() => reorderWatchlistLists(order));
+  };
+
+  const removeList = async () => {
+    if (!window.confirm(`Delete the list "${group}"? Its symbols stay in your watchlist; any that were only in this list move to Main.`)) return;
+    if (await runListCall(() => deleteWatchlistList(group))) selectGroup('');
+  };
+
+  const toggleList = async (ticker, name) => {
+    const current = listsOf(ticker);
+    const next = current.includes(name) ? current.filter(n => n !== name) : [...current, name];
+    if (!next.length) return;
+    const previous = items[ticker];
+    setItems(prev => ({ ...prev, [ticker]: { ...prev[ticker], ticker, lists: next } }));
+    if (!await runListCall(() => updateWatchlistItem(ticker, next, previous?.note || '')) && active.current) {
+      setItems(prev => ({ ...prev, [ticker]: previous }));
+    }
+  };
 
   const openNotes = (ticker) => {
+    setListPanel(null);
     setNotePanel(prev => (prev === ticker ? null : ticker));
-    setDraft({ lists: listsOf(ticker).join(', '), note: items[ticker]?.note || '' });
+    setNoteDraft(items[ticker]?.note || '');
+  };
+
+  const openLists = (ticker) => {
+    setNotePanel(null);
+    setListPanel(prev => (prev === ticker ? null : ticker));
   };
 
   const saveNotes = async (ticker) => {
-    const lists = [...new Map(draft.lists.split(',').map(name => name.trim()).filter(Boolean)
-      .map(name => [name.toLowerCase(), name])).values()];
-    if (!lists.length) lists.push('Main');
-    if (lists.length > 10 || lists.some(name => name.length > 40)) { setAddMsg('Use up to 10 lists of at most 40 characters each.'); return; }
-    try {
-      await updateWatchlistItem(ticker, lists, draft.note);
-      setItems(prev => ({ ...prev, [ticker]: { ticker, lists, list_name: lists[0], note: draft.note.trim() } }));
-      setNotePanel(null);
-    } catch (error) { setAddMsg(error.message); }
+    if (await runListCall(() => updateWatchlistItem(ticker, listsOf(ticker), noteDraft))) setNotePanel(null);
+  };
+
+  const onTabKey = (event) => {
+    const tabs = ['', ...lists];
+    const step = { ArrowRight: 1, ArrowLeft: -1 }[event.key];
+    if (!step) return;
+    event.preventDefault();
+    const index = (tabs.indexOf(group) + step + tabs.length) % tabs.length;
+    selectGroup(tabs[index]);
+    event.currentTarget.querySelectorAll('[role="tab"]')[index]?.focus();
   };
 
   const earningsCell = (ticker) => {
@@ -358,15 +436,6 @@ function AccountWatchlist({ onSelect, onSignIn, session }) {
           >
             {loading ? '⟳' : '↻'} Refresh
           </button>
-          {!isGuest && groups.length > 0 && (
-            <div className="screener-sort-dropdown">
-              <label htmlFor="watchlist-group">List:</label>
-              <select id="watchlist-group" value={group} onChange={e => setGroup(e.target.value)}>
-                <option value="">All lists</option>
-                {groups.map(name => <option key={name} value={name}>{name}</option>)}
-              </select>
-            </div>
-          )}
           <div className="screener-sort-dropdown">
             <label>Sort:</label>
             <select
@@ -403,10 +472,55 @@ function AccountWatchlist({ onSelect, onSignIn, session }) {
       )}
       {addMsg && <div className="portfolio-msg">{addMsg}</div>}
 
+      {!isGuest && lists.length > 0 && (
+        <div className="watchlist-tabs-bar">
+          <div className="watchlist-tabs" role="tablist" aria-label="Watchlist lists" onKeyDown={onTabKey} ref={tabStrip}>
+            {['', ...lists].map(name => {
+              const count = name ? stocks.filter(s => listsOf(s.ticker).includes(name)).length : stocks.length;
+              const selected = group === name;
+              return (
+                <button key={name || '__all'} type="button" role="tab" aria-selected={selected}
+                  aria-controls="watchlist-panel" tabIndex={selected ? 0 : -1}
+                  className={`watchlist-tab${selected ? ' active' : ''}`} onClick={() => selectGroup(name)}>
+                  {name || 'All'}<span className="watchlist-tab-count">{count}</span>
+                </button>
+              );
+            })}
+          </div>
+          <button type="button" className="watchlist-tab watchlist-tab-new" onClick={() => setNameForm({ mode: 'new', value: '' })}>+ New list</button>
+          {group && (
+            <div className="watchlist-list-tools" role="group" aria-label={`Manage list ${group}`}>
+              <button type="button" className="btn-icon" aria-label="Move list left" title="Move left" disabled={listBusy || lists.indexOf(group) <= 0}
+                onClick={() => moveList(-1)}>◀</button>
+              <button type="button" className="btn-icon" aria-label="Move list right" title="Move right"
+                disabled={listBusy || lists.indexOf(group) >= lists.length - 1} onClick={() => moveList(1)}>▶</button>
+              {group !== 'Main' && <>
+                <button type="button" className="btn-secondary btn-sm" disabled={listBusy} onClick={() => setNameForm({ mode: 'rename', value: group })}>Rename</button>
+                <button type="button" className="btn-secondary btn-sm" disabled={listBusy} onClick={removeList}>Delete list</button>
+              </>}
+            </div>
+          )}
+          {nameForm && (
+            <form className="watchlist-name-form" onSubmit={submitListName}>
+              <label htmlFor="watchlist-list-name">{nameForm.mode === 'new' ? 'New list name' : `Rename "${group}" to`}</label>
+              <input id="watchlist-list-name" className="tool-input" autoFocus maxLength={40} value={nameForm.value}
+                onChange={e => setNameForm(f => ({ ...f, value: e.target.value }))}
+                onKeyDown={e => { if (e.key === 'Escape') setNameForm(null); }} />
+              <button type="submit" className="btn-primary btn-sm" disabled={listBusy || !nameForm.value.trim()}>
+                {nameForm.mode === 'new' ? 'Create' : 'Save name'}</button>
+              <button type="button" className="btn-secondary btn-sm" onClick={() => setNameForm(null)}>Cancel</button>
+            </form>
+          )}
+        </div>
+      )}
+
+      <div id="watchlist-panel" role={isGuest ? undefined : 'tabpanel'} aria-label={isGuest ? undefined : (group || 'All symbols')}>
       {loading && stocks.length === 0 ? (
         <p className="loading-text">Loading watchlist...</p>
       ) : stocks.length === 0 ? (
         <p className="empty-state">Your watchlist is empty. Add tickers above to start tracking.</p>
+      ) : group && sorted.length === 0 ? (
+        <p className="empty-state">No symbols in {group} yet. Add a ticker above while this list is open, or use 🏷️ on any row under All.</p>
       ) : (
         <div className="screener-table-wrap">
           <table className="portfolio-table screener-table watchlist-table">
@@ -465,8 +579,10 @@ function AccountWatchlist({ onSelect, onSignIn, session }) {
                       <td className="screener-sector">{s.sector || '—'}</td>
                       {!isGuest && <td>{earningsCell(s.ticker)}</td>}
                       <td className="action-cell">
+                        {!isGuest && <button className="btn-icon" onClick={() => openLists(s.ticker)}
+                          title="Lists" aria-label={`Lists for ${s.ticker}`} aria-expanded={listPanel === s.ticker}>🏷️</button>}
                         {!isGuest && <button className="btn-icon" onClick={() => openNotes(s.ticker)}
-                          title="List and notes" aria-label={`List and notes for ${s.ticker}`}>📝</button>}
+                          title="Note" aria-label={`Note for ${s.ticker}`} aria-expanded={notePanel === s.ticker}>📝</button>}
                         <button
                           className="btn-icon btn-alert"
                           onClick={() => setAlertPanelTicker(prev => prev === s.ticker ? null : s.ticker)}
@@ -475,28 +591,36 @@ function AccountWatchlist({ onSelect, onSignIn, session }) {
                         <button className="btn-icon btn-remove" onClick={() => handleRemove(s.ticker)} title="Remove">✕</button>
                       </td>
                     </tr>
+                    {listPanel === s.ticker && (
+                      <tr className="alert-panel-row">
+                        <td colSpan={16}>
+                          <div className="watchlist-panel-body">
+                          <fieldset className="watchlist-list-picker" disabled={listBusy}>
+                            <legend>Lists for {s.ticker}</legend>
+                            {lists.map(name => {
+                              const mine = listsOf(s.ticker);
+                              const on = mine.includes(name);
+                              return (
+                                <label key={name} className="watchlist-list-option">
+                                  <input type="checkbox" checked={on} disabled={on && mine.length === 1}
+                                    onChange={() => toggleList(s.ticker, name)} />{name}
+                                </label>
+                              );
+                            })}
+                            <span className="market-sub">Changes save immediately. A symbol stays in at least one list; use + New list to add more.</span>
+                            <button type="button" className="btn-secondary btn-sm" onClick={() => setListPanel(null)}>Done</button>
+                          </fieldset>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
                     {notePanel === s.ticker && (
                       <tr className="alert-panel-row">
                         <td colSpan={16}>
                           <div className="watchlist-note-editor">
-                            <label>Lists (comma-separated)<input className="tool-input" value={draft.lists} maxLength={420}
-                              placeholder="Main"
-                              onChange={e => setDraft(d => ({ ...d, lists: e.target.value }))} /></label>
-                            {groups.length > 0 && <div className="watchlist-list-chips" role="group" aria-label="Existing lists">
-                              {groups.map(name => {
-                                const chosen = draft.lists.split(',').map(n => n.trim().toLowerCase());
-                                const on = chosen.includes(name.toLowerCase());
-                                return <button key={name} type="button" className="btn-secondary btn-sm" aria-pressed={on}
-                                  onClick={() => setDraft(d => {
-                                    const current = d.lists.split(',').map(n => n.trim()).filter(Boolean);
-                                    const next = on ? current.filter(n => n.toLowerCase() !== name.toLowerCase()) : [...current, name];
-                                    return { ...d, lists: next.join(', ') };
-                                  })}>{on ? '✓ ' : '+ '}{name}</button>;
-                              })}
-                            </div>}
-                            <label>Note<textarea className="tool-input" value={draft.note} maxLength={500} rows={2}
-                              onChange={e => setDraft(d => ({ ...d, note: e.target.value }))} /></label>
-                            <button className="btn-primary btn-sm" onClick={() => saveNotes(s.ticker)}>Save</button>
+                            <label>Note<textarea className="tool-input" value={noteDraft} maxLength={500} rows={2}
+                              onChange={e => setNoteDraft(e.target.value)} /></label>
+                            <button className="btn-primary btn-sm" disabled={listBusy} onClick={() => saveNotes(s.ticker)}>Save</button>
                             <button className="btn-secondary btn-sm" onClick={() => setNotePanel(null)}>Cancel</button>
                           </div>
                         </td>
@@ -516,6 +640,7 @@ function AccountWatchlist({ onSelect, onSignIn, session }) {
           </table>
         </div>
       )}
+      </div>
       {loading && stocks.length > 0 && <p className="loading-text" style={{marginTop:'0.5rem'}}>Refreshing...</p>}
     </div>
   );

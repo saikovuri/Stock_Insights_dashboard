@@ -538,6 +538,12 @@ export const searchSymbols = (q, signal) =>
 export const fetchWatchlistItems = () => getJson(`${BASE}/watchlist`, 'Failed to load watchlist', true);
 export const updateWatchlistItem = (ticker, lists, note) =>
   sendJson(`${BASE}/watchlist/${encodeURIComponent(ticker)}`, 'PUT', { lists, note }, 'Failed to save watchlist note');
+export const createWatchlistList = (name) => sendJson(`${BASE}/watchlist/lists`, 'POST', { name }, 'Could not create the list');
+export const renameWatchlistList = (name, next) =>
+  sendJson(`${BASE}/watchlist/lists/${encodeURIComponent(name)}`, 'PUT', { name: next }, 'Could not rename the list');
+export const deleteWatchlistList = (name) =>
+  sendJson(`${BASE}/watchlist/lists/${encodeURIComponent(name)}`, 'DELETE', null, 'Could not delete the list');
+export const reorderWatchlistLists = (names) => sendJson(`${BASE}/watchlist/lists/order`, 'POST', { names }, 'Could not reorder lists');
 export const fetchWatchlistEarnings = () => getJson(`${BASE}/watchlist/earnings`, 'Failed to load earnings dates', true);
 export const fetchWeeklyReview = (refresh = false) =>
   getJson(`${BASE}/weekly-review${refresh ? '?refresh=true' : ''}`, 'Failed to load weekly review', true);
