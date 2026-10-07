@@ -22,6 +22,7 @@ import TabStrip from './TabStrip';
 import Skeleton from './Skeleton';
 import NextSteps from './NextSteps';
 import ExpiryLadder from './ExpiryLadder';
+import { TradingRules, TrimPlanner } from './RiskTools';
 
 const GUEST_HOLDINGS_KEY = 'guest_holdings';
 const usd = (value) => `${value < 0 ? '-' : ''}$${Math.abs(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -41,6 +42,8 @@ export default function Portfolio() {
   const [tab, setTab] = useState('stocks');
   const [section, setSection] = useState('holdings');
   const [insightsTab, setInsightsTab] = useState(null);
+  const [rulesRevision, setRulesRevision] = useState(0);
+  const [trimTicker, setTrimTicker] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [transferRevision, setTransferRevision] = useState(0);
   const [account, setAccountState] = useState(() => localStorage.getItem('portfolio_account') || '');
@@ -386,9 +389,13 @@ export default function Portfolio() {
       {section === 'risk' && <section className="portfolio-section">
         {isGuest ? <p>Sign in to review portfolio risk.</p> : <>
           <h3>Suggested next steps</h3>
-          <NextSteps version={version}
+          <NextSteps version={`${version}:${rulesRevision}`}
             onShowAlerts={() => document.getElementById('position-alerts')?.scrollIntoView({ behavior: 'smooth' })}
-            onShowTax={() => { setInsightsTab('tax'); setSection('performance'); }} />
+            onShowTax={() => { setInsightsTab('tax'); setSection('performance'); }}
+            onTrim={ticker => { setTrimTicker(ticker); setTimeout(() => document.getElementById('trim-planner')?.scrollIntoView({ behavior: 'smooth' }), 0); }} />
+          <details className="risk-tool"><summary><h3>My trading rules</h3></summary><TradingRules onSaved={() => setRulesRevision(value => value + 1)} /></details>
+          <h3 id="trim-planner">Trim planner</h3>
+          <TrimPlanner tickers={[...new Set(holdings.map(item => item.ticker))].sort()} initialTicker={trimTicker} />
           <h3 id="position-alerts">Position alerts</h3><Today version={version} onRepair={repair} onAssign={id => { const option = options.find(item => item.id === id); if (option) handleAssign(option); }} />
           <h3>Earnings exposure</h3><Earnings version={version} />
           <h3>Expiration ladder</h3><ExpiryLadder version={version} />

@@ -507,6 +507,10 @@ export const fetchOptionActions = () => getJson(`${BASE}/portfolio/options/actio
 export const fetchNextSteps = () => getJson(`${BASE}/portfolio/next-steps`, 'Failed to load suggestions', true);
 export const fetchSystemStatus = () => getJson(`${BASE}/status`, 'Failed to load system status', true);
 export const fetchExpiryLadder = () => getJson(`${BASE}/portfolio/expiry-ladder`, 'Failed to load expiration ladder', true);
+export const fetchTradingRules = () => getJson(`${BASE}/rules`, 'Failed to load rules', true);
+export const saveTradingRules = (rules) => sendJson(`${BASE}/rules`, 'PUT', rules, 'Failed to save rules');
+export const fetchTrimPlan = (ticker, target, steps, spacing) =>
+  getJson(`${BASE}/portfolio/trim-plan?ticker=${encodeURIComponent(ticker)}&target=${target}&steps=${steps}&spacing=${spacing}`, 'Failed to plan trim', true);
 export const fetchPortfolioEarnings = () => getJson(`${BASE}/portfolio/earnings`, 'Failed to load earnings', true);
 export const fetchWheelLedger = () => getJson(`${BASE}/portfolio/wheel-ledger`, 'Failed to load wheel ledger', true);
 export const fetchOptionsReview = () => getJson(`${BASE}/portfolio/options/review`, 'Failed to load review', true);

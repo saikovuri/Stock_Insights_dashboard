@@ -4,7 +4,7 @@ import { fetchNextSteps } from '../api/stockApi';
 
 const ICON = { act: '🔴', warn: '⚠️', idea: '💡', info: 'ℹ️' };
 
-export default function NextSteps({ version, onShowAlerts, onShowTax }) {
+export default function NextSteps({ version, onShowAlerts, onShowTax, onTrim }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [open, setOpen] = useState(null);
@@ -27,6 +27,7 @@ export default function NextSteps({ version, onShowAlerts, onShowTax }) {
     if (link.kind === 'alerts') return <button className="link-btn" onClick={onShowAlerts}>See position alerts</button>;
     if (link.kind === 'wheel') return <button className="link-btn" onClick={openWheel}>Open Wheel ideas</button>;
     if (link.kind === 'tax') return <button className="link-btn" onClick={onShowTax}>Open tax check</button>;
+    if (link.kind === 'trim' && onTrim) return <button className="link-btn" onClick={() => onTrim(link.ticker)}>Plan a trim</button>;
     if (link.kind === 'covered_calls') {
       return <button className="link-btn" aria-expanded={open === i} onClick={() => setOpen(open === i ? null : i)}>
         {open === i ? 'Hide covered calls' : 'Show covered calls'}

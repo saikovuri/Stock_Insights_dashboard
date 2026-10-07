@@ -1228,6 +1228,41 @@ def portfolio_option_actions(request: Request, user: dict = Depends(get_current_
         raise _upstream_error(e)
 
 
+class TradingRulesRequest(BaseModel):
+    max_position_pct: Optional[float] = Field(None, ge=1, le=100)
+    min_free_cash_pct: Optional[float] = Field(None, ge=0, le=100)
+    take_profit_pct: Optional[float] = Field(None, ge=1, le=100)
+    no_calls_below_cost: bool = False
+    no_short_through_earnings: bool = False
+
+
+@app.get("/api/rules")
+def trading_rules_get(user: dict = Depends(get_current_user)):
+    import trading_rules
+    return trading_rules.get_rules(int(user["user_id"]))
+
+
+@app.put("/api/rules")
+@limiter.limit("20/minute")
+def trading_rules_put(request: Request, req: TradingRulesRequest, user: dict = Depends(get_current_user)):
+    import trading_rules
+    return trading_rules.save_rules(int(user["user_id"]), req.model_dump())
+
+
+@app.get("/api/portfolio/trim-plan")
+@limiter.limit("20/minute")
+def portfolio_trim_plan(request: Request, ticker: str, target: float = Query(..., ge=1, le=95),
+                        steps: int = Query(4, ge=1, le=12), spacing: float = Query(5.0, ge=0, le=50),
+                        user: dict = Depends(get_current_user)):
+    import trim_plan
+    try:
+        return trim_plan.plan(int(user["user_id"]), _valid_ticker(ticker), target, steps, spacing)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error))
+    except Exception as e:
+        raise _upstream_error(e)
+
+
 @app.get("/api/portfolio/expiry-ladder")
 @limiter.limit("20/minute")
 def portfolio_expiry_ladder(request: Request, user: dict = Depends(get_current_user)):

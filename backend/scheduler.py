@@ -382,6 +382,25 @@ def _run_position_checks() -> None:
                     push_ntfy(get_ntfy_topic(uid), title, a["text"], tags="wrench")
 
 
+def _run_rule_checks() -> None:
+    """Notify users once a day about broken personal trading rules."""
+    import next_steps
+    import options_desk
+    import trading_rules
+    day = datetime.now(ET).date().isoformat()
+    for uid in trading_rules.user_ids():
+        try:
+            items = [i for i in next_steps.build(uid, options_desk.position_actions(uid))["items"] if i["code"].startswith("rule_")]
+        except Exception as e:
+            log.info("Rule check failed for user %s: %s", uid, e)
+            continue
+        for item in items:
+            body = "; ".join(item.get("points") or []) or item["detail"]
+            key = f"rule:{day}:{item['code']}:{item.get('account') or ''}:{item.get('ticker') or ''}"
+            if add_notification(uid, "position", f"📏 {item['title']}", body, key, ticker=item.get("ticker")):
+                push_ntfy(get_ntfy_topic(uid), item["title"], body, tags="straight_ruler")
+
+
 # Read by the Status page: when the loop last ticked, what last ran, and the last failure.
 HEARTBEAT = {"started_at": None, "last_tick": None, "jobs": {}, "last_error": None}
 
@@ -417,6 +436,8 @@ def _loop() -> None:
                 last_positions_day = now.date()
                 _run_position_checks()
                 _ran("position_checks")
+                _run_rule_checks()
+                _ran("rule_checks")
             if now.weekday() < 5 and (now.hour, now.minute) >= (16, 45) and last_settle_day != now.date():
                 last_settle_day = now.date()
                 import track_record

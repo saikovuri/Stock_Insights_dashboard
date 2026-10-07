@@ -312,6 +312,55 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(december["oldest_first"]["lots"][0]["basis"], 500, "the first call already took the oldest lot")
         self.assertEqual(december["oldest_first"]["uncovered_shares"], 100, "only one 100-share lot is left for two contracts")
 
+    def test_personal_rules_are_saved_validated_and_flagged(self):
+        import accounts as accounts_module
+        import next_steps
+        uid = new_user()
+        database.add_user_holding(uid, "AMD", 200, 100, "2026-01-02 00:00:00", account="A")
+        database.add_user_holding(uid, "KO", 100, 60, "2026-01-02 00:00:00", account="A")
+        database.add_user_option(uid, "AMD", "call", 90, "2099-01-15", 3, 1, "short", account="A")
+        database.add_user_option(uid, "KO", "put", 60, "2099-01-15", 1, 1, "short", account="A")
+        accounts_module.set_cash(uid, "A", 7000)
+        with self.as_user(uid):
+            self.assertEqual(self.client.get("/api/rules").json()["max_position_pct"], None)
+            self.assertEqual(self.client.put("/api/rules", json={"max_position_pct": 0}).status_code, 422)
+            saved = self.client.put("/api/rules", json={"max_position_pct": 50, "min_free_cash_pct": 10, "take_profit_pct": 60,
+                                                        "no_calls_below_cost": True, "no_short_through_earnings": True}).json()
+        self.assertEqual(saved["take_profit_pct"], 60)
+        actions = {"positions": [
+            {"id": 1, "ticker": "AMD", "position": "short", "type": "call", "strike": 90, "expiry": "2099-01-15",
+             "profit_captured_pct": 70, "actions": [{"level": "warn", "code": "earnings", "text": "Earnings"}]},
+            {"id": 2, "ticker": "KO", "position": "short", "type": "put", "strike": 60, "expiry": "2099-01-15",
+             "profit_captured_pct": 20, "actions": []}]}
+        quote = lambda t: {"price": {"AMD": 150, "KO": 60}[t]}  # noqa: E731
+        with patch.object(next_steps, "get_quote", side_effect=quote), patch("portfolio_insights.get_quote", side_effect=quote):
+            items = next_steps.build(uid, actions)["items"]
+        codes = {i["code"] for i in items}
+        self.assertTrue({"rule_max_position", "rule_free_cash", "rule_take_profit", "rule_call_below_cost", "rule_earnings"} <= codes)
+        self.assertNotIn("concentration", codes, "a personal limit replaces the default 25% check")
+        self.assertIn("your limit 50%", next(i for i in items if i["code"] == "rule_max_position")["title"])
+        self.assertIn("is 2% of", next(i for i in items if i["code"] == "rule_free_cash")["title"], "(7000-6000)/(7000+36000)")
+
+    def test_trim_plan_sizes_sales_to_target_weight_with_highest_cost_lots_first(self):
+        import trim_plan
+        uid = new_user()
+        database.add_user_holding(uid, "AMD", 100, 50, "2019-01-02 00:00:00")
+        database.add_user_holding(uid, "AMD", 100, 140, (date.today() - timedelta(days=10)).isoformat() + " 00:00:00")
+        database.add_user_holding(uid, "KO", 100, 60, "2026-01-02 00:00:00")
+        with patch.object(trim_plan, "get_quote", side_effect=lambda t: {"price": {"AMD": 150, "KO": 100}[t]}):
+            result = trim_plan.plan(uid, "AMD", 50, steps=2, spacing_pct=10)
+            self.assertEqual(result["current_pct"], 75.0)
+            first, second = result["tranches"]
+            self.assertEqual((first["price"], second["price"]), (150, 165))
+            self.assertEqual(first["shares"], 88.89, "62.5% at $150: keep 0.625*10000/(0.375*150)")
+            self.assertEqual(result["shares_to_sell"], round(200 - 10000 / 165, 2), "50% exactly at the last step's price")
+            self.assertEqual(second["weight_after_pct"], 50.0)
+            self.assertEqual(first["short_term_gain"], round(88.89 * 10, 2), "the $140 lot goes first")
+            self.assertGreater(second["long_term_gain"], 0, "then the 2019 lot")
+            self.assertEqual(trim_plan.plan(uid, "KO", 50)["shares_to_sell"], 0)
+            with self.assertRaises(LookupError):
+                trim_plan.plan(uid, "TSLA", 50)
+
     def test_next_steps_flag_cash_concentration_and_covered_calls(self):
         import accounts as accounts_module
         import next_steps

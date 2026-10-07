@@ -91,7 +91,8 @@ def _covered_call_items(holdings: list[dict], options: list[dict]) -> list[dict]
     return items[:5]
 
 
-def _concentration_items(holdings: list[dict], prices: dict) -> list[dict]:
+def _concentration_items(holdings: list[dict], prices: dict, limit: float | None = None) -> list[dict]:
+    threshold = limit if limit is not None else CONCENTRATION_PCT
     value = defaultdict(float)
     for h in holdings:
         if prices.get(h["ticker"]):
@@ -99,11 +100,13 @@ def _concentration_items(holdings: list[dict], prices: dict) -> list[dict]:
     total = sum(value.values())
     if not total or len(value) < 2:
         return []
-    return [{"level": "warn", "code": "concentration", "ticker": t,
-             "title": f"{t} is {v / total * 100:.0f}% of your stock value",
+    suffix = f" (your limit {limit:g}%)" if limit is not None else ""
+    return [{"level": "warn", "code": "rule_max_position" if limit is not None else "concentration", "ticker": t,
+             "title": f"{'Rule: ' if limit is not None else ''}{t} is {v / total * 100:.0f}% of your stock value{suffix}",
              "detail": f"{_usd(v)} of {_usd(total)}. One stock's move swings the whole portfolio. To reduce it: trim or stop "
-                       "adding, sell covered calls on part of it, or hedge with a protective put or collar."}
-            for t, v in sorted(value.items(), key=lambda kv: -kv[1]) if v / total * 100 > CONCENTRATION_PCT]
+                       "adding, sell covered calls on part of it, or hedge with a protective put or collar. The trim planner below "
+                       "sizes the sales.", "link": {"kind": "trim", "ticker": t}}
+            for t, v in sorted(value.items(), key=lambda kv: -kv[1]) if v / total * 100 > threshold]
 
 
 def _tax_items(holdings: list[dict], prices: dict) -> list[dict]:
@@ -128,10 +131,15 @@ def _tax_items(holdings: list[dict], prices: dict) -> list[dict]:
 
 
 def build(user_id: int, option_actions: dict) -> dict:
+    import trading_rules
     holdings = [h for h in database.get_user_holdings(user_id) if h["shares"] > 0]
     options = database.get_user_options(user_id)
     prices = _prices(sorted({h["ticker"] for h in holdings}))
-    items = (_option_items(option_actions) + _cash_items(user_id) + _concentration_items(holdings, prices)
+    rules = trading_rules.get_rules(user_id)
+    items = (_option_items(option_actions) + _cash_items(user_id)
+             + _concentration_items(holdings, prices, rules.get("max_position_pct"))
+             + trading_rules.violations(rules, holdings, options, prices, option_actions,
+                                        accounts.list_accounts(user_id)["accounts"])
              + _covered_call_items(holdings, options) + _tax_items(holdings, prices))
     items.sort(key=lambda i: LEVELS[i["level"]])
     return {"items": items, "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),

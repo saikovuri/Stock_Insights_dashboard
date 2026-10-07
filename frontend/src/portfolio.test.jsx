@@ -26,6 +26,7 @@ import WheelCycles from './components/WheelCycles';
 import AccountTransfer from './components/AccountTransfer';
 import PnlCalendar, { dailyPnl, compactMoney } from './components/PnlCalendar';
 import ExpiryLadder from './components/ExpiryLadder';
+import { TradingRules, TrimPlanner } from './components/RiskTools';
 
 beforeEach(() => {
   localStorage.clear(); sessionStorage.clear();
@@ -437,6 +438,33 @@ test('expiration ladder shows assignment cash, risk-aware moneyness and the lowe
   expect(inTheMoney.every(element => element.className === 'negative')).toBe(true);
   expect(screen.getByText('out of the money').className).toBe('market-sub');
   expect(screen.getByText(/\(free cash \$5,000\)/)).toBeTruthy();
+});
+
+test('trading rules save blanks as off, and the trim planner shows the sale steps', async () => {
+  vi.spyOn(stockApi, 'fetchTradingRules').mockResolvedValue({ max_position_pct: 30, min_free_cash_pct: null, take_profit_pct: null,
+    no_calls_below_cost: false, no_short_through_earnings: false });
+  const save = vi.spyOn(stockApi, 'saveTradingRules').mockResolvedValue({});
+  const saved = vi.fn();
+  render(<TradingRules onSaved={saved} />);
+  const limit = await screen.findByLabelText('Max % of stock value in one stock');
+  expect(limit.value).toBe('30');
+  fireEvent.change(screen.getByLabelText('Take profit on short options at % of premium captured'), { target: { value: '60' } });
+  fireEvent.click(screen.getByLabelText('Never sell a call below my average cost'));
+  fireEvent.click(screen.getByRole('button', { name: 'Save rules' }));
+  await waitFor(() => expect(save).toHaveBeenCalledWith({ max_position_pct: 30, min_free_cash_pct: null, take_profit_pct: 60,
+    no_calls_below_cost: true, no_short_through_earnings: false }));
+  expect(saved).toHaveBeenCalled();
+  cleanup();
+  const plan = vi.spyOn(stockApi, 'fetchTrimPlan').mockResolvedValue({ ticker: 'AMD', price: 640, shares_held: 600, current_pct: 74,
+    target_pct: 30, shares_to_sell: 380.5, total_proceeds: 260000, total_short_term_gain: 220000, total_long_term_gain: 0, note: 'Plan note.',
+    tranches: [{ step: 1, price: 640, shares: 190.25, proceeds: 121760, covered_call_contracts: 1, short_term_gain: 110000, long_term_gain: 0, weight_after_pct: 61 },
+      { step: 2, price: 672, shares: 190.25, proceeds: 127848, covered_call_contracts: 1, short_term_gain: 110000, long_term_gain: 0, weight_after_pct: 30 }] });
+  render(<TrimPlanner tickers={['AMD', 'KO']} initialTicker="AMD" />);
+  fireEvent.click(screen.getByRole('button', { name: 'Plan trim' }));
+  const table = await screen.findByRole('table', { name: 'Trim steps' });
+  expect(plan).toHaveBeenCalledWith('AMD', 30, 4, 5);
+  expect(within(table).getByText('1 × $672 call')).toBeTruthy();
+  expect(screen.getByText('380.5')).toBeTruthy();
 });
 
 test('editing a stock lot can correct its purchase date', async () => {

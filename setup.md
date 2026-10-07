@@ -299,6 +299,9 @@ The bundled app calls the URL in `VITE_API_URL`, or the fallback in `src/api/con
 | Broker CSV import | `portfolio_insights.py` (`parse_broker_csv`, `parse_activity_csv`, `parse_history_csv`) | `components/PortfolioInsights.jsx` (`ImportCsv`) |
 | Suggested next steps | `next_steps.py` | `components/NextSteps.jsx` |
 | Option alerts, stress test | `options_desk.py` | `components/OptionsDesk.jsx` |
+| Expiration ladder, rules, trim planner | `expiry_ladder.py`, `trading_rules.py`, `trim_plan.py` | `components/ExpiryLadder.jsx`, `RiskTools.jsx` |
+| System status | `system_status.py`, `scheduler.HEARTBEAT` | `components/SystemStatus.jsx` |
+| Journal edge report and P&L calendar | (uses closed-trade APIs) | `components/Journal.jsx`, `PnlCalendar.jsx` |
 | Options math, wheel, covered calls, rolls | `options_analytics.py`, `wheel.py` | `components/WheelIdeas.jsx`, `WheelManager.jsx`, `RollRepair.jsx` |
 | Quotes and market data | `stock_data.py`, `providers.py`, `cache.py` | — |
 | AI | `llm.py`, `ai_brief.py`, `ai_chat.py`, `portfolio_doctor.py` | `components/AiChat.jsx`, `PortfolioDoctor.jsx` |

@@ -700,6 +700,30 @@ The top of Portfolio Risk gathers open issues and opportunities across all accou
 
 Covered-call capacity counts recorded shares per account and does not see shares pledged elsewhere at the broker. Lots dated on the import day make the long-term check wrong until corrected.
 
+### My Trading Rules
+
+Under Suggested next steps, **My trading rules** stores optional personal limits per user. A blank number turns that rule off. Broken rules appear in Suggested next steps as "Rule: …" items. They are also checked once each market day after 10:15 ET, with one deduplicated notification (and ntfy push if configured) per broken rule per day.
+
+| Rule | Broken when |
+| --- | --- |
+| Max % of stock value in one stock (1-100) | A ticker's share of priced stock value exceeds it. This replaces the default 25% concentration check. |
+| Minimum free cash % (0-100) | An account's free cash (cash minus short-put collateral) divided by cash plus its priced stock value is below it. Accounts without an entered cash balance are skipped. |
+| Take profit at % captured (1-100) | A short option's captured premium (from Position alerts' midpoint) reaches it. |
+| Never sell a call below my average cost | A short call's strike is below the average cost of the recorded shares of that ticker in the same account. |
+| No short options through earnings | A short option has an earnings-before-expiry alert. |
+
+Rules are reminders you set for yourself. They do not block trades or change records.
+
+### Trim Planner
+
+The trim planner sizes sales that bring one recorded stock down to a target share (1-95%) of priced stock value. **Plan a trim** on a concentration item opens it for that stock.
+- The sales are split into 1-12 steps at rising prices (today's price, then +step % each). Each step lowers the weight by an equal amount, and the share count is computed at that step's own price, so the last step lands on the target.
+- Each step shows shares, proceeds, realized gain split short-term/long-term (more than 365 days held as of today), and the weight afterwards. It also shows how many whole 100-share covered calls at roughly that price could replace the sale.
+- Gains assume highest-cost lots are sold first across all accounts. Other holdings stay at today's prices and cash is excluded from the weight.
+- Missing quotes for any holding stop the plan rather than understating the weight.
+
+It is arithmetic, not a price forecast: later steps happen only if the stock reaches those prices. Not tax advice.
+
 ### Position Alerts
 
 Open option records are checked individually using the exact contract quote, canonical earnings data and recorded share coverage. Severity order is Act, Warn, Info, then remaining DTE.
