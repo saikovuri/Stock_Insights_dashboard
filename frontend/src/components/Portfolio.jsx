@@ -18,6 +18,7 @@ import CorrelationHeatmap from './CorrelationHeatmap';
 import AccountTransfer from './AccountTransfer';
 import { AccountBar, NavHistory, CorporateActions } from './Accounts';
 import { ClosedStocks, ClosedOptions } from './ClosedHistory';
+import TabStrip from './TabStrip';
 import Skeleton from './Skeleton';
 
 const GUEST_HOLDINGS_KEY = 'guest_holdings';
@@ -368,10 +369,10 @@ export default function Portfolio() {
 
   return (
     <div className="portfolio-workspace">
-      <nav className="sub-tabs" aria-label="Portfolio views">
+      <TabStrip label="Portfolio views" activeKey={section}>
         {[['holdings', 'Holdings'], ['risk', 'Portfolio Risk'], ['performance', 'Income & Performance']].map(([id, label]) =>
           <button key={id} className={`sub-tab ${section === id ? 'active' : ''}`} onClick={() => setSection(id)}>{label}</button>)}
-      </nav>
+      </TabStrip>
       <AccountTransfer onImported={() => { loadStocks(); loadOptions(); loadClosed(); setTransferRevision(value => value + 1); }} />
       {!isGuest && <AccountBar account={account} onChange={setAccount} version={version} />}
       {loadError && <p className="error-text" role="alert">{loadError} <button className="link-btn" onClick={() => { setLoadError(null); loadStocks(); loadOptions(); loadClosed(); }}>Retry</button></p>}

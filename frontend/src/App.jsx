@@ -4,6 +4,7 @@ import { ThemeProvider, useTheme } from './ThemeContext';
 import LoginPage from './components/LoginPage';
 import SearchBar from './components/SearchBar';
 import Skeleton from './components/Skeleton';
+import TabStrip from './components/TabStrip';
 import KeyMetrics from './components/KeyMetrics';
 const PriceChart = lazy(() => import('./components/CandleChart'));
 import NewsSentiment from './components/NewsSentiment';
@@ -236,7 +237,7 @@ function AppShell() {
             {ticker && metrics && (
               <>
                 {/* ── Sub-tab navigation (ordered by trading style) ── */}
-                <nav className="sub-tabs">
+                <TabStrip label="Stock views" activeKey={subTab}>
                   {config.subTabs.map(id => ({ id, label: SUB_TAB_LABELS[id] })).map(t => (
                     <button
                       key={t.id}
@@ -244,7 +245,7 @@ function AppShell() {
                       onClick={() => setSubTab(t.id)}
                     >{t.label}</button>
                   ))}
-                </nav>
+                </TabStrip>
 
                 {/* ── Overview ────────────────────────────────── */}
                 {subTab === 'overview' && (

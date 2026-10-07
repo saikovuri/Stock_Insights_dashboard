@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import TabStrip from './TabStrip';
 import { ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid } from 'recharts';
 import CorrelationHeatmap from './CorrelationHeatmap';
 import Accounting from './Accounting';
@@ -248,11 +249,11 @@ export default function PortfolioInsights({ tickers, version, onImported }) {
   const [tab, setTab] = useState('combined');
   return (
     <div className="card portfolio-insights">
-      <nav className="sub-tabs">
+      <TabStrip label="Income and performance views" activeKey={tab}>
         {TABS.map(([id, label]) => (
           <button key={id} className={`sub-tab ${tab === id ? 'active' : ''}`} onClick={() => setTab(id)}>{label}</button>
         ))}
-      </nav>
+      </TabStrip>
       {tab === 'combined' && <Ledger version={version} />}
       {tab === 'accounting' && <Accounting version={version} />}
       {tab === 'income' && <PremiumIncome version={version} />}

@@ -296,7 +296,7 @@ test('journal review and explicit wheel cycles work on desktop and mobile', asyn
     return route.fulfill({ json: { id: 63 } });
   });
   await page.goto('/#journal');
-  await expect(page.getByRole('cell', { name: 'Captured: 75.0%' })).toBeAttached();
+  await expect(page.getByRole('table', { name: 'Recorded trades' }).getByText('75.0%', { exact: true })).toBeAttached();
   await page.getByRole('button', { name: 'Review AAPL trade 12' }).click();
   const dialog = page.getByRole('dialog', { name: 'Review AAPL closed trade' });
   await expect(dialog).toBeVisible();
@@ -310,7 +310,7 @@ test('journal review and explicit wheel cycles work on desktop and mobile', asyn
   await dialog.getByRole('button', { name: 'Save review' }).click();
   await expect(dialog).toHaveCount(0);
   expect(submissions[1]).toEqual(submissions[0]);
-  await expect(page.getByRole('cell', { name: '+25.0 pp' })).toBeAttached();
+  await expect(page.getByRole('table', { name: 'Recorded trades' }).getByText('+25.0 pp', { exact: true })).toBeAttached();
   await expect(page.getByRole('cell', { name: 'Profit target' })).toBeAttached();
   await page.getByRole('button', { name: 'Review AAPL trade 12' }).click();
   await expect(dialog.getByLabel('Target capture (%)')).toHaveValue('50');
@@ -339,7 +339,7 @@ test('journal review and explicit wheel cycles work on desktop and mobile', asyn
 test('journal keeps planning in one on-demand dialog across review tabs', async ({ page }, testInfo) => {
   await page.goto('/#journal');
   await expect(page.getByRole('button', { name: 'Trade history', exact: true })).toBeVisible();
-  await expect(page.getByRole('cell', { name: 'MSFT', exact: true })).toBeVisible();
+  await expect(page.getByRole('table', { name: 'Recorded trades' }).getByText('MSFT', { exact: true })).toBeVisible();
   const planner = page.getByRole('dialog', { name: 'Plan a trade', exact: true });
   const launch = page.getByRole('button', { name: 'Plan a trade', exact: true });
   for (const tab of ['Trade history', 'Manual journal', 'Options review', 'Wheel cycles']) {
@@ -430,11 +430,11 @@ test('journal records historical options with fees and safe retry', async ({ pag
   await expect(page.getByRole('status')).toHaveText('WDC closed option recorded.');
   expect(submissions).toHaveLength(2);
   expect(submissions[1]).toEqual(submissions[0]);
-  await expect(page.getByRole('cell', { name: 'WDC', exact: true })).toHaveCount(1);
-  await expect(page.getByRole('table', { name: 'Recorded trades' }).getByRole('cell', { name: '$83.7', exact: true })).toBeAttached();
+  await expect(page.getByRole('table', { name: 'Recorded trades' }).getByText('WDC', { exact: true })).toHaveCount(1);
+  await expect(page.getByRole('table', { name: 'Recorded trades' }).getByText('$83.7', { exact: true })).toBeAttached();
   await page.getByRole('button', { name: 'Trade history', exact: true }).click();
-  await expect(page.getByRole('cell', { name: 'WDC', exact: true })).toHaveCount(1);
-  await expect(page.getByRole('cell', { name: '2025-09-10', exact: true })).toBeAttached();
+  await expect(page.getByRole('table', { name: 'Recorded trades' }).getByText('WDC', { exact: true })).toHaveCount(1);
+  await expect(page.getByRole('table', { name: 'Recorded trades' }).getByText(/→ Sep 10, 2025/)).toBeAttached();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath('closed-option-history.png'), fullPage: true });
   await page.getByRole('button', { name: 'Options review', exact: true }).click();
@@ -454,8 +454,8 @@ test('journal records historical options with fees and safe retry', async ({ pag
   await form.getByLabel('Closed on', { exact: true }).fill('2025-09-11');
   await form.getByRole('button', { name: 'Save option changes', exact: true }).click();
   await expect(page.getByRole('status')).toHaveText('WDC closed option updated.');
-  await expect(page.getByRole('cell', { name: 'WDC', exact: true })).toHaveCount(1);
-  await expect(page.getByRole('table', { name: 'Recorded trades' }).getByRole('cell', { name: '$92.5', exact: true })).toBeAttached();
+  await expect(page.getByRole('table', { name: 'Recorded trades' }).getByText('WDC', { exact: true })).toHaveCount(1);
+  await expect(page.getByRole('table', { name: 'Recorded trades' }).getByText('$92.5', { exact: true })).toBeAttached();
   await page.locator('.closed-option-journal').screenshot({ path: testInfo.outputPath('option-edit-actions.png') });
   page.once('dialog', dialog => dialog.dismiss());
   await page.getByRole('button', { name: 'Delete WDC option', exact: true }).click();
@@ -465,8 +465,8 @@ test('journal records historical options with fees and safe retry', async ({ pag
   await expect(page.getByRole('status')).toHaveText('WDC closed option deleted.');
   await expect(page.getByText('No closed options recorded.', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Trade history', exact: true }).click();
-  await expect(page.getByRole('cell', { name: 'MSFT', exact: true })).toBeVisible();
-  await expect(page.getByRole('cell', { name: 'WDC', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('table', { name: 'Recorded trades' }).getByText('MSFT', { exact: true })).toBeVisible();
+  await expect(page.getByRole('table', { name: 'Recorded trades' }).getByText('WDC', { exact: true })).toHaveCount(0);
 });
 
 test('guest journal can open the planner without signing in', async ({ page }) => {
@@ -706,4 +706,30 @@ test('watchlist list tabs, list picker and new-list form fit the viewport', asyn
   await expect(tabs.getByRole('tab', { name: /Earnings this week/ })).toBeInViewport();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
   await page.locator('.watchlist-tabs-bar').screenshot({ path: testInfo.outputPath('watchlist-tabs.png') });
+});
+
+test('sub-tab strips hide the scrollbar and reveal overflowing tabs', async ({ page }, testInfo) => {
+  const mobile = testInfo.project.name === 'mobile';
+  if (!mobile) await page.setViewportSize({ width: 1024, height: 800 });
+  await page.goto('/#ideas');
+  const nav = page.getByRole('navigation', { name: 'Ideas views' });
+  const last = nav.getByRole('button', { name: /Options track record/ });
+  if (mobile) {
+    expect(await nav.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+    await expect(last).toBeInViewport({ ratio: 1 });
+    await expect(page.locator('.tab-strip-arrow')).toHaveCount(0);
+    return;
+  }
+  expect(await nav.evaluate(element => getComputedStyle(element).scrollbarWidth)).toBe('none');
+  await expect(page.locator('.tab-strip-arrow.right')).toBeVisible();
+  await expect(page.locator('.tab-strip-arrow.left')).toHaveCount(0);
+  await page.locator('.tab-strip-arrow.right').click();
+  await expect(page.locator('.tab-strip-arrow.left')).toBeVisible();
+  await last.click();
+  await expect(last).toHaveClass(/active/);
+  await expect.poll(async () => {
+    const [box, strip] = await Promise.all([last.boundingBox(), nav.boundingBox()]);
+    return box.x >= strip.x && box.x + box.width <= strip.x + strip.width + 1;
+  }).toBe(true);
+  await page.locator('.tab-strip').first().screenshot({ path: testInfo.outputPath('tab-strip.png') });
 });

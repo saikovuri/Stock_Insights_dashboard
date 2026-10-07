@@ -51,7 +51,7 @@ An absent candidate does not necessarily mean a bad investment. It can mean miss
 | Portfolio | Recorded holdings and options, account risks, income/performance, and the account ledger. |
 | Journal | Separate recorded trading history from manually written trade plans and reviews. |
 
-The Dashboard has Overview, Analysis, Fundamentals, and News subtabs. The trading-style selector changes defaults, ordering, and visibility; it is not an account risk limit. Sign-in enables account-specific features. Theme controls affect appearance only. Older `#setups`, `#screener`, and `#tools` links route to Ideas, Watchlist, and Journal respectively.
+The Dashboard has Overview, Analysis, Fundamentals, and News subtabs. When a row of subtabs is wider than the screen, it scrolls sideways without a scrollbar: fades and ‹ › arrows mark hidden tabs, and the selected tab scrolls into view. On phones the subtabs wrap into a grid instead. The trading-style selector changes defaults, ordering, and visibility; it is not an account risk limit. Sign-in enables account-specific features. Theme controls affect appearance only. Older `#setups`, `#screener`, and `#tools` links route to Ideas, Watchlist, and Journal respectively.
 
 Source: [frontend/src/App.jsx](frontend/src/App.jsx).
 
@@ -854,6 +854,18 @@ Combines recorded closed stock and option records, sorted by closing timestamp d
 
 Gross/net P&L values, capture/return percentages and the gross realized total are green for profit, red for loss, and neutral for zero. The same value coloring applies to the recorded closed-options table in Manual journal. These colors do not change calculations or deduct fees from gross P&L.
 
+The table has one row per closing record with seven columns:
+
+- **Trade:** ticker, a side badge (short/long put/call or stock), strike, expiry and size, and the brokerage account when it is not Default.
+- **Dates:** opened → closed, with days held and DTE left at the close underneath.
+- **Premium / price:** opening → closing premium for options, or buy → sell price for stocks.
+- **Captured / return:** for options, a progress bar; when a short option has a review target, a marker on the bar shows the target, with the gap in percentage points underneath. For stocks, the recorded return.
+- **Exit reason**
+- **Net P&L:** net, with gross and recorded fees underneath. Rows without a recorded net show gross only.
+- **Actions:** Review, plus edit, delete and Notes where available.
+
+Missing values show a muted dash; hover it for the reason. Filter by ticker or by All / Options / Stocks; the table shows 25 trades at a time, with **Show more** for the rest. Statistics and groupings above the table always cover every recorded trade, not just the filtered rows. On phones each trade becomes a card instead of a sideways-scrolling row.
+
 | Recorded metric | Rule |
 | --- | --- |
 | Short-option premium captured | `(opening premium - closing premium) / opening premium * 100`, before fees. $2 opened and $0.50 closed is 75%; $3 closed is -50%. |
@@ -869,7 +881,7 @@ The recorded-option summary shows sample count, net P&L, net expectancy per clos
 
 **Option results by** repeats those statistics per group, chosen with **Group by**: Strategy (short/long put/call), Ticker, Closing month, Exit reason (reviews; otherwise Not recorded) or Account. Groups sort by net P&L, or newest month first. Groups with fewer than 10 closes are flagged as too small to show a reliable edge. Manual stock-journal entries keep their separate per-setup breakdown.
 
-**Review trade** in the Actions column opens a nonfinancial review dialog for an owned closed stock or option record with a ledger reference. Choose profit target, stop/risk limit, expiry, assignment, roll, discretionary exit, other, or leave the reason unrecorded. Short options additionally accept an optional capture target. Review notes are limited to 500 characters. Targets and exit reasons are self-reported after the trade; they are not verified pre-trade plans and do not execute any trade workflow.
+**Review** in the last column opens a nonfinancial review dialog for an owned closed stock or option record with a ledger reference. Choose profit target, stop/risk limit, expiry, assignment, roll, discretionary exit, other, or leave the reason unrecorded. Short options additionally accept an optional capture target. Review notes are limited to 500 characters. Targets and exit reasons are self-reported after the trade; they are not verified pre-trade plans and do not execute any trade workflow.
 
 Saving appends an audited review and records the server timestamp, without changing fills, fees or P&L. The latest active review is shown; revisions remain in Account ledger and can be reversed there. Clearing a field saves it as unrecorded. Unchanged retries reuse the same request key. Close/Escape discards the unsaved review draft; dismissal is disabled during save. Notes expose the latest review and its recorded-at timestamp.
 

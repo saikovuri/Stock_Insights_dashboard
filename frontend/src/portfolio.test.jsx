@@ -126,10 +126,16 @@ test('journal review saves retrospective targets without changing fills and retr
   expect(first).toMatchObject({ kind: 'review', event_id: 42, target_capture_pct: 50, exit_reason: 'profit_target', note: 'Closed early' });
   fetch.mockResolvedValue({ trades: [{ ...trade, review: { review_id: 51, target_capture_pct: 50, exit_reason: 'profit_target', review_note: 'Closed early' } }] });
   fireEvent.click(within(dialog).getByRole('button', { name: 'Save review' }));
-  await screen.findByRole('cell', { name: '+25.0 pp' });
+  await screen.findByText('+25.0 pp');
   expect(save.mock.calls[1][0]).toEqual(first);
   expect(fills).not.toHaveBeenCalled();
-  expect(screen.getByRole('cell', { name: 'Captured: 75.0%' })).toBeTruthy();
+  const table = screen.getByRole('table', { name: 'Recorded trades' });
+  expect(within(table).getByText('75.0%')).toBeTruthy();
+  expect(within(table).getByText('Target 50.0% ·', { exact: false })).toBeTruthy();
+  expect(within(table).getByRole('cell', { name: 'Profit target' })).toBeTruthy();
+  expect(within(table).getByText('Sep 1, 2025 → Sep 10, 2025', { exact: false })).toBeTruthy();
+  expect(within(table).getByText('9d held · 9 DTE left')).toBeTruthy();
+  expect(within(table).getByText('Gross $150 · fees $2')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Review AAPL trade 12' }));
   expect(screen.getByLabelText('Target capture (%)').value).toBe('50');
   expect(screen.getByLabelText('Review notes').value).toBe('Closed early');
@@ -282,7 +288,7 @@ test.each([
   vi.spyOn(stockApi, 'fetchClosedTrades').mockResolvedValue({ trades: kind === 'stock' ? [trade] : [] });
   vi.spyOn(stockApi, 'fetchClosedOptions').mockResolvedValue({ trades: kind === 'option' ? [trade] : [] });
   render(<Journal />);
-  const cell = await screen.findByRole('cell', { name: formatted, exact: true });
+  const cell = await within(await screen.findByRole('table', { name: 'Recorded trades' })).findByText(formatted, { exact: true, selector: '.trade-pnl strong' });
   expect(cell.className).toBe(color);
   const total = screen.getByText('Gross realized P&L:').querySelector('span');
   expect(total.className).toBe(color);
@@ -387,7 +393,7 @@ test('closed option journal previews net profit and retries the same canonical e
   expect(log.mock.calls[1][0]).toEqual(first);
   expect(stockJournal).not.toHaveBeenCalled();
   await screen.findByText('WDC');
-  expect(within(screen.getByRole('table', { name: 'Recorded trades' })).getByRole('cell', { name: '$83.7', exact: true })).toBeTruthy();
+  expect(within(screen.getByRole('table', { name: 'Recorded trades' })).getByText('$83.7', { exact: true })).toBeTruthy();
 });
 
 test('manual option corrections prefill the trade, retry updates and confirm deletion', async () => {
@@ -415,7 +421,7 @@ test('manual option corrections prefill the trade, retry updates and confirm del
   expect(update.mock.calls[0][0]).toBe(12);
   expect(update.mock.calls[1]).toEqual(update.mock.calls[0]);
   expect(create).toHaveBeenCalledTimes(1);
-  await within(await screen.findByRole('table', { name: 'Recorded trades' })).findByRole('cell', { name: '$92.5', exact: true });
+  await within(await screen.findByRole('table', { name: 'Recorded trades' })).findByText('$92.5', { exact: true });
   const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
   fireEvent.click(screen.getByRole('button', { name: 'Delete WDC option' }));
   expect(remove).not.toHaveBeenCalled();

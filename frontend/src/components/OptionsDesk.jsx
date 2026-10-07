@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import TabStrip from './TabStrip';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, Legend, CartesianGrid, ReferenceLine, ComposedChart, Bar } from 'recharts';
 import {
   fetchOptionActions, fetchPortfolioEarnings, fetchWheelLedger, fetchOptionsReview, fetchOptionsCoach,
@@ -360,11 +361,11 @@ export default function OptionsDesk({ options, holdings, closedCount, onRepair, 
   const version = JSON.stringify([options, holdings, closedCount]);
   return (
     <div className="card portfolio-insights">
-      <nav className="sub-tabs">
+      <TabStrip label="Options desk views" activeKey={tab}>
         {TABS.map(([id, label]) => (
           <button key={id} className={`sub-tab ${tab === id ? 'active' : ''}`} onClick={() => setTab(id)}>{label}</button>
         ))}
-      </nav>
+      </TabStrip>
       {tab === 'today' && <Today version={version} onRepair={onRepair} onAssign={onAssign} />}
       {tab === 'income' && <PremiumIncome version={version} />}
       {tab === 'earnings' && <Earnings version={version} />}

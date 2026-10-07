@@ -4637,6 +4637,23 @@ button.signal-chip { cursor: pointer; }
 
 /* ── v4: ideas, options hub, portfolio insights, thesis ────────── */
 .sub-tabs { overflow-x: auto; scrollbar-width: thin; }
+.tab-strip { position: relative; margin-bottom: 1.25rem; }
+.tab-strip > .sub-tabs { margin-bottom: 0; position: relative; scrollbar-width: none; }
+.tab-strip > .sub-tabs::-webkit-scrollbar { display: none; }
+.tab-strip.fade-left::before, .tab-strip.fade-right::after {
+  content: ''; position: absolute; top: 1px; bottom: 1px; width: 56px; z-index: 1; pointer-events: none;
+}
+.tab-strip.fade-left::before { left: 1px; border-radius: var(--radius) 0 0 var(--radius); background: linear-gradient(to right, var(--bg) 35%, transparent); }
+.tab-strip.fade-right::after { right: 1px; border-radius: 0 var(--radius) var(--radius) 0; background: linear-gradient(to left, var(--bg) 35%, transparent); }
+.tab-strip-arrow {
+  position: absolute; top: 50%; z-index: 2; transform: translateY(-50%); width: 28px; height: 28px; padding: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 1.15rem; line-height: 1; cursor: pointer;
+  color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 50%;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+.tab-strip-arrow:hover { border-color: var(--accent); color: var(--accent); }
+.tab-strip-arrow.left { left: 6px; }
+.tab-strip-arrow.right { right: 6px; }
 .link-btn {
   background: none; border: none; padding: 0; color: var(--accent); cursor: pointer; font: inherit;
 }
@@ -4785,6 +4802,65 @@ button.signal-chip { cursor: pointer; }
 .closed-option-actions { white-space: nowrap; }
 .closed-option-actions .btn-icon { width: 32px; height: 32px; }
 .closed-option-notes { min-width: 12ch; max-width: 30ch; white-space: normal; overflow-wrap: anywhere; }
+
+/* ── Journal trade history ── */
+.trade-history-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; margin: 0.75rem 0 0.5rem; }
+.trade-history-toolbar input[type="search"] { width: 11rem; max-width: 100%; }
+.trade-history-kinds { display: flex; gap: 0.3rem; }
+.trade-history-table td { vertical-align: top; padding-top: 0.6rem; padding-bottom: 0.6rem; }
+.portfolio-workspace .table-scroll > .trade-history-table { display: table; width: 100%; overflow: visible; }
+.trade-history-table tbody tr:hover { background: var(--surface-hover); }
+.trade-history-table .nowrap { white-space: nowrap; }
+.trade-cell { min-width: 11rem; }
+.trade-cell strong { font-size: 0.95rem; margin-right: 0.4rem; }
+.trade-badge {
+  display: inline-block; padding: 0.05rem 0.45rem; border-radius: 999px; font-size: 0.7rem; font-weight: 600;
+  text-transform: capitalize; vertical-align: middle; border: 1px solid var(--border); color: var(--text-secondary);
+}
+.trade-badge.trade-short { color: var(--positive); border-color: var(--positive); background: var(--positive-soft); }
+.trade-badge.trade-long { color: var(--accent); border-color: var(--accent); }
+.trade-sub { display: block; margin-top: 0.2rem; font-size: 0.75rem; color: var(--text-muted); white-space: nowrap; }
+.capture-cell { min-width: 8.5rem; }
+.capture-cell small { color: var(--text-muted); }
+.capture-bar { position: relative; display: block; width: 7.5rem; height: 5px; margin-top: 0.3rem; border-radius: 3px; background: var(--border); }
+.capture-bar > span { display: block; height: 100%; border-radius: 3px; background: var(--positive); }
+.capture-bar > span.negative-fill { background: var(--negative); }
+.capture-bar > i { position: absolute; top: -3px; width: 2px; height: 11px; margin-left: -1px; background: var(--text); border-radius: 1px; }
+.trade-pnl strong { font-size: 0.95rem; }
+.trade-history-table .closed-option-actions { text-align: right; }
+.trade-history-table .closed-option-actions .closed-option-notes { margin-top: 0.3rem; text-align: left; margin-left: auto; }
+.muted-dash { color: var(--text-muted); }
+.trade-history-more { display: block; margin: 0.6rem auto 0; }
+
+@media (max-width: 600px) {
+  /* Trade history becomes one card per trade instead of a sideways-scrolling table */
+  .table-scroll > .trade-history-table, .portfolio-workspace .table-scroll > .trade-history-table,
+  .trade-history-table tbody { display: block; width: 100%; }
+  .trade-history-table thead { display: none; }
+  .trade-history-table tr {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.45rem 0.75rem; margin-bottom: 0.55rem;
+    grid-template-areas: "trade pnl" "dates dates" "premium exit" "capture capture" "actions actions";
+    padding: 0.7rem 0.8rem; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-subtle);
+  }
+  .table-scroll .trade-history-table tr > td {
+    display: block; position: static; padding: 0; border: none; background: none; box-shadow: none; min-width: 0; white-space: normal;
+  }
+  .trade-history-table td:nth-child(1) { grid-area: trade; }
+  .trade-history-table td:nth-child(2) { grid-area: dates; }
+  .trade-history-table td:nth-child(3) { grid-area: premium; }
+  .trade-history-table td:nth-child(4) { grid-area: capture; }
+  .trade-history-table td:nth-child(5) { grid-area: exit; text-align: right; }
+  .trade-history-table td:nth-child(6) { grid-area: pnl; text-align: right; }
+  .trade-history-table td:nth-child(7) { grid-area: actions; display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; text-align: left; }
+  .trade-history-table td[data-label]::before {
+    content: attr(data-label); display: block; font-size: 0.65rem; font-weight: 600; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 0.1rem;
+  }
+  .trade-history-table td:nth-child(2)::before { display: none; }
+  .trade-history-table .trade-sub { white-space: normal; }
+  .trade-history-table .capture-bar { width: 100%; }
+  .trade-history-table .closed-option-actions .closed-option-notes { margin: 0; flex-basis: 100%; }
+}
 
 .raw-statements { margin-bottom: 1.25rem; }
 .raw-statements > summary {

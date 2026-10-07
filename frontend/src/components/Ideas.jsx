@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import TabStrip from './TabStrip';
 import SetupScanner from './SetupScanner';
 import EconomicCalendar from './EconomicCalendar';
 import InPlay from './InPlay';
@@ -241,11 +242,11 @@ export default function Ideas({ onSelect }) {
   const choose = t => { setTab(t); sessionStorage.setItem('ideas_tab', t); };
   return (
     <div className="ideas-page">
-      <nav className="sub-tabs">
+      <TabStrip label="Ideas views" activeKey={tab}>
         {TABS.map(([id, label]) => (
           <button key={id} className={`sub-tab ${tab === id ? 'active' : ''}`} onClick={() => choose(id)}>{label}</button>
         ))}
-      </nav>
+      </TabStrip>
       {tab === 'inplay' && <><InPlay onSelect={onSelect} /><MarketContext key="attention" kind="attention" onSelect={onSelect} /></>}
       {tab === 'setups' && <SetupScanner onSelect={onSelect} />}
       {tab === 'wheel' && <WheelIdeas onSelect={onSelect} />}

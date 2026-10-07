@@ -7,6 +7,7 @@ import { Review } from './OptionsDesk';
 import WheelCycles from './WheelCycles';
 import AccountTransfer from './AccountTransfer';
 import Skeleton from './Skeleton';
+import TabStrip from './TabStrip';
 import {
   fetchJournal, addJournalEntry, updateJournalEntry, deleteJournalEntry, fetchJournalCoach, fetchClosedTrades, fetchClosedOptions, logClosedOption, updateClosedOption, deleteClosedOption,
   recordAccountingEntry,
@@ -26,6 +27,18 @@ const percent = value => value == null ? 'Unavailable' : `${value.toFixed(1)}%`;
 const pnlClass = value => value > 0 ? 'positive' : value < 0 ? 'negative' : '';
 const EXIT_REASONS = { profit_target: 'Profit target', stop: 'Stop / risk limit', expiry: 'Expiry', assignment: 'Assignment',
   roll: 'Roll', discretionary: 'Discretionary exit', other: 'Other' };
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const PAGE = 25;
+
+function shortDate(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value ?? '').slice(0, 10));
+  if (!match) return null;
+  const label = `${MONTHS[Number(match[2]) - 1]} ${Number(match[3])}`;
+  return match[1] === String(new Date().getFullYear()) ? label : `${label}, ${match[1]}`;
+}
+
+const Missing = ({ reason }) => <span className="muted-dash" title={reason}>—<span className="sr-only">{reason}</span></span>;
+const barWidth = value => `${Math.max(0, Math.min(100, value))}%`;
 
 function calendarDays(start, end) {
   const parse = value => {
@@ -193,6 +206,9 @@ function RecordedHistory({ optionsOnly = false, version = 0, onEdit, onDelete, b
   const [rows, setRows] = useState(null);
   const [error, setError] = useState(null);
   const [reviewTrade, setReviewTrade] = useState(null);
+  const [query, setQuery] = useState('');
+  const [kind, setKind] = useState('all');
+  const [limit, setLimit] = useState(PAGE);
   const [revision, setRevision] = useState(0);
   const [saved, setSaved] = useState(null);
   useEffect(() => {
@@ -211,6 +227,10 @@ function RecordedHistory({ optionsOnly = false, version = 0, onEdit, onDelete, b
   if (!rows.length) return <p className="empty-state">{optionsOnly ? 'No closed options recorded.' : 'No closed stock or option trades recorded.'}</p>;
   const grossTotal = rows.reduce((total, row) => total + row.pnl, 0);
   const stats = recordedOptionStats(rows);
+  const search = query.trim().toUpperCase();
+  const filtered = rows.filter(row => (kind === 'all' || (kind === 'options') === row.key.startsWith('option:'))
+    && (!search || row.ticker.toUpperCase().includes(search)));
+  const visible = filtered.slice(0, limit);
   return <section className="portfolio-section">
     <h3>{optionsOnly ? 'Recorded closed options' : 'Recorded stock and option trades'}</h3>
     {saved && <p className="positive" role="status">{saved}</p>}
@@ -227,27 +247,63 @@ function RecordedHistory({ optionsOnly = false, version = 0, onEdit, onDelete, b
     <p className="market-sub">Capture and return percentages are before fees and measure the option only, not return on collateral or a full wheel cycle.
       Net statistics include recorded fees only; each closing record counts once, including partial closes. Past averages are not forecasts.</p>
     <GroupedOptionStats rows={rows} />
-    <div className="table-scroll"><table className="market-table" aria-label="Recorded trades">
-      <thead><tr><th>Actions</th><th>Opened</th><th>Closed</th><th>Ticker</th><th>Position</th><th>Quantity</th><th>Open / close premium</th><th>Captured / return %</th><th>Target capture</th><th>Actual vs target</th><th>Exit reason</th><th>Days held</th><th>DTE at close</th><th>Gross P&L</th><th>Recorded fees</th><th>Net P&L</th><th>Notes</th></tr></thead>
-      <tbody>{rows.map(row => { const metrics = recordedTradeMetrics(row); return <tr key={row.key}>
-        <td className="closed-option-actions">
-          <button className="btn-icon" type="button" title="Review trade" aria-label={`Review ${row.ticker} trade ${row.id}`}
-            disabled={busy || !row.ledger_event_id} onClick={() => { setSaved(null); setReviewTrade(row); }}>✎</button>
-          {onEdit && row.is_manual && <>
-          <button className="btn-icon" type="button" title="Edit manual option" aria-label={`Edit ${row.ticker} option`} disabled={busy} onClick={() => onEdit(row)}>✎</button>
-          <button className="btn-icon" type="button" title="Delete manual option" aria-label={`Delete ${row.ticker} option`} disabled={busy} onClick={() => onDelete(row)}>🗑</button>
-        </>}</td>
-        <td>{row.opened_at || row.acquired_at || '—'}</td><td>{String(row.closed_at).slice(0, 10)}</td><td>{row.ticker}</td><td>{row.kind}</td><td>{row.quantity}</td>
-        <td>{row.open_premium == null ? '—' : `${money(row.open_premium)} / ${money(row.close_premium)}`}</td>
-        <td className={pnlClass(metrics.capture)}>{metrics.option ? `${metrics.label}: ${percent(metrics.capture)}` : 'Not applicable'}</td>
-        <td>{metrics.target == null ? 'Unavailable' : <>{percent(metrics.target)}<small className="journal-review-meta">Retrospective</small></>}</td>
-        <td>{metrics.targetGap == null ? 'Unavailable' : `${metrics.targetGap > 0 ? '+' : ''}${metrics.targetGap.toFixed(1)} pp`}</td>
-        <td>{EXIT_REASONS[row.review?.exit_reason] || 'Not recorded'}</td>
-        <td>{metrics.daysHeld ?? 'Unavailable'}</td><td>{metrics.option ? metrics.dteAtClose ?? 'Unavailable' : 'Not applicable'}</td>
-        <td className={row.pnl > 0 ? 'positive' : row.pnl < 0 ? 'negative' : ''}>{money(row.pnl)}</td><td>{money(row.fees)}</td><td className={pnlClass(row.net_pnl)}>{money(row.net_pnl)}</td>
-        <td>{(row.notes || row.review) && <details className="closed-option-notes"><summary>Notes</summary>{row.notes && <p>{row.notes}</p>}
-          {row.review && <><p>{row.review.review_note || 'No review notes.'}</p><small>Review recorded {row.review.review_recorded_at}</small></>}</details>}</td></tr>; })}</tbody>
+    <div className="trade-history-toolbar">
+      <input className="tool-input" type="search" aria-label="Filter by ticker" placeholder="Filter by ticker" maxLength={12}
+        value={query} onChange={event => { setQuery(event.target.value); setLimit(PAGE); }} />
+      {!optionsOnly && <div className="trade-history-kinds" role="group" aria-label="Trade type">
+        {[['all', 'All'], ['options', 'Options'], ['stocks', 'Stocks']].map(([value, label]) =>
+          <button key={value} type="button" className={`watchlist-tab${kind === value ? ' active' : ''}`} aria-pressed={kind === value}
+            onClick={() => { setKind(value); setLimit(PAGE); }}>{label}</button>)}
+      </div>}
+      <span className="market-sub">{filtered.length === rows.length ? `${rows.length} trades` : `${filtered.length} of ${rows.length} trades`}</span>
+    </div>
+    {!filtered.length ? <p className="empty-state">No recorded trades match this filter.</p> : <>
+    <div className="table-scroll"><table className="market-table trade-history-table" aria-label="Recorded trades">
+      <thead><tr><th>Trade</th><th>Dates</th><th>Premium / price</th><th>Captured / return</th><th>Exit reason</th><th>Net P&L</th><th><span className="sr-only">Actions</span></th></tr></thead>
+      <tbody>{visible.map(row => {
+        const metrics = recordedTradeMetrics(row);
+        const opened = shortDate(row.opened_at || row.acquired_at);
+        const closed = shortDate(row.closed_at);
+        const timing = [metrics.daysHeld != null && `${metrics.daysHeld}d held`,
+          metrics.option && metrics.dteAtClose != null && `${metrics.dteAtClose} DTE left`].filter(Boolean).join(' · ');
+        const size = metrics.option ? `${row.quantity} contract${row.quantity === 1 ? '' : 's'}` : `${row.quantity} shares`;
+        const stockReturn = !metrics.option && finiteNumber(row.pnl_pct) ? Number(row.pnl_pct) : null;
+        return <tr key={row.key}>
+          <td className="trade-cell"><strong>{row.ticker}</strong>
+            <span className={`trade-badge trade-${metrics.option ? row.position : 'stock'}`}>{metrics.option ? `${row.position} ${row.option_type}` : 'stock'}</span>
+            {row.account && row.account !== 'Default' && <span className="account-badge">{row.account}</span>}
+            <span className="trade-sub">{metrics.option ? `$${row.strike} · exp ${shortDate(row.expiry) || row.expiry} · ` : ''}{size}</span></td>
+          <td className="nowrap" data-label="Dates">{opened ? <>{opened} → {closed}</> : closed || <Missing reason="Close date unavailable" />}
+            {timing && <span className="trade-sub">{timing}</span>}</td>
+          <td className="nowrap" data-label="Premium / price">{metrics.option && row.open_premium != null ? `${money(row.open_premium)} → ${money(row.close_premium)}`
+            : !metrics.option && row.buy_price != null ? `${money(row.buy_price)} → ${money(row.sell_price)}` : <Missing reason="Prices unavailable" />}</td>
+          <td data-label="Captured / return">{metrics.option && metrics.capture != null ? <div className="capture-cell">
+              <span className={pnlClass(metrics.capture)}>{metrics.capture.toFixed(1)}%</span> <small>{metrics.label.toLowerCase()}</small>
+              <span className="capture-bar" aria-hidden="true"><span className={metrics.capture < 0 ? 'negative-fill' : ''} style={{ width: barWidth(Math.abs(metrics.capture)) }} />
+                {metrics.target != null && <i style={{ left: barWidth(metrics.target) }} />}</span>
+              {metrics.target != null && <span className="trade-sub">Target {percent(metrics.target)} · <span className={pnlClass(metrics.targetGap)}>
+                {metrics.targetGap > 0 ? '+' : ''}{metrics.targetGap.toFixed(1)} pp</span></span>}
+            </div>
+            : stockReturn != null ? <><span className={pnlClass(stockReturn)}>{stockReturn.toFixed(1)}%</span> <small>return</small></>
+              : <Missing reason={metrics.option ? 'Premiums unavailable' : 'Return unavailable'} />}</td>
+          <td data-label="Exit reason">{EXIT_REASONS[row.review?.exit_reason] || <Missing reason="Exit reason not recorded" />}</td>
+          <td className="trade-pnl">{row.net_pnl != null
+            ? <><strong className={pnlClass(row.net_pnl)}>{money(row.net_pnl)}</strong><span className="trade-sub">Gross {money(row.pnl)} · fees {money(row.fees)}</span></>
+            : <><strong className={pnlClass(row.pnl)}>{money(row.pnl)}</strong><span className="trade-sub">Gross · no fees recorded</span></>}</td>
+          <td className="closed-option-actions">
+            <button className="btn-secondary btn-sm" type="button" title="Exit reason, target and review notes" aria-label={`Review ${row.ticker} trade ${row.id}`}
+              disabled={busy || !row.ledger_event_id} onClick={() => { setSaved(null); setReviewTrade(row); }}>Review</button>
+            {onEdit && row.is_manual && <>
+              <button className="btn-icon" type="button" title="Edit manual option" aria-label={`Edit ${row.ticker} option`} disabled={busy} onClick={() => onEdit(row)}>✏️</button>
+              <button className="btn-icon" type="button" title="Delete manual option" aria-label={`Delete ${row.ticker} option`} disabled={busy} onClick={() => onDelete(row)}>🗑</button>
+            </>}
+            {(row.notes || row.review) && <details className="closed-option-notes"><summary>Notes</summary>{row.notes && <p>{row.notes}</p>}
+              {row.review && <><p>{row.review.review_note || 'No review notes.'}</p><small>Review recorded {row.review.review_recorded_at}</small></>}</details>}
+          </td></tr>; })}</tbody>
     </table></div>
+    {filtered.length > visible.length && <button type="button" className="btn-secondary btn-sm trade-history-more" onClick={() => setLimit(value => value + PAGE)}>
+      Show {Math.min(PAGE, filtered.length - visible.length)} more ({visible.length} of {filtered.length} shown)</button>}
+    </>}
   </section>;
 }
 
@@ -404,10 +460,10 @@ function JournalViews({ onSignIn, onSelect }) {
   }
 
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
-  const navigation = <nav className="sub-tabs" aria-label="Journal views">
+  const navigation = <TabStrip label="Journal views" activeKey={view}>
     {[['history', 'Trade history'], ['journal', 'Manual journal'], ['options', 'Options review'], ['cycles', 'Wheel cycles']].map(([id, label]) =>
       <button key={id} className={`sub-tab ${view === id ? 'active' : ''}`} onClick={() => setView(id)}>{label}</button>)}
-  </nav>;
+  </TabStrip>;
   if (view !== 'journal') return <div className="journal portfolio-workspace">{navigation}
     {view === 'history' ? <RecordedHistory /> : view === 'cycles' ? <WheelCycles /> : <Review version={user.id} />}
   </div>;
