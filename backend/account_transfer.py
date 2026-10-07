@@ -55,10 +55,15 @@ def export_account(user_id):
                 tables[table] = [{key: value for key, value in row.items() if key != "user_id"} for row in rows]
         cursor.execute(f"SELECT ticker, split_date, ratio, applied_at FROM applied_splits WHERE user_id={database.PH} ORDER BY ticker, split_date", (user_id,))
         applied_splits = database._fetchall(cursor)
+        cursor.execute(f"SELECT ticker, list_name FROM watchlist_lists WHERE user_id={database.PH} ORDER BY ticker, list_name", (user_id,))
+        watchlist_lists = database._fetchall(cursor)
+        cursor.execute(f"SELECT kind, ticker, action_date, details, applied_at FROM applied_actions WHERE user_id={database.PH} ORDER BY kind, ticker, action_date", (user_id,))
+        applied_actions = database._fetchall(cursor)
         payload = json.loads(json.dumps({"format": "stockpilot-account-transfer", "version": 1,
             "source_user_id": user_id, "source_name": user["display_name"], "events": events,
             "tables": tables, "counts": counts, "combined_histories": combined_histories,
-            "applied_splits": applied_splits}, default=str, allow_nan=False))
+            "applied_splits": applied_splits, "watchlist_lists": watchlist_lists,
+            "applied_actions": applied_actions}, default=str, allow_nan=False))
         encoded = _canonical(payload)
         package = {"payload": encoded, "signature": _signature(encoded), "exported_at": datetime.now(timezone.utc).isoformat()}
         if len(_canonical(package).encode()) > MAX_BYTES - 64:
@@ -210,6 +215,7 @@ def import_account(user_id, package):
                 raise ValueError("Unsupported ledger source in export")
             origin_events.append({"source_event_id": event["id"], "destination_event_id": event_ids[event["id"]],
                                   "source_recorded_at": event["recorded_at"], "source_operation": operation})
+        copied_tickers = set()
         for table in COPY_TABLES:
             for row in payload["tables"][table]:
                 values = {field: value for field, value in row.items() if field not in {"id", "user_id"}}
@@ -219,7 +225,17 @@ def import_account(user_id, package):
                     cursor.execute(f"SELECT id FROM watchlist WHERE user_id={database.PH} AND ticker={database.PH}", (user_id, values["ticker"]))
                     if database._fetchone(cursor):
                         continue
+                    copied_tickers.add(values["ticker"])
                 _insert(cursor, table, {"user_id": user_id, **values})
+        # Symbols already on the destination watchlist keep the destination's lists.
+        for membership in payload.get("watchlist_lists", []):
+            if membership["ticker"] in copied_tickers:
+                cursor.execute(f"""INSERT INTO watchlist_lists (user_id, ticker, list_name) VALUES ({', '.join([database.PH] * 3)})
+                    ON CONFLICT (user_id, ticker, list_name) DO NOTHING""", (user_id, membership["ticker"], membership["list_name"]))
+        for action in payload.get("applied_actions", []):
+            cursor.execute(f"""INSERT INTO applied_actions (user_id, kind, ticker, action_date, details, applied_at)
+                VALUES ({', '.join([database.PH] * 6)}) ON CONFLICT (user_id, kind, ticker, action_date) DO NOTHING""",
+                (user_id, action["kind"], action["ticker"], action["action_date"], action["details"], action["applied_at"]))
         # Copied lots already carry the source's split adjustments; keep them from being adjusted twice.
         for split in payload.get("applied_splits", []):
             cursor.execute(f"""INSERT INTO applied_splits (user_id, ticker, split_date, ratio, applied_at)

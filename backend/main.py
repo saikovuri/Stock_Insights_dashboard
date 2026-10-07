@@ -1,9 +1,10 @@
-from fastapi import FastAPI, HTTPException, Query, Depends, Header, Request
+from fastapi import FastAPI, HTTPException, Query, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 from pydantic import BaseModel
 from typing import Optional
+from contextlib import asynccontextmanager
 from datetime import datetime, date as _date
 import logging
 import math
@@ -11,9 +12,9 @@ import re
 from typing import Literal
 from pydantic import Field
 from portfolio_models import AccountingEntryRequest, HoldingRequest, HoldingUpdateRequest, OptionRequest, OptionUpdateRequest, ClosedOptionRequest, LifecycleRequest, ACCOUNT_PATTERN
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
+from api_common import limiter, get_current_user, valid_ticker as _valid_ticker, upstream_error as _upstream_error
 
 from stock_data import get_stock_data, get_key_metrics, get_quote, format_large_number, compute_indicators, \
     get_daily_indicators
@@ -39,26 +40,21 @@ import backtester
 import wheel
 import options_desk
 import track_record
-from providers import finnhub_enabled, finnhub_quote, finnhub_peers, finnhub_recommendations, \
-    finnhub_basic_financials, finnhub_insider_transactions, finnhub_profile, \
+from providers import finnhub_enabled, finnhub_quote, finnhub_peers, finnhub_profile, \
     finra_short_interest
 from alerts import check_alerts, technical_events
-from cache import get_or_fetch, stats as cache_stats, clear as cache_clear
-from auth import hash_password, verify_password, create_token, decode_token, create_refresh_token, REFRESH_EXPIRE_DAYS
+from cache import get_or_fetch, stats as cache_stats
 from database import (
-    create_user, get_user_by_username, get_user_by_username_by_id,
     get_user_holdings, add_user_holding, update_user_holding, delete_user_holding, sell_user_holding,
     sell_user_holding_by_lot,
     get_user_options, add_user_option, close_user_option, update_user_option, delete_user_option,
     assign_user_option, kv_set,
-    get_user_transactions, get_user_watchlist, add_to_watchlist, remove_from_watchlist,
-    get_closed_trades, get_closed_options, delete_closed_trade, delete_closed_option, record_closed_option,
-    store_refresh_token, consume_refresh_token, delete_user_refresh_tokens,
+    get_user_transactions, get_user_watchlist, get_closed_trades, get_closed_options, delete_closed_trade, delete_closed_option, record_closed_option,
     list_notifications, mark_notifications_read, get_ntfy_topic, set_ntfy_topic,
     get_trader_profile, set_trader_profile, list_user_alerts, add_user_alert, delete_user_alert,
     count_active_alerts, list_journal, add_journal, update_journal, delete_journal,
     get_thesis, list_theses, delete_thesis,
-    in_account, get_watchlist_items, update_watchlist_item,
+    in_account,
 )
 from config import CORS_ORIGINS, SCHEDULER_ENABLED, SENTRY_DSN, SENTRY_ENVIRONMENT
 
@@ -85,21 +81,15 @@ if SENTRY_DSN:
     )
     ignore_logger("yfinance")
 
-app = FastAPI(title="StockPilot API", version="3.0.0")
 
-
-@app.on_event("startup")
-def _start_background_jobs():
+@asynccontextmanager
+async def _lifespan(_app):
     if SCHEDULER_ENABLED:
         scheduler.start()
+    yield
 
 
-def _upstream_error(e: Exception, status: int = 500) -> HTTPException:
-    """Log the real error; return a generic message so internals aren't exposed."""
-    log.warning("Request failed: %s: %s", type(e).__name__, e)
-    if status == 404:
-        return HTTPException(status_code=404, detail="Ticker not found or data unavailable")
-    return HTTPException(status_code=status, detail="Data provider error. Please try again shortly.")
+app = FastAPI(title="StockPilot API", version="3.0.0", lifespan=_lifespan)
 
 
 @app.exception_handler(Exception)
@@ -134,14 +124,6 @@ def api_health_check():
 
 # ── Rate limiting ───────────────────────────────────────────────────────────
 
-def _get_real_ip(request: Request) -> str:
-    """Use X-Forwarded-For behind reverse proxies (Render, etc.), else remote address."""
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return get_remote_address(request)
-
-limiter = Limiter(key_func=_get_real_ip)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -178,122 +160,22 @@ app.add_middleware(
 )
 
 
-# ── Ticker validation ───────────────────────────────────────────────────────
+# ── Route modules ───────────────────────────────────────────────────────────
 
-_TICKER_RE = re.compile(r"^[A-Za-z0-9\.\-\^]{1,10}$")
+import routes_accounts
+import routes_auth
+import routes_research
+import routes_watchlist
 
-def _valid_ticker(ticker: str) -> str:
-    t = ticker.strip().upper()
-    if not _TICKER_RE.match(t):
-        raise HTTPException(status_code=400, detail="Invalid ticker symbol")
-    return t
-
-
-# ── Auth dependency ─────────────────────────────────────────────────────────
-
-def get_current_user(authorization: Optional[str] = Header(None)) -> dict:
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    token = authorization.split(" ", 1)[1]
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-    return {"user_id": payload["sub"], "username": payload["username"]}
+app.include_router(routes_auth.router)
+app.include_router(routes_watchlist.router)
+app.include_router(routes_accounts.router)
+app.include_router(routes_research.router)
 
 
 @app.get("/api/cache/stats")
 def cache_stats_endpoint(user: dict = Depends(get_current_user)):
     return cache_stats()
-
-
-# ── Request models ──────────────────────────────────────────────────────────
-
-class RegisterRequest(BaseModel):
-    username: str
-    password: str
-    display_name: str
-
-class LoginRequest(BaseModel):
-    username: str
-    password: str
-
-class WatchlistRequest(BaseModel):
-    ticker: str
-    list_name: Optional[str] = Field(None, max_length=40)
-
-
-# ── Auth endpoints ──────────────────────────────────────────────────────────
-
-def _issue_tokens(user: dict) -> dict:
-    """Create access + refresh tokens and return auth response."""
-    from datetime import timedelta
-    access = create_token(user["id"], user["username"])
-    refresh = create_refresh_token()
-    expires_at = (datetime.utcnow() + timedelta(days=REFRESH_EXPIRE_DAYS)).isoformat()
-    store_refresh_token(user["id"], refresh, expires_at)
-    return {
-        "token": access,
-        "refresh_token": refresh,
-        "user": {"id": user["id"], "username": user["username"], "display_name": user["display_name"]},
-    }
-
-
-@app.post("/api/auth/register")
-@limiter.limit("5/minute")
-def register(request: Request, req: RegisterRequest):
-    if len(req.username) < 3:
-        raise HTTPException(status_code=400, detail="Username must be at least 3 characters")
-    if len(req.password) < 6:
-        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
-    if len(req.password.encode()) > 72:
-        raise HTTPException(status_code=400, detail="Password must be at most 72 bytes")
-    hashed = hash_password(req.password)
-    user = create_user(req.username.strip(), hashed, req.display_name.strip())
-    if not user:
-        raise HTTPException(status_code=409, detail="Username already taken")
-    return _issue_tokens(user)
-
-
-@app.post("/api/auth/login")
-@limiter.limit("10/minute")
-def login(request: Request, req: LoginRequest):
-    user = get_user_by_username(req.username.strip())
-    if not user or len(req.password.encode()) > 72 or not verify_password(req.password, user["password_hash"]):
-        raise HTTPException(status_code=401, detail="Invalid username or password")
-    return _issue_tokens(user)
-
-
-class RefreshRequest(BaseModel):
-    refresh_token: str
-
-
-@app.post("/api/auth/refresh")
-@limiter.limit("30/minute")
-def refresh(request: Request, req: RefreshRequest):
-    stored = consume_refresh_token(req.refresh_token)
-    if not stored:
-        raise HTTPException(status_code=401, detail="Invalid refresh token")
-    expires = datetime.fromisoformat(str(stored["expires_at"]).replace("+00:00", "").replace("Z", ""))
-    if datetime.utcnow() > expires:
-        raise HTTPException(status_code=401, detail="Refresh token expired")
-    user = get_user_by_username_by_id(stored["user_id"])
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-    return _issue_tokens(user)
-
-
-@app.post("/api/auth/logout")
-def logout(user: dict = Depends(get_current_user)):
-    delete_user_refresh_tokens(user["user_id"])
-    return {"message": "Logged out"}
-
-
-@app.get("/api/auth/me")
-def auth_me(user: dict = Depends(get_current_user)):
-    db_user = get_user_by_username(user["username"])
-    if not db_user:
-        raise HTTPException(status_code=404, detail="User not found")
-    return {"id": db_user["id"], "username": db_user["username"], "display_name": db_user["display_name"]}
 
 
 # ── Stock endpoints (no auth needed) ───────────────────────────────────────
@@ -948,59 +830,7 @@ def portfolio_income_goal(request: Request, req: IncomeGoal, user: dict = Depend
     return {"goal": req.goal or None}
 
 
-# ── Screener / Watchlist (auth required) ────────────────────────────────────
-
-@app.get("/api/watchlist")
-def watchlist_get(user: dict = Depends(get_current_user)):
-    items = get_watchlist_items(user["user_id"])
-    return {"tickers": [item["ticker"] for item in items], "items": items}
-
-
-class WatchlistItemRequest(BaseModel):
-    list_name: Optional[str] = Field(None, max_length=40)
-    note: Optional[str] = Field(None, max_length=500)
-
-
-@app.put("/api/watchlist/{ticker}")
-def watchlist_update(ticker: str, req: WatchlistItemRequest, user: dict = Depends(get_current_user)):
-    if not update_watchlist_item(user["user_id"], _valid_ticker(ticker), req.list_name, req.note):
-        raise HTTPException(status_code=404, detail="Not in watchlist")
-    return {"ok": True}
-
-
-@app.get("/api/watchlist/earnings")
-@limiter.limit("10/minute")
-def watchlist_earnings(request: Request, user: dict = Depends(get_current_user)):
-    """Next earnings for watchlist symbols (canonical Finnhub + Yahoo dates, earlier date wins)."""
-    from concurrent.futures import ThreadPoolExecutor
-    tickers = get_user_watchlist(user["user_id"])[:60]
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        infos = list(pool.map(options_analytics.earnings_info, tickers))
-    return {"items": [{"ticker": t, "next": i.get("next"), "timing": i.get("next_timing"),
-                       "confirmed": i.get("next_confirmed", False)} for t, i in zip(tickers, infos)]}
-
-
-@app.post("/api/watchlist")
-def watchlist_add(req: WatchlistRequest, user: dict = Depends(get_current_user)):
-    ticker = _valid_ticker(req.ticker)
-    try:
-        get_key_metrics(ticker)
-    except Exception:
-        raise HTTPException(status_code=404, detail=f"Ticker '{ticker}' not found")
-    added = add_to_watchlist(user["user_id"], ticker, req.list_name)
-    if not added:
-        raise HTTPException(status_code=409, detail="Already in watchlist")
-    return {"message": f"{ticker} added to watchlist"}
-
-
-@app.delete("/api/watchlist/{ticker}")
-def watchlist_remove(ticker: str, user: dict = Depends(get_current_user)):
-    ticker = _valid_ticker(ticker)
-    removed = remove_from_watchlist(user["user_id"], ticker)
-    if not removed:
-        raise HTTPException(status_code=404, detail="Not in watchlist")
-    return {"message": f"{ticker} removed from watchlist"}
-
+# ── Screener (auth required; watchlist routes live in routes_watchlist.py) ──────
 
 @app.get("/api/screener")
 def screener_data(user: dict = Depends(get_current_user)):
@@ -1279,304 +1109,6 @@ def stock_history_returns(ticker: str, period: str = Query("3mo")):
         return records
     except Exception as e:
         raise _upstream_error(e, 404)
-
-
-# ── Analyst Ratings & Price Targets ─────────────────────────────────────────
-
-@app.get("/api/stock/{ticker}/analyst")
-@limiter.limit("120/minute")
-def stock_analyst(request: Request, ticker: str):
-    """Analyst recommendations, price targets, and upgrade/downgrade history."""
-    ticker = _valid_ticker(ticker)
-    def _fetch():
-        import yfinance as yf
-        import math
-        stock = yf.Ticker(ticker)
-        try:
-            info = stock.info or {}
-        except Exception:
-            info = {}
-
-        target_high = info.get("targetHighPrice")
-        target_low = info.get("targetLowPrice")
-        target_mean = info.get("targetMeanPrice")
-        target_median = info.get("targetMedianPrice")
-        num_analysts = info.get("numberOfAnalystOpinions", 0)
-        recommendation = info.get("recommendationKey", "")
-        recommendation_mean = info.get("recommendationMean")
-
-        breakdown = {"strongBuy": 0, "buy": 0, "hold": 0, "sell": 0, "strongSell": 0}
-        fh_recs = finnhub_recommendations(ticker)
-        if fh_recs:
-            for col in breakdown:
-                breakdown[col] = int(fh_recs[0].get(col) or 0)
-        try:
-            recs = None if fh_recs else stock.recommendations
-            if recs is not None and not recs.empty:
-                latest = recs.iloc[-1] if len(recs) > 0 else None
-                if latest is not None:
-                    for col in ["strongBuy", "buy", "hold", "sell", "strongSell"]:
-                        val = latest.get(col)
-                        if val is not None and not (isinstance(val, float) and math.isnan(val)):
-                            breakdown[col] = int(val)
-        except Exception:
-            pass
-        total = sum(breakdown.values())
-        if not recommendation_mean and total:
-            # Yahoo's 1 (strong buy) .. 5 (strong sell) scale, derived from the Finnhub breakdown
-            recommendation_mean = round(sum(w * breakdown[k] for w, k in enumerate(breakdown, 1)) / total, 2)
-            recommendation = ("strong_buy" if recommendation_mean <= 1.5 else "buy" if recommendation_mean <= 2.5
-                              else "hold" if recommendation_mean <= 3.5 else "sell" if recommendation_mean <= 4.5
-                              else "strong_sell")
-
-        upgrades = []
-        try:
-            ug = stock.upgrades_downgrades
-            if ug is not None and not ug.empty:
-                recent = ug.head(10)
-                for idx, row in recent.iterrows():
-                    d = str(idx)[:10] if hasattr(idx, 'strftime') else str(idx)[:10]
-                    cur_pt = row.get("currentPriceTarget")
-                    prior_pt = row.get("priorPriceTarget")
-                    upgrades.append({
-                        "date": d,
-                        "firm": str(row.get("Firm", "")),
-                        "toGrade": str(row.get("ToGrade", "")),
-                        "fromGrade": str(row.get("FromGrade", "")),
-                        "action": str(row.get("Action", "")),
-                        "priceTargetAction": str(row.get("priceTargetAction", "")),
-                        "currentPriceTarget": None if (cur_pt is None or (isinstance(cur_pt, float) and math.isnan(cur_pt))) else float(cur_pt),
-                        "priorPriceTarget": None if (prior_pt is None or (isinstance(prior_pt, float) and math.isnan(prior_pt))) else float(prior_pt),
-                    })
-        except Exception:
-            pass
-
-        return {
-            "price_targets": {"high": target_high, "low": target_low, "mean": target_mean, "median": target_median, "num_analysts": num_analysts},
-            "recommendation": recommendation,
-            "recommendation_mean": recommendation_mean,
-            "breakdown": breakdown,
-            "upgrades_downgrades": upgrades[-10:],
-        }
-    try:
-        return get_or_fetch(f"analyst:{ticker}", _fetch, ttl=600)
-    except Exception as e:
-        raise _upstream_error(e)
-
-
-# ── Financial Statements ────────────────────────────────────────────────────
-
-@app.get("/api/stock/{ticker}/financials")
-@limiter.limit("60/minute")
-def stock_financials(request: Request, ticker: str):
-    """Income statement, balance sheet, cash flow (annual + quarterly)."""
-    ticker = _valid_ticker(ticker)
-    def _fetch():
-        import yfinance as yf
-        import math
-        stock = yf.Ticker(ticker)
-
-        def _df_to_dict(df):
-            if df is None or df.empty:
-                return {}
-            result = {}
-            for col in df.columns:
-                period_key = str(col)[:10]
-                items = {}
-                for idx, val in df[col].items():
-                    if val is not None and not (isinstance(val, float) and math.isnan(val)):
-                        items[str(idx)] = float(val)
-                if items:
-                    result[period_key] = items
-            return result
-
-        return {
-            "income_statement": _df_to_dict(stock.financials),
-            "income_statement_quarterly": _df_to_dict(stock.quarterly_financials),
-            "balance_sheet": _df_to_dict(stock.balance_sheet),
-            "balance_sheet_quarterly": _df_to_dict(stock.quarterly_balance_sheet),
-            "cash_flow": _df_to_dict(stock.cashflow),
-            "cash_flow_quarterly": _df_to_dict(stock.quarterly_cashflow),
-        }
-    try:
-        return get_or_fetch(f"financials:{ticker}", _fetch, ttl=600)
-    except Exception as e:
-        raise _upstream_error(e)
-
-
-# ── Institutional & Insider Activity ────────────────────────────────────────
-
-@app.get("/api/stock/{ticker}/ownership")
-@limiter.limit("60/minute")
-def stock_ownership(request: Request, ticker: str):
-    """Top institutional holders and insider transactions."""
-    ticker = _valid_ticker(ticker)
-    def _fetch():
-        import yfinance as yf
-        import math
-        stock = yf.Ticker(ticker)
-        try:
-            info = stock.info or {}
-        except Exception:
-            info = {}
-
-        # Institutional holders
-        institutions = []
-        try:
-            ih = stock.institutional_holders
-            if ih is not None and not ih.empty:
-                for _, row in ih.head(15).iterrows():
-                    holder = {}
-                    for col in ih.columns:
-                        val = row[col]
-                        if val is not None and not (isinstance(val, float) and math.isnan(val)):
-                            if hasattr(val, 'strftime'):
-                                holder[col] = val.strftime("%Y-%m-%d")
-                            elif isinstance(val, (int, float)):
-                                holder[col] = float(val)
-                            else:
-                                holder[col] = str(val)
-                    institutions.append(holder)
-        except Exception:
-            pass
-
-        # Insider transactions
-        insiders = []
-        try:
-            it = stock.insider_transactions
-            if it is not None and not it.empty:
-                for _, row in it.head(20).iterrows():
-                    txn = {}
-                    for col in it.columns:
-                        val = row[col]
-                        if val is not None and not (isinstance(val, float) and math.isnan(val)):
-                            if hasattr(val, 'strftime'):
-                                txn[col] = val.strftime("%Y-%m-%d")
-                            elif isinstance(val, (int, float)):
-                                txn[col] = float(val)
-                            else:
-                                txn[col] = str(val)
-                    insiders.append(txn)
-        except Exception:
-            pass
-        if not insiders:
-            # Finnhub fallback (Form 4 data); codes per SEC Form 4 instructions
-            codes = {"P": "Purchase", "S": "Sale", "A": "Award/Grant", "M": "Option Exercise",
-                     "F": "Tax Withholding", "G": "Gift", "C": "Conversion", "X": "Option Exercise"}
-            for t in finnhub_insider_transactions(ticker)[:20]:
-                change, price = t.get("change") or 0, t.get("transactionPrice") or 0
-                insiders.append({
-                    "Insider": t.get("name"),
-                    "Transaction": codes.get(t.get("transactionCode"), t.get("transactionCode") or ""),
-                    "Shares": change,
-                    "Value": round(abs(change) * price, 2) if price else None,
-                    "Date": t.get("transactionDate"),
-                })
-
-        # Summary stats
-        held_pct_insiders = info.get("heldPercentInsiders")
-        held_pct_institutions = info.get("heldPercentInstitutions")
-
-        return {
-            "held_pct_insiders": round(held_pct_insiders * 100, 2) if held_pct_insiders else None,
-            "held_pct_institutions": round(held_pct_institutions * 100, 2) if held_pct_institutions else None,
-            "institutional_holders": institutions,
-            "insider_transactions": insiders,
-        }
-    try:
-        return get_or_fetch(f"ownership:{ticker}", _fetch, ttl=600)
-    except Exception as e:
-        raise _upstream_error(e)
-
-
-# ── Dividend Details ────────────────────────────────────────────────────────
-
-@app.get("/api/stock/{ticker}/dividends")
-@limiter.limit("60/minute")
-def stock_dividends(request: Request, ticker: str):
-    """Dividend history, yield, payout details."""
-    ticker = _valid_ticker(ticker)
-    def _fetch():
-        import yfinance as yf
-        stock = yf.Ticker(ticker)
-        try:
-            info = stock.info or {}
-        except Exception:
-            info = {}
-
-        # Dividend info from info
-        div_rate = info.get("dividendRate")
-        div_yield = info.get("dividendYield")
-        ex_date = info.get("exDividendDate")
-        payout_ratio = info.get("payoutRatio")
-        five_yr_avg = info.get("fiveYearAvgDividendYield")
-        if div_yield is None:
-            # Finnhub fallback (percent units, like yfinance's dividendYield)
-            m = finnhub_basic_financials(ticker) or {}
-            div_rate = m.get("dividendIndicatedAnnual") or m.get("dividendPerShareTTM")
-            div_yield = m.get("currentDividendYieldTTM")
-            if m.get("payoutRatioTTM") is not None:
-                payout_ratio = m["payoutRatioTTM"] / 100
-
-        # Convert epoch ex_date to readable
-        ex_date_str = None
-        if ex_date:
-            try:
-                from datetime import datetime as _dt
-                ex_date_str = _dt.fromtimestamp(ex_date).strftime("%Y-%m-%d")
-            except Exception:
-                ex_date_str = str(ex_date)
-
-        # Historical dividends
-        history = []
-        try:
-            divs = stock.dividends
-            if divs is not None and len(divs) > 0:
-                for ts, amount in divs.items():
-                    d = str(ts.date()) if hasattr(ts, "date") else str(ts)[:10]
-                    history.append({"date": d, "amount": round(float(amount), 4)})
-        except Exception:
-            pass
-        if not ex_date_str and history:
-            ex_date_str = history[-1]["date"]
-
-        return {
-            "dividend_rate": div_rate,
-            "dividend_yield": round(div_yield, 2) if div_yield else None,  # yfinance already returns a percent
-            "ex_dividend_date": ex_date_str,
-            "payout_ratio": round(payout_ratio * 100, 1) if payout_ratio else None,
-            "five_year_avg_yield": five_yr_avg,
-            "history": history,
-        }
-    try:
-        return get_or_fetch(f"dividends:{ticker}", _fetch, ttl=600)
-    except Exception as e:
-        raise _upstream_error(e)
-
-
-# ── Sparkline data for watchlist ────────────────────────────────────────────
-
-class SparklineRequest(BaseModel):
-    tickers: list[str]
-
-@app.post("/api/stock/batch-sparklines")
-@limiter.limit("60/minute")
-def batch_sparklines(request: Request, req: SparklineRequest):
-    """Return 5-day close prices for tiny sparkline charts."""
-    from concurrent.futures import ThreadPoolExecutor
-    tickers = [_valid_ticker(t) for t in req.tickers[:30]]
-
-    def _fetch_spark(t):
-        try:
-            df = get_stock_data(t, period="5d", interval="1d")
-            closes = [round(float(row["Close"]), 2) for _, row in df.iterrows()]
-            return {"ticker": t, "closes": closes}
-        except Exception:
-            return {"ticker": t, "closes": []}
-
-    with ThreadPoolExecutor(max_workers=min(len(tickers), 8)) as pool:
-        results = list(pool.map(_fetch_spark, tickers))
-    return {"sparklines": {r["ticker"]: r["closes"] for r in results}}
 
 
 # ── Options analytics: IV rank, expected move, suggested structures ─────────
@@ -2119,76 +1651,6 @@ def portfolio_import(request: Request, req: ImportRequest, user: dict = Depends(
         else:
             parsed["imported"] = portfolio_insights.import_rows(uid, parsed["rows"], req.account)
     return parsed
-
-
-# ── Accounts, cash, daily account value and corporate actions ────────────────────────
-
-class CashRequest(BaseModel):
-    model_config = {"extra": "forbid"}
-    account: Optional[str] = Field(None, pattern=ACCOUNT_PATTERN)
-    cash: float = Field(..., ge=-100_000_000, le=1_000_000_000, allow_inf_nan=False)
-
-
-class SplitRequest(BaseModel):
-    ticker: str
-    split_date: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$")
-
-
-@app.get("/api/portfolio/accounts")
-def portfolio_accounts(user: dict = Depends(get_current_user)):
-    import accounts
-    return accounts.list_accounts(int(user["user_id"]))
-
-
-@app.put("/api/portfolio/cash")
-@limiter.limit("30/minute")
-def portfolio_cash(request: Request, req: CashRequest, user: dict = Depends(get_current_user)):
-    import accounts
-    return accounts.set_cash(int(user["user_id"]), req.account, req.cash)
-
-
-@app.get("/api/portfolio/nav-history")
-def portfolio_nav_history(account: Optional[str] = None, user: dict = Depends(get_current_user)):
-    import accounts
-    return accounts.nav_history(int(user["user_id"]), account)
-
-
-@app.post("/api/portfolio/nav-snapshot")
-@limiter.limit("4/minute")
-def portfolio_nav_snapshot(request: Request, user: dict = Depends(get_current_user)):
-    import accounts
-    try:
-        return {"snapshots": accounts.snapshot(int(user["user_id"]))}
-    except Exception as e:
-        raise _upstream_error(e)
-
-
-@app.get("/api/portfolio/corporate-actions")
-@limiter.limit("10/minute")
-def portfolio_corporate_actions(request: Request, user: dict = Depends(get_current_user)):
-    import corporate_actions
-    return {"splits": corporate_actions.pending_splits(int(user["user_id"]))}
-
-
-@app.post("/api/portfolio/corporate-actions/apply")
-@limiter.limit("10/minute")
-def portfolio_apply_split(request: Request, req: SplitRequest, user: dict = Depends(get_current_user)):
-    import corporate_actions
-    try:
-        return corporate_actions.apply_split(int(user["user_id"]), _valid_ticker(req.ticker), req.split_date)
-    except LookupError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
-
-
-@app.get("/api/search")
-@limiter.limit("60/minute")
-def symbol_search(request: Request, q: str = Query(..., min_length=1, max_length=40)):
-    try:
-        return {"results": market.search_symbols(q)}
-    except Exception as e:
-        raise _upstream_error(e)
 
 
 @app.get("/api/weekly-review")

@@ -54,7 +54,7 @@ function AccountWatchlist({ onSelect, onSignIn, session }) {
   const [earnings, setEarnings] = useState({});
   const [group, setGroup] = useState('');
   const [notePanel, setNotePanel] = useState(null);
-  const [draft, setDraft] = useState({ list_name: '', note: '' });
+  const [draft, setDraft] = useState({ lists: '', note: '' });
   const active = useRef(false);
   const loadGeneration = useRef(0);
 
@@ -146,17 +146,22 @@ function AccountWatchlist({ onSelect, onSignIn, session }) {
     return () => { current = false; };
   }, [isGuest, tickerKey]);
 
-  const groups = [...new Set(Object.values(items).map(item => item.list_name || 'Main'))].sort();
+  const listsOf = (ticker) => items[ticker]?.lists || [items[ticker]?.list_name || 'Main'];
+  const groups = [...new Set(Object.keys(items).flatMap(listsOf))].sort();
 
   const openNotes = (ticker) => {
     setNotePanel(prev => (prev === ticker ? null : ticker));
-    setDraft({ list_name: items[ticker]?.list_name || 'Main', note: items[ticker]?.note || '' });
+    setDraft({ lists: listsOf(ticker).join(', '), note: items[ticker]?.note || '' });
   };
 
   const saveNotes = async (ticker) => {
+    const lists = [...new Map(draft.lists.split(',').map(name => name.trim()).filter(Boolean)
+      .map(name => [name.toLowerCase(), name])).values()];
+    if (!lists.length) lists.push('Main');
+    if (lists.length > 10 || lists.some(name => name.length > 40)) { setAddMsg('Use up to 10 lists of at most 40 characters each.'); return; }
     try {
-      await updateWatchlistItem(ticker, draft.list_name.trim() || 'Main', draft.note);
-      setItems(prev => ({ ...prev, [ticker]: { ticker, list_name: draft.list_name.trim() || 'Main', note: draft.note.trim() } }));
+      await updateWatchlistItem(ticker, lists, draft.note);
+      setItems(prev => ({ ...prev, [ticker]: { ticker, lists, list_name: lists[0], note: draft.note.trim() } }));
       setNotePanel(null);
     } catch (error) { setAddMsg(error.message); }
   };
@@ -301,7 +306,7 @@ function AccountWatchlist({ onSelect, onSignIn, session }) {
   ];
 
   const sorted = useMemo(() => {
-    const visible = group ? stocks.filter(s => (items[s.ticker]?.list_name || 'Main') === group) : stocks;
+    const visible = group ? stocks.filter(s => listsOf(s.ticker).includes(group)) : stocks;
     if (sortCol === 'custom') {
       const orderMap = {};
       customOrder.forEach((t, i) => { orderMap[t] = i; });
@@ -474,9 +479,21 @@ function AccountWatchlist({ onSelect, onSignIn, session }) {
                       <tr className="alert-panel-row">
                         <td colSpan={16}>
                           <div className="watchlist-note-editor">
-                            <label>List<input className="tool-input" value={draft.list_name} maxLength={40} list="watchlist-groups"
-                              onChange={e => setDraft(d => ({ ...d, list_name: e.target.value }))} /></label>
-                            <datalist id="watchlist-groups">{groups.map(name => <option key={name} value={name} />)}</datalist>
+                            <label>Lists (comma-separated)<input className="tool-input" value={draft.lists} maxLength={420}
+                              placeholder="Main"
+                              onChange={e => setDraft(d => ({ ...d, lists: e.target.value }))} /></label>
+                            {groups.length > 0 && <div className="watchlist-list-chips" role="group" aria-label="Existing lists">
+                              {groups.map(name => {
+                                const chosen = draft.lists.split(',').map(n => n.trim().toLowerCase());
+                                const on = chosen.includes(name.toLowerCase());
+                                return <button key={name} type="button" className="btn-secondary btn-sm" aria-pressed={on}
+                                  onClick={() => setDraft(d => {
+                                    const current = d.lists.split(',').map(n => n.trim()).filter(Boolean);
+                                    const next = on ? current.filter(n => n.toLowerCase() !== name.toLowerCase()) : [...current, name];
+                                    return { ...d, lists: next.join(', ') };
+                                  })}>{on ? '✓ ' : '+ '}{name}</button>;
+                              })}
+                            </div>}
                             <label>Note<textarea className="tool-input" value={draft.note} maxLength={500} rows={2}
                               onChange={e => setDraft(d => ({ ...d, note: e.target.value }))} /></label>
                             <button className="btn-primary btn-sm" onClick={() => saveNotes(s.ticker)}>Save</button>

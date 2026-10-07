@@ -22,8 +22,14 @@ def install_schema(conn, postgres=False):
     cursor.execute("""CREATE TABLE IF NOT EXISTS applied_splits (
         user_id INTEGER NOT NULL REFERENCES users(id), ticker TEXT NOT NULL, split_date TEXT NOT NULL,
         ratio TEXT NOT NULL, applied_at TEXT NOT NULL, PRIMARY KEY(user_id, ticker, split_date))""")
+    cursor.execute("""CREATE TABLE IF NOT EXISTS watchlist_lists (
+        user_id INTEGER NOT NULL REFERENCES users(id), ticker TEXT NOT NULL, list_name TEXT NOT NULL,
+        PRIMARY KEY(user_id, ticker, list_name))""")
+    cursor.execute("""CREATE TABLE IF NOT EXISTS applied_actions (
+        user_id INTEGER NOT NULL REFERENCES users(id), kind TEXT NOT NULL, ticker TEXT NOT NULL, action_date TEXT NOT NULL,
+        details TEXT NOT NULL, applied_at TEXT NOT NULL, PRIMARY KEY(user_id, kind, ticker, action_date))""")
     if postgres:
-        for table in ("account_cash", "nav_snapshots", "applied_splits"):
+        for table in ("account_cash", "nav_snapshots", "applied_splits", "watchlist_lists", "applied_actions"):
             cursor.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
             for role in ("anon", "authenticated"):
                 cursor.execute("SELECT 1 FROM pg_roles WHERE rolname=%s", (role,))
@@ -130,7 +136,8 @@ def snapshot_all() -> int:
     return len(users)
 
 
-def _external_flows(user_id: int) -> dict[str, Decimal]:
+def _external_flows(user_id: int, account: str | None = None) -> dict[str, Decimal]:
+    """Deposits minus withdrawals per day. With an account, only that account's flows; unassigned entries count as Default."""
     import database
     from accounting import _active_manual
     events = database._run(f"SELECT * FROM accounting_events WHERE user_id={database.PH} AND source='manual' ORDER BY id",
@@ -139,6 +146,8 @@ def _external_flows(user_id: int) -> dict[str, Decimal]:
     for event in _active_manual(events):
         payload = json.loads(event["after_json"])
         if payload.get("kind") in ("deposit", "withdrawal"):
+            if account and (payload.get("account") or database.DEFAULT_ACCOUNT) != account:
+                continue
             sign = 1 if payload["kind"] == "deposit" else -1
             day = payload["occurred_at"][:10]
             flows[day] = flows.get(day, Decimal("0")) + sign * Decimal(str(payload["amount"]))
@@ -157,7 +166,7 @@ def nav_history(user_id: int, account: str | None = None) -> dict:
         for key in ("nav", "cash", "stocks", "options"):
             entry[key] += row[key] or 0
     series = [{**d, "nav": round(d["nav"], 2) if d["complete"] else None} for d in days.values()]
-    flows = {} if account else _external_flows(user_id)
+    flows = _external_flows(user_id, account)
     growth, peak, drawdown, previous = 1.0, None, 0.0, None
     for point in series:
         if point["nav"] is None:
@@ -174,9 +183,10 @@ def nav_history(user_id: int, account: str | None = None) -> dict:
         "account": account, "series": series,
         "return_pct": round((growth - 1) * 100, 2) if len(complete) > 1 else None,
         "max_drawdown_pct": round(drawdown * 100, 2) if len(complete) > 1 else None,
-        "flow_adjusted": not account,
+        "flow_adjusted": True,
         "note": ("Deposits and withdrawals from the Account ledger are removed from returns." if not account else
-                 "Per-account returns are not flow-adjusted; ledger cash flows are not assigned to accounts."),
+                 f"Deposits and withdrawals assigned to {account} are removed from returns; ledger entries without an "
+                 f"account count toward {database.DEFAULT_ACCOUNT}. Moves between your accounts need a withdrawal and a deposit."),
     }
 
 

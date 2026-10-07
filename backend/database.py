@@ -2,7 +2,12 @@ import sqlite3
 import os
 import json
 import math
-from datetime import datetime
+from datetime import datetime, timezone
+
+
+def utc_now() -> datetime:
+    """Naive UTC, matching the timestamps already stored by datetime.utcnow()."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 USE_PG = bool(DATABASE_URL)
@@ -648,7 +653,8 @@ def sell_user_holding(user_id: int, ticker: str, shares: float, sell_price: floa
         _release(conn)
 
 
-def sell_user_holding_by_lot(user_id: int, holding_id: int, shares: float, sell_price: float, *, _conn=None) -> dict | None:
+def sell_user_holding_by_lot(user_id: int, holding_id: int, shares: float, sell_price: float, *, _conn=None,
+                             closed_at: str | None = None) -> dict | None:
     """Sell shares from a specific lot (holding_id)."""
     _quantity(shares, "shares")
     _quantity(sell_price, "price", zero=True)
@@ -657,7 +663,7 @@ def sell_user_holding_by_lot(user_id: int, holding_id: int, shares: float, sell_
         try:
             if not USE_PG:
                 conn.execute("BEGIN IMMEDIATE")
-            result = sell_user_holding_by_lot(user_id, holding_id, shares, sell_price, _conn=conn)
+            result = sell_user_holding_by_lot(user_id, holding_id, shares, sell_price, _conn=conn, closed_at=closed_at)
             conn.commit()
             return result
         except Exception:
@@ -688,9 +694,11 @@ def sell_user_holding_by_lot(user_id: int, holding_id: int, shares: float, sell_
     pnl = (sell_price - h["buy_price"]) * sold_shares
     invested = h["buy_price"] * sold_shares
     pnl_pct = (pnl / invested * 100) if invested else 0
+    dated = ", closed_at" if closed_at else ""
     cur.execute(
-        f"INSERT INTO closed_trades (user_id, ticker, shares, buy_price, sell_price, pnl, pnl_pct, source_lot_id, acquired_at, account) VALUES ({PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH})",
-        (user_id, h["ticker"], sold_shares, h["buy_price"], sell_price, round(pnl, 2), round(pnl_pct, 2), h["id"], str(h.get("date_added") or "")[:10] or None, h.get("account")),
+        f"INSERT INTO closed_trades (user_id, ticker, shares, buy_price, sell_price, pnl, pnl_pct, source_lot_id, acquired_at, account{dated}) VALUES ({PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH}{f', {PH}' if closed_at else ''})",
+        (user_id, h["ticker"], sold_shares, h["buy_price"], sell_price, round(pnl, 2), round(pnl_pct, 2), h["id"], str(h.get("date_added") or "")[:10] or None, h.get("account"),
+         *((closed_at,) if closed_at else ())),
     )
     cur.execute(
         f"INSERT INTO transactions (user_id, action, ticker, details) VALUES ({PH}, 'SELL', {PH}, {PH})",
@@ -929,6 +937,16 @@ def get_user_watchlist(user_id: int) -> list[str]:
     return [r["ticker"] for r in rows]
 
 
+def _list_names(names) -> list[str]:
+    """Trimmed, case-insensitively unique list names; a symbol always belongs to at least one list."""
+    unique: dict[str, str] = {}
+    for name in names or []:
+        name = (name or "").strip()
+        if name:
+            unique.setdefault(name.lower(), name)
+    return list(unique.values()) or ["Main"]
+
+
 def add_to_watchlist(user_id: int, ticker: str, list_name: str | None = None) -> bool:
     try:
         _run(f"INSERT INTO watchlist (user_id, ticker, list_name) VALUES ({PH}, {PH}, {PH})",
@@ -939,16 +957,43 @@ def add_to_watchlist(user_id: int, ticker: str, list_name: str | None = None) ->
 
 
 def get_watchlist_items(user_id: int) -> list[dict]:
+    """Symbols with all their lists. Symbols never edited since multi-list support keep their single legacy list."""
     rows = _run(f"SELECT ticker, list_name, note FROM watchlist WHERE user_id={PH} ORDER BY added_at", (user_id,), "all")
-    return [{"ticker": r["ticker"], "list_name": r["list_name"] or "Main", "note": r["note"] or ""} for r in rows]
+    memberships: dict[str, list[str]] = {}
+    for row in _run(f"SELECT ticker, list_name FROM watchlist_lists WHERE user_id={PH} ORDER BY list_name", (user_id,), "all"):
+        memberships.setdefault(row["ticker"], []).append(row["list_name"])
+    items = []
+    for r in rows:
+        lists = memberships.get(r["ticker"]) or [r["list_name"] or "Main"]
+        items.append({"ticker": r["ticker"], "lists": lists, "list_name": lists[0], "note": r["note"] or ""})
+    return items
 
 
-def update_watchlist_item(user_id: int, ticker: str, list_name: str | None, note: str | None) -> bool:
-    return _run(f"UPDATE watchlist SET list_name={PH}, note={PH} WHERE user_id={PH} AND ticker={PH}",
-                ((list_name or "").strip() or None, (note or "").strip() or None, user_id, ticker.upper())) > 0
+def update_watchlist_item(user_id: int, ticker: str, lists: list[str] | None, note: str | None) -> bool:
+    names = _list_names(lists)
+    ticker = ticker.upper()
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        cur.execute(f"UPDATE watchlist SET list_name={PH}, note={PH} WHERE user_id={PH} AND ticker={PH}",
+                    (names[0], (note or "").strip() or None, user_id, ticker))
+        if cur.rowcount == 0:
+            conn.rollback()
+            return False
+        cur.execute(f"DELETE FROM watchlist_lists WHERE user_id={PH} AND ticker={PH}", (user_id, ticker))
+        for name in names:
+            cur.execute(f"INSERT INTO watchlist_lists (user_id, ticker, list_name) VALUES ({PH}, {PH}, {PH})", (user_id, ticker, name))
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        _release(conn)
 
 
 def remove_from_watchlist(user_id: int, ticker: str) -> bool:
+    _run(f"DELETE FROM watchlist_lists WHERE user_id={PH} AND ticker={PH}", (user_id, ticker.upper()))
     return _run(f"DELETE FROM watchlist WHERE user_id={PH} AND ticker={PH}", (user_id, ticker.upper())) > 0
 
 
@@ -1119,14 +1164,24 @@ def delete_closed_option(user_id: int, trade_id: int) -> bool:
 
 # ── Refresh token operations ─────────────────────────────────────────────
 
+def _token_digest(token: str) -> str:
+    import hashlib
+    return "sha256:" + hashlib.sha256(token.encode()).hexdigest()
+
+
 def store_refresh_token(user_id: int, token: str, expires_at: str) -> None:
+    """Only a SHA-256 digest is stored, so a database leak does not expose usable session tokens."""
     _run(f"INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES ({PH}, {PH}, {PH})",
-         (user_id, token, expires_at))
+         (user_id, _token_digest(token), expires_at))
 
 
 def consume_refresh_token(token: str) -> dict | None:
-    """Atomically delete and return a refresh token so concurrent requests cannot reuse it."""
-    return _run(f"DELETE FROM refresh_tokens WHERE token = {PH} RETURNING *", (token,), "one")
+    """Atomically delete and return a refresh token so concurrent requests cannot reuse it.
+    Rows stored before hashing hold the raw token; they are accepted once and replaced by a hashed one.
+    Issued tokens are URL-safe base64 (no ':'), so a stored 'sha256:' digest can never match as a raw token."""
+    candidates = (_token_digest(token),) if ":" in token else (_token_digest(token), token)
+    return _run(f"DELETE FROM refresh_tokens WHERE token IN ({', '.join([PH] * len(candidates))}) RETURNING *",
+                candidates, "one")
 
 
 def delete_user_refresh_tokens(user_id: int) -> None:
@@ -1134,7 +1189,7 @@ def delete_user_refresh_tokens(user_id: int) -> None:
 
 
 def cleanup_expired_refresh_tokens() -> None:
-    _run(f"DELETE FROM refresh_tokens WHERE expires_at < {PH}", (datetime.utcnow().isoformat(),))
+    _run(f"DELETE FROM refresh_tokens WHERE expires_at < {PH}", (utc_now().isoformat(),))
 
 
 # ── Notifications ─────────────────────────────────────────────────────────────────
@@ -1189,13 +1244,13 @@ def list_notifications(user_id: int, limit: int = 50) -> list[dict]:
 
 
 def mark_notifications_read(user_id: int) -> None:
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    now = utc_now().strftime("%Y-%m-%d %H:%M:%S")
     _run(f"UPDATE notifications SET read_at={PH} WHERE user_id={PH} AND read_at IS NULL", (now, user_id))
 
 
 def delete_old_notifications(days: int = 30) -> None:
     from datetime import timedelta
-    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    cutoff = (utc_now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
     _run(f"DELETE FROM notifications WHERE created_at < {PH}", (cutoff,))
 
 

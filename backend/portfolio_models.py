@@ -96,9 +96,12 @@ class AccountingEntryRequest(BaseModel):
     idempotency_key: str = Field(min_length=8, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
     exit_reason: Literal["profit_target", "stop", "expiry", "assignment", "roll", "discretionary", "other"] | None = None
     target_capture_pct: Decimal | None = Field(default=None, ge=0, le=100, max_digits=5, decimal_places=2)
+    account: str | None = Field(default=None, pattern=ACCOUNT_PATTERN)
 
     @model_validator(mode="after")
     def review_fields(self):
+        if self.account is not None and self.kind not in ("deposit", "withdrawal"):
+            raise ValueError("Only deposits and withdrawals are assigned to an account")
         if self.kind != "review" and (self.exit_reason is not None or self.target_capture_pct is not None):
             raise ValueError("Review fields require a review entry")
         if self.kind == "review" and (self.event_id is None or self.amount != 0):

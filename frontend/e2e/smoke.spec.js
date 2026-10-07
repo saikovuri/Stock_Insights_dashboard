@@ -640,3 +640,28 @@ test('slash focuses company search and the account bar fits the viewport', async
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
   await bar.screenshot({ path: testInfo.outputPath('account-bar.png') });
 });
+
+test('corporate actions flag a stale holding and record a spin-off without overflow', async ({ page }, testInfo) => {
+  let posted = null;
+  await page.route('**/api/portfolio/corporate-actions', route => route.fulfill({ json: {
+    splits: [], stale: [{ ticker: 'ATVI', last_quote: '2023-10-12' }], applied: [] } }));
+  await page.route('**/api/portfolio/corporate-actions/spinoff', route => {
+    posted = route.request().postDataJSON();
+    return route.fulfill({ json: { ticker: 'MMM', new_ticker: 'SOLV', lots: 1, basis_moved: 150, options_unadjusted: 0 } });
+  });
+  page.on('dialog', dialog => dialog.accept());
+  await page.goto('/#portfolio');
+  await expect(page.getByText(/ATVI.*no quotes since 2023-10-12/)).toBeVisible();
+  await page.getByText('Record a spin-off or merger', { exact: true }).click();
+  const form = page.getByRole('form', { name: 'Record corporate action' });
+  await form.getByLabel('Ticker you hold').fill('MMM');
+  await form.getByLabel('Ex-date').fill('2024-04-01');
+  await form.getByLabel('New company ticker').fill('SOLV');
+  await form.getByLabel('New shares per share held').fill('0.25');
+  await form.getByLabel('% of cost basis to new company').fill('7.5');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+  await form.screenshot({ path: testInfo.outputPath('corporate-actions.png') });
+  await form.getByRole('button', { name: 'Record', exact: true }).click();
+  await expect(page.getByText(/MMM: moved \$150 of cost basis to SOLV/)).toBeVisible();
+  expect(posted).toEqual({ ticker: 'MMM', new_ticker: 'SOLV', action_date: '2024-04-01', ratio: 0.25, basis_pct: 7.5 });
+});

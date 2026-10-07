@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../AuthContext';
-import { authFetch } from '../api/stockApi';
+import { authFetch, fetchAccounts } from '../api/stockApi';
 import { API_BASE } from '../api/config';
 
 const money = value => value == null ? 'Unavailable' : new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format(value);
@@ -26,10 +26,16 @@ function AccountLedger({ version }) {
   const [revision, setRevision] = useState(0);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [form, setForm] = useState({ kind: 'fee', amount: '', occurred_at: '', nav_before: '', event_id: '', cycle: '', quantity: '', note: '' });
+  const [form, setForm] = useState({ kind: 'fee', amount: '', occurred_at: '', nav_before: '', event_id: '', cycle: '', quantity: '', note: '', account: '' });
+  const [accounts, setAccounts] = useState([]);
   const pending = useRef(null);
   const active = useRef(false);
   useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
+  useEffect(() => {
+    let current = true;
+    fetchAccounts().then(data => { if (current) setAccounts((data.accounts || []).map(item => item.name)); }).catch(() => {});
+    return () => { current = false; };
+  }, [version]);
   useEffect(() => {
     let current = true;
     setError('');
@@ -60,6 +66,7 @@ function AccountLedger({ version }) {
     else body.amount = form.amount;
     if (form.event_id && ['fee', 'link'].includes(form.kind)) body.event_id = Number(form.event_id);
     if (form.nav_before && ['deposit', 'withdrawal'].includes(form.kind)) body.nav_before = form.nav_before;
+    if (form.account && ['deposit', 'withdrawal'].includes(form.kind)) body.account = form.account;
     save(body);
   };
   const loadMore = async () => {
@@ -93,6 +100,7 @@ function AccountLedger({ version }) {
       <label>Occurred at<input aria-label="Occurred at" name="occurred_at" type="datetime-local" required value={form.occurred_at} onChange={change} /></label>
       {form.kind !== 'link' && <label>Amount ($)<input name="amount" type="number" min={form.kind === 'valuation' ? '0' : '0.01'} step="0.01" required value={form.amount} onChange={change} /></label>}
       {['deposit', 'withdrawal'].includes(form.kind) && <label>NAV immediately before flow ($)<input name="nav_before" type="number" min="0" step="0.01" value={form.nav_before} onChange={change} /></label>}
+      {['deposit', 'withdrawal'].includes(form.kind) && <label>Brokerage account<input name="account" list="ledger-accounts" maxLength={40} placeholder="Default" value={form.account} onChange={change} /><datalist id="ledger-accounts">{accounts.map(name => <option key={name} value={name} />)}</datalist></label>}
       {['fee', 'link'].includes(form.kind) && <label>Ledger event ID{form.kind === 'fee' ? ' (optional)' : ''}<input name="event_id" type="number" min="1" step="1" required={form.kind === 'link'} value={form.event_id} onChange={change} /></label>}
       {form.kind === 'link' && <><label>Cycle name<input name="cycle" maxLength={80} required value={form.cycle} onChange={change} /></label><label>Shares / contracts<input name="quantity" type="number" min="0.000001" step="any" required value={form.quantity} onChange={change} /></label></>}
       <label>Note<input name="note" maxLength={500} value={form.note} onChange={change} /></label>
@@ -101,7 +109,7 @@ function AccountLedger({ version }) {
     {report && <>
       <h4>Manual entries</h4>
       <div className="accounting-table"><table className="market-table"><thead><tr><th>ID</th><th>Date</th><th>Entry</th><th>Amount</th><th>Reference</th><th>Correction</th></tr></thead><tbody>
-        {report.manual_entries.map(entry => <tr key={entry.id}><td>{entry.id}</td><td>{entry.occurred_at.slice(0, 10)}</td><td>{entry.kind}</td><td>{entry.kind === 'link' ? entry.quantity : money(entry.amount)}</td><td>{entry.cycle || entry.event_id || entry.note || '-'}</td><td><button className="btn-secondary" disabled={busy} onClick={() => save({ kind: 'reverse', event_id: entry.id, occurred_at: new Date().toISOString(), note: `Reversal of entry ${entry.id}` })}>Reverse #{entry.id}</button></td></tr>)}
+        {report.manual_entries.map(entry => <tr key={entry.id}><td>{entry.id}</td><td>{entry.occurred_at.slice(0, 10)}</td><td>{entry.kind}</td><td>{entry.kind === 'link' ? entry.quantity : money(entry.amount)}</td><td>{entry.cycle || entry.event_id || [entry.account, entry.note].filter(Boolean).join(' - ') || '-'}</td><td><button className="btn-secondary" disabled={busy} onClick={() => save({ kind: 'reverse', event_id: entry.id, occurred_at: new Date().toISOString(), note: `Reversal of entry ${entry.id}` })}>Reverse #{entry.id}</button></td></tr>)}
       </tbody></table></div>
       <h4>US informational tax lots</h4>
       <div className="accounting-table"><table className="market-table"><thead><tr><th>Event</th><th>Ticker</th><th>Acquired</th><th>Closed</th><th>Term</th><th>Basis</th><th>Proceeds</th><th>Fees</th><th>Gain</th></tr></thead><tbody>

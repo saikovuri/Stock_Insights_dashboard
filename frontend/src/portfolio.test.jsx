@@ -18,7 +18,7 @@ import MarketContext from './components/MarketContext';
 import PreTradeChecklist from './components/PreTradeChecklist';
 import Journal, { recordedTradeMetrics, recordedOptionStats, groupedOptionStats } from './components/Journal';
 import SearchBar from './components/SearchBar';
-import { NavHistory, SplitNotice } from './components/Accounts';
+import { NavHistory, CorporateActions } from './components/Accounts';
 import { ImportCsv } from './components/PortfolioInsights';
 import WheelManager from './components/WheelManager';
 import RollRepair from './components/RollRepair';
@@ -596,6 +596,33 @@ test('account ledger preserves idempotency on retry and displays missing TWR hon
   expect(submissions[0].amount).toBe('3.25');
 });
 
+test('account ledger assigns deposits and withdrawals to a brokerage account', async () => {
+  vi.spyOn(auth, 'useAuth').mockReturnValue({ user: { id: 1 } });
+  vi.spyOn(stockApi, 'fetchAccounts').mockResolvedValue({ accounts: [{ name: 'Default' }, { name: 'IRA' }] });
+  const submissions = [];
+  vi.spyOn(stockApi, 'authFetch').mockImplementation(async (url, options) => {
+    if (url.endsWith('/entries')) { submissions.push(JSON.parse(options.body)); return new Response(JSON.stringify({ id: 2 })); }
+    return new Response(JSON.stringify(url.endsWith('/report') ? { fees: 0, external_cash_flow: 0, dividends: 0, twr: { pct: null },
+      manual_entries: [{ id: 2, kind: 'deposit', amount: 500, account: 'IRA', occurred_at: '2026-01-01T12:00:00Z' }], tax_lots: [], cycles: [], notes: [] } : { events: [] }));
+  });
+  const { container } = render(<Accounting />);
+  expect(await screen.findByText('IRA')).toBeTruthy();
+  expect(screen.queryByLabelText('Brokerage account')).toBeNull();
+  fireEvent.change(screen.getByLabelText('Entry'), { target: { value: 'deposit' } });
+  fireEvent.change(screen.getByLabelText('Occurred at'), { target: { value: '2026-01-01T12:00' } });
+  fireEvent.change(screen.getByLabelText('Amount ($)'), { target: { value: '500' } });
+  fireEvent.change(screen.getByLabelText('Brokerage account'), { target: { value: 'IRA' } });
+  await waitFor(() => expect(container.querySelectorAll('#ledger-accounts option')).toHaveLength(2));
+  fireEvent.click(screen.getByRole('button', { name: 'Record entry' }));
+  await waitFor(() => expect(submissions).toHaveLength(1));
+  expect(submissions[0]).toMatchObject({ kind: 'deposit', amount: '500', account: 'IRA' });
+  fireEvent.change(screen.getByLabelText('Entry'), { target: { value: 'fee' } });
+  fireEvent.change(screen.getByLabelText('Amount ($)'), { target: { value: '1' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Record entry' }));
+  await waitFor(() => expect(submissions).toHaveLength(2));
+  expect(submissions[1].account).toBeUndefined();
+});
+
 test.each(['response', 'body', 'error'])('watchlist ignores an old account %s after switching accounts', async phase => {
   const session = vi.spyOn(auth, 'useAuth').mockReturnValue({ user: { id: 1 }, token: 'first' });
   let resolveOld, rejectOld;
@@ -942,7 +969,7 @@ test('signed-in watchlist filters lists, saves notes and shows next earnings', a
   vi.spyOn(stockApi, 'authFetch').mockResolvedValue(new Response(JSON.stringify({ stocks: [
     { ticker: 'AAPL', name: 'Apple', price: 200 }, { ticker: 'KO', name: 'Coca-Cola', price: 60 }] })));
   vi.spyOn(stockApi, 'fetchWatchlistItems').mockResolvedValue({ items: [
-    { ticker: 'AAPL', list_name: 'Growth', note: 'Buy under 180' }, { ticker: 'KO', list_name: 'Income', note: '' }] });
+    { ticker: 'AAPL', lists: ['Growth', 'Income'], list_name: 'Growth', note: 'Buy under 180' }, { ticker: 'KO', list_name: 'Income', note: '' }] });
   const ahead = new Date(Date.now() + 5 * 86400000);
   const soon = `${ahead.getFullYear()}-${String(ahead.getMonth() + 1).padStart(2, '0')}-${String(ahead.getDate()).padStart(2, '0')}`;
   vi.spyOn(stockApi, 'fetchWatchlistEarnings').mockResolvedValue({ items: [
@@ -951,14 +978,22 @@ test('signed-in watchlist filters lists, saves notes and shows next earnings', a
   render(<Watchlist />);
   expect(await screen.findByText('Buy under 180')).toBeTruthy();
   expect(await screen.findByText(/\(5d\)/)).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('List:'), { target: { value: 'Growth' } });
+  expect(screen.getByText('Buy under 180')).toBeTruthy();
+  expect(screen.queryByText('Coca-Cola')).toBeNull();
   fireEvent.change(screen.getByLabelText('List:'), { target: { value: 'Income' } });
-  expect(screen.queryByText('Buy under 180')).toBeNull();
+  expect(screen.getByText('Buy under 180')).toBeTruthy();
   expect(screen.getByText('Coca-Cola')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'List and notes for KO' }));
+  expect(screen.getByLabelText('Lists (comma-separated)').value).toBe('Income');
+  fireEvent.click(screen.getByRole('button', { name: '+ Growth' }));
+  expect(screen.getByLabelText('Lists (comma-separated)').value).toBe('Income, Growth');
   fireEvent.change(screen.getByLabelText('Note'), { target: { value: 'Dividend raise in Feb' } });
   fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-  await waitFor(() => expect(save).toHaveBeenCalledWith('KO', 'Income', 'Dividend raise in Feb'));
+  await waitFor(() => expect(save).toHaveBeenCalledWith('KO', ['Income', 'Growth'], 'Dividend raise in Feb'));
   expect(await screen.findByText('Dividend raise in Feb')).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('List:'), { target: { value: 'Growth' } });
+  expect(screen.getByText('Coca-Cola')).toBeTruthy();
 });
 
 test('account value history shows flow-adjusted return and drawdown and records on demand', async () => {
@@ -982,7 +1017,7 @@ test('split notice applies a pending split only after confirmation', async () =>
   const apply = vi.spyOn(stockApi, 'applySplit').mockResolvedValue({ ticker: 'NVDA', lots: 2, options: 1, options_skipped: 0 });
   const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
   const onApplied = vi.fn();
-  render(<SplitNotice version={0} onApplied={onApplied} />);
+  render(<CorporateActions version={0} onApplied={onApplied} />);
   const button = await screen.findByRole('button', { name: 'Apply adjustment' });
   fireEvent.click(button);
   expect(apply).not.toHaveBeenCalled();
@@ -991,6 +1026,36 @@ test('split notice applies a pending split only after confirmation', async () =>
   expect(apply).toHaveBeenCalledWith('NVDA', '2024-06-10');
   expect(confirm).toHaveBeenCalledTimes(2);
   expect(onApplied).toHaveBeenCalled();
+});
+
+test('corporate actions record a spin-off and prefill a merger for a stale holding', async () => {
+  vi.spyOn(stockApi, 'fetchCorporateActions').mockResolvedValue({ splits: [], stale: [{ ticker: 'ATVI', last_quote: '2023-10-12' }],
+    applied: [{ kind: 'spinoff', ticker: 'GE', action_date: '2024-04-02', details: { ratio: 0.25, new_ticker: 'GEV', basis_pct: 20 } }] });
+  const spinoff = vi.spyOn(stockApi, 'recordSpinoff').mockResolvedValue({ ticker: 'MMM', new_ticker: 'SOLV', lots: 1, basis_moved: 150, options_unadjusted: 1 });
+  const merger = vi.spyOn(stockApi, 'recordMerger').mockResolvedValue({ ticker: 'ATVI', new_ticker: null, lots: 2, realized_pnl: 900, options_unadjusted: 0 });
+  vi.spyOn(window, 'confirm').mockReturnValue(true);
+  const onApplied = vi.fn();
+  const { container } = render(<CorporateActions version={0} onApplied={onApplied} />);
+  expect(await screen.findByText(/no quotes since 2023-10-12/)).toBeTruthy();
+  expect(screen.getByRole('table', { name: 'Recorded corporate actions' }).textContent).toContain('0.25 GEV per share, 20% of basis');
+  const form = screen.getByRole('form', { name: 'Record corporate action' });
+  fireEvent.change(screen.getByLabelText('Ticker you hold'), { target: { value: 'mmm' } });
+  fireEvent.change(screen.getByLabelText('Ex-date'), { target: { value: '2024-04-01' } });
+  fireEvent.change(screen.getByLabelText('New company ticker'), { target: { value: 'solv' } });
+  fireEvent.change(screen.getByLabelText('New shares per share held'), { target: { value: '0.25' } });
+  fireEvent.change(screen.getByLabelText('% of cost basis to new company'), { target: { value: '7.5' } });
+  fireEvent.submit(form);
+  await waitFor(() => expect(spinoff).toHaveBeenCalledWith({ ticker: 'MMM', new_ticker: 'SOLV', action_date: '2024-04-01', ratio: 0.25, basis_pct: 7.5 }));
+  expect(await screen.findByText(/MMM: moved \$150 of cost basis to SOLV across 1 lot\(s\)\. 1 open MMM option/)).toBeTruthy();
+  expect(onApplied).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole('button', { name: 'Record merger' }));
+  expect(container.querySelector('details').open).toBe(true);
+  expect(screen.getByLabelText('Ticker you hold').value).toBe('ATVI');
+  fireEvent.change(screen.getByLabelText('Closing date'), { target: { value: '2023-10-13' } });
+  fireEvent.change(screen.getByLabelText('Cash per share ($)'), { target: { value: '95' } });
+  fireEvent.submit(form);
+  await waitFor(() => expect(merger).toHaveBeenCalledWith({ ticker: 'ATVI', action_date: '2023-10-13', ratio: 0, cash_per_share: 95 }));
+  expect(await screen.findByText(/ATVI: closed 2 lot\(s\) for cash, realized \$900/)).toBeTruthy();
 });
 
 test('broker import previews closed trade history into the selected account', async () => {

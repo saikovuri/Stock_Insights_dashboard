@@ -4912,6 +4912,8 @@ button.signal-chip { cursor: pointer; }
 .watchlist-note-editor { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: flex-end; }
 .watchlist-note-editor label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.8rem; }
 .watchlist-note-editor textarea { min-width: min(28rem, 80vw); }
+.watchlist-list-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.watchlist-list-chips [aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
 
 /* Pinch-zoom is allowed; 16px inputs stop iOS from auto-zooming on focus (overrides denser component sizes). */
 @media (max-width: 768px) {

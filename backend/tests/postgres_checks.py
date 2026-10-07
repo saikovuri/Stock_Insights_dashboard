@@ -120,6 +120,21 @@ def main():
         corporate_actions.apply_split(user, "SPLT", "2024-06-10")
         assert corporate_actions.pending_splits(user) == []
     assert [(h["shares"], h["buy_price"]) for h in database.get_user_holdings(user) if h["ticker"] == "SPLT"] == [(20, 25)]
+    database.add_to_watchlist(user, "NVDA", "Semis")
+    assert database.update_watchlist_item(user, "NVDA", ["Semis", "AI"], "note")
+    assert database.get_watchlist_items(user)[0]["lists"] == ["AI", "Semis"]
+    database.add_user_holding(user, "PRNT", 10, 100, "2023-01-02 00:00:00", account="IRA")
+    database.add_user_holding(user, "TGT", 10, 40, "2023-01-02 00:00:00")
+    corporate_actions.apply_spinoff(user, "PRNT", "CHLD", "2024-04-01", 0.5, 25)
+    corporate_actions.apply_merger(user, "TGT", "2025-06-02", None, 0, 55)
+    child = next(h for h in database.get_user_holdings(user) if h["ticker"] == "CHLD")
+    assert (child["shares"], child["buy_price"], child["account"]) == (5, 50, "IRA"), child
+    cashed = next(t for t in database.get_closed_trades(user) if t["ticker"] == "TGT")
+    assert cashed["pnl"] == 150 and str(cashed["closed_at"])[:10] == "2025-06-02", cashed
+    copy = database.create_user(uuid4().hex, "test-only", "Corporate action copy")["id"]
+    account_transfer.import_account(copy, account_transfer.export_account(user))
+    assert database.get_watchlist_items(copy)[0]["lists"] == ["AI", "Semis"]
+    assert {a["ticker"] for a in corporate_actions.applied_actions(copy)} == {"PRNT", "TGT"}
     transferred = next(row for row in database.get_closed_options(destination) if row["ticker"] == "WDC")
     assert transferred["net_pnl"] == 92.5 and transferred["is_manual"]
     assert transferred["review"]["target_capture_pct"] == 50

@@ -528,14 +528,16 @@ export const fetchNavHistory = (account = '') => getJson(`${BASE}/portfolio/nav-
 export const recordNavSnapshot = () => sendJson(`${BASE}/portfolio/nav-snapshot`, 'POST', null, 'Failed to record account value');
 export const fetchCorporateActions = () => getJson(`${BASE}/portfolio/corporate-actions`, 'Failed to check splits', true);
 export const applySplit = (ticker, split_date) => sendJson(`${BASE}/portfolio/corporate-actions/apply`, 'POST', { ticker, split_date }, 'Failed to apply split');
+export const recordSpinoff = (body) => sendJson(`${BASE}/portfolio/corporate-actions/spinoff`, 'POST', body, 'Failed to record spin-off');
+export const recordMerger = (body) => sendJson(`${BASE}/portfolio/corporate-actions/merger`, 'POST', body, 'Failed to record merger');
 export const searchSymbols = (q, signal) =>
   netFetch(`${BASE}/search?q=${encodeURIComponent(q)}`, { signal }).then(async res => {
     if (!res.ok) throw new Error(await readError(res, 'Search failed'));
     return res.json();
   });
 export const fetchWatchlistItems = () => getJson(`${BASE}/watchlist`, 'Failed to load watchlist', true);
-export const updateWatchlistItem = (ticker, list_name, note) =>
-  sendJson(`${BASE}/watchlist/${encodeURIComponent(ticker)}`, 'PUT', { list_name, note }, 'Failed to save watchlist note');
+export const updateWatchlistItem = (ticker, lists, note) =>
+  sendJson(`${BASE}/watchlist/${encodeURIComponent(ticker)}`, 'PUT', { lists, note }, 'Failed to save watchlist note');
 export const fetchWatchlistEarnings = () => getJson(`${BASE}/watchlist/earnings`, 'Failed to load earnings dates', true);
 export const fetchWeeklyReview = (refresh = false) =>
   getJson(`${BASE}/weekly-review${refresh ? '?refresh=true' : ''}`, 'Failed to load weekly review', true);

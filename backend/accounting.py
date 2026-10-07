@@ -137,7 +137,7 @@ def record_entry(user_id, request):
                        (user_id, request.idempotency_key))
         existing = database._fetchone(cursor)
         if existing:
-            previous = {"exit_reason": None, "target_capture_pct": None, **json.loads(existing["after_json"])}
+            previous = {"exit_reason": None, "target_capture_pct": None, "account": None, **json.loads(existing["after_json"])}
             if previous != payload:
                 raise ValueError("Request key already used for a different entry")
             return {"id": existing["id"]}

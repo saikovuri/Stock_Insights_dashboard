@@ -84,7 +84,21 @@ class FeatureTests(unittest.TestCase):
         self.assertIsNone(navs[2], "missing marks must not become a value")
         self.assertAlmostEqual(history["return_pct"], 0.0, places=2, msg="the deposit must not count as a return")
         self.assertTrue(history["flow_adjusted"])
-        self.assertFalse(accounts_module.nav_history(uid, "IRA")["flow_adjusted"])
+        self.assertAlmostEqual(accounts_module.nav_history(uid, "Default")["return_pct"], 0.0, places=2,
+                               msg="unassigned ledger flows count toward Default")
+        self.assertTrue(accounts_module.nav_history(uid, "IRA")["flow_adjusted"])
+        self.assertEqual(accounts_module._external_flows(uid, "IRA"), {})
+        from decimal import Decimal
+        withdrawal = {"kind": "withdrawal", "amount": "500", "account": "IRA", "idempotency_key": uuid4().hex,
+                      "occurred_at": datetime(2026, 3, 2, tzinfo=timezone.utc)}
+        first = accounting.record_entry(uid, withdrawal)
+        self.assertEqual(accounting.record_entry(uid, withdrawal), first, "retries stay idempotent")
+        self.assertEqual(accounts_module._external_flows(uid, "IRA"), {"2026-03-02": Decimal("-500")})
+        self.assertEqual(accounts_module._external_flows(uid, "Default"), {"2026-03-02": Decimal("10000")})
+        self.assertEqual(accounts_module._external_flows(uid), {"2026-03-02": Decimal("9500")})
+        with self.assertRaisesRegex(ValueError, "Only deposits and withdrawals"):
+            accounting.record_entry(uid, {"kind": "fee", "amount": "1", "account": "IRA", "idempotency_key": uuid4().hex,
+                                          "occurred_at": datetime(2026, 3, 2, tzinfo=timezone.utc)})
 
     def test_expire_worthless_and_close_link_cycles(self):
         uid = new_user()
@@ -170,12 +184,21 @@ class FeatureTests(unittest.TestCase):
     def test_watchlist_groups_notes_earnings_search_and_route_conflicts(self):
         uid = new_user()
         database.add_to_watchlist(uid, "AAPL")
+        database.add_to_watchlist(uid, "NVDA", "Semis")
         with self.as_user(uid):
-            self.assertEqual(self.client.put("/api/watchlist/AAPL", json={"list_name": "Core", "note": "Buy < 180"}).status_code, 200)
-            self.assertEqual(self.client.put("/api/watchlist/MSFT", json={"list_name": "Core"}).status_code, 404)
+            self.assertEqual(self.client.put("/api/watchlist/AAPL", json={"lists": ["Core", " Income ", "core"], "note": "Buy < 180"}).status_code, 200)
+            self.assertEqual(self.client.put("/api/watchlist/MSFT", json={"lists": ["Core"]}).status_code, 404)
+            self.assertEqual(self.client.put("/api/watchlist/AAPL", json={"lists": []}).status_code, 422)
+            self.assertEqual(self.client.put("/api/watchlist/AAPL", json={"lists": ["x" * 41]}).status_code, 422)
             items = self.client.get("/api/watchlist").json()
-            self.assertEqual(items["items"], [{"ticker": "AAPL", "list_name": "Core", "note": "Buy < 180"}])
-            self.assertEqual(items["tickers"], ["AAPL"])
+            self.assertEqual(items["items"], [
+                {"ticker": "AAPL", "lists": ["Core", "Income"], "list_name": "Core", "note": "Buy < 180"},
+                {"ticker": "NVDA", "lists": ["Semis"], "list_name": "Semis", "note": ""}])
+            self.assertEqual(items["tickers"], ["AAPL", "NVDA"])
+            self.assertEqual(self.client.delete("/api/watchlist/AAPL").status_code, 200)
+            self.assertEqual(database._run(f"SELECT COUNT(*) AS n FROM watchlist_lists WHERE user_id={database.PH}", (uid,), "one")["n"], 0)
+            database.add_to_watchlist(uid, "AAPL")
+            self.assertEqual(self.client.get("/api/watchlist").json()["items"][1]["lists"], ["Main"], "removed memberships must not resurface")
             with patch.object(self.main.options_analytics, "earnings_info",
                               return_value={"next": "2026-10-30", "next_timing": "after close", "next_confirmed": True}):
                 self.assertEqual(self.client.get("/api/watchlist/earnings").json()["items"][0]["next"], "2026-10-30")
@@ -193,6 +216,91 @@ class FeatureTests(unittest.TestCase):
             results = self.client.get("/api/search", params={"q": "app"}).json()["results"]
             self.assertEqual([r["symbol"] for r in results], ["APP", "AAPL", "APPN"])
             self.assertEqual(self.client.get("/api/search", params={"q": "microsoft"}).json()["results"][0]["symbol"], "MSFT")
+
+    def test_spinoff_moves_basis_and_keeps_lot_date_and_account(self):
+        uid = new_user()
+        old = database.add_user_holding(uid, "GE", 10, 100, "2023-01-05 00:00:00", account="IRA")
+        database.add_user_holding(uid, "GE", 4, 150, "2024-05-01 00:00:00")
+        with self.as_user(uid):
+            body = {"ticker": "GE", "new_ticker": "GEV", "action_date": "2024-04-02", "ratio": 0.25, "basis_pct": 20}
+            self.assertEqual(self.client.post("/api/portfolio/corporate-actions/spinoff", json={**body, "new_ticker": "GE"}).status_code, 422)
+            self.assertEqual(self.client.post("/api/portfolio/corporate-actions/spinoff", json={**body, "action_date": "2999-01-01"}).status_code, 422)
+            response = self.client.post("/api/portfolio/corporate-actions/spinoff", json=body)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual((response.json()["lots"], response.json()["basis_moved"]), (1, 200))
+            self.assertEqual(self.client.post("/api/portfolio/corporate-actions/spinoff", json=body).status_code, 409)
+            self.assertEqual(self.client.post("/api/portfolio/corporate-actions/spinoff",
+                                              json={**body, "ticker": "MSFT", "new_ticker": "XYZ"}).status_code, 404)
+        lots = {(h["ticker"], h["account"]): h for h in database.get_user_holdings(uid)}
+        self.assertEqual(lots[("GE", "IRA")]["buy_price"], 80, "parent keeps 80% of its basis")
+        child = lots[("GEV", "IRA")]
+        self.assertEqual((child["shares"], child["buy_price"]), (2.5, 80))
+        self.assertEqual(str(child["date_added"])[:10], str(old["date_added"])[:10], "holding period carries over")
+        self.assertEqual(lots[("GE", None)]["buy_price"], 150, "lots bought after the ex-date are untouched")
+        total = sum(h["shares"] * h["buy_price"] for h in database.get_user_holdings(uid))
+        self.assertAlmostEqual(total, 10 * 100 + 4 * 150, places=6, msg="total basis is conserved")
+
+    def test_merger_cash_stock_and_mixed_deals(self):
+        uid = new_user()
+        database.add_user_holding(uid, "CASHCO", 10, 40, "2023-01-05 00:00:00")
+        database.add_user_holding(uid, "STOCKCO", 10, 60, "2023-01-05 00:00:00", account="IRA")
+        database.add_user_holding(uid, "MIXCO", 10, 30, "2023-01-05 00:00:00")
+        database.add_user_option(uid, "STOCKCO", "call", 70, "2099-01-15", 1, 1, "short", account="IRA")
+        with self.as_user(uid):
+            post = lambda body: self.client.post("/api/portfolio/corporate-actions/merger", json=body)
+            self.assertEqual(post({"ticker": "CASHCO", "action_date": "2025-06-02"}).status_code, 422)
+            self.assertEqual(post({"ticker": "CASHCO", "action_date": "2025-06-02", "ratio": 1}).status_code, 422)
+            cash = post({"ticker": "CASHCO", "action_date": "2025-06-02", "cash_per_share": 55})
+            self.assertEqual((cash.status_code, cash.json()["realized_pnl"]), (200, 150), cash.text)
+            stock = post({"ticker": "STOCKCO", "action_date": "2025-06-02", "new_ticker": "BIGCO", "ratio": 0.5})
+            self.assertEqual((stock.status_code, stock.json()["options_unadjusted"]), (200, 1), stock.text)
+            mixed = post({"ticker": "MIXCO", "action_date": "2025-06-02", "new_ticker": "BIGCO", "ratio": 2, "cash_per_share": 35})
+            self.assertEqual((mixed.status_code, mixed.json()["lots_cash_above_basis"]), (200, 1), mixed.text)
+            self.assertEqual(post({"ticker": "MIXCO", "action_date": "2025-06-02", "cash_per_share": 1}).status_code, 409)
+            import corporate_actions
+            with patch.object(corporate_actions, "_splits", return_value=[]), patch.object(corporate_actions, "_last_bar", return_value=None):
+                applied = self.client.get("/api/portfolio/corporate-actions").json()
+        self.assertEqual({a["ticker"] for a in applied["applied"]}, {"CASHCO", "STOCKCO", "MIXCO"})
+        closed = database.get_closed_trades(uid)
+        self.assertEqual([(t["ticker"], t["pnl"], str(t["closed_at"])[:10]) for t in closed], [("CASHCO", 150, "2025-06-02")])
+        lots = sorted((h["ticker"], h["account"] or "", h["shares"], h["buy_price"]) for h in database.get_user_holdings(uid))
+        self.assertEqual(lots, [("BIGCO", "", 20, 0), ("BIGCO", "IRA", 5, 120)])
+        import account_transfer
+        destination = new_user()
+        account_transfer.import_account(destination, account_transfer.export_account(uid))
+        with self.as_user(destination):
+            again = self.client.post("/api/portfolio/corporate-actions/merger",
+                                     json={"ticker": "STOCKCO", "action_date": "2025-06-02", "new_ticker": "BIGCO", "ratio": 0.5})
+            self.assertEqual(again.status_code, 409, "transferred actions must not be applied twice")
+
+    def test_stale_holdings_need_a_fresh_benchmark(self):
+        import corporate_actions
+        uid = new_user()
+        database.add_user_holding(uid, "LIVE", 1, 10)
+        database.add_user_holding(uid, "GONE", 1, 10)
+        database.add_user_holding(uid, "OLDBAR", 1, 10)
+        database.add_user_holding(uid, "ERR", 1, 10)
+        today = date.today().isoformat()
+        bars = {"SPY": today, "LIVE": today, "GONE": "", "OLDBAR": "2020-01-02", "ERR": None}
+        with patch.object(corporate_actions, "_last_bar", side_effect=bars.get):
+            self.assertEqual(corporate_actions.stale_holdings(uid), [
+                {"ticker": "GONE", "last_quote": None}, {"ticker": "OLDBAR", "last_quote": "2020-01-02"}])
+        with patch.object(corporate_actions, "_last_bar", side_effect={**bars, "SPY": ""}.get):
+            self.assertEqual(corporate_actions.stale_holdings(uid), [], "an outage must not flag every holding")
+
+    def test_refresh_tokens_are_hashed_and_legacy_tokens_still_work_once(self):
+        uid = new_user()
+        database.store_refresh_token(uid, "new-token-value", "2999-01-01T00:00:00")
+        stored = database._run(f"SELECT token FROM refresh_tokens WHERE user_id={database.PH}", (uid,), "all")
+        self.assertEqual([r["token"] for r in stored], [database._token_digest("new-token-value")])
+        self.assertEqual(database.consume_refresh_token("new-token-value")["user_id"], uid)
+        self.assertIsNone(database.consume_refresh_token("new-token-value"))
+        self.assertIsNone(database.consume_refresh_token(database._token_digest("new-token-value")),
+                          "a leaked digest is not itself a usable token")
+        database._run(f"INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES ({database.PH}, {database.PH}, {database.PH})",
+                      (uid, "legacy-plain", "2999-01-01T00:00:00"))
+        self.assertEqual(database.consume_refresh_token("legacy-plain")["user_id"], uid)
+        self.assertIsNone(database.consume_refresh_token("legacy-plain"))
 
 
 if __name__ == "__main__":

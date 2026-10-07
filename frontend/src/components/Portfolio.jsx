@@ -16,7 +16,8 @@ import { Today, Earnings, WhatIf } from './OptionsDesk';
 import { ImportCsv } from './PortfolioInsights';
 import CorrelationHeatmap from './CorrelationHeatmap';
 import AccountTransfer from './AccountTransfer';
-import { AccountBar, NavHistory, SplitNotice } from './Accounts';
+import { AccountBar, NavHistory, CorporateActions } from './Accounts';
+import { ClosedStocks, ClosedOptions } from './ClosedHistory';
 import Skeleton from './Skeleton';
 
 const GUEST_HOLDINGS_KEY = 'guest_holdings';
@@ -393,7 +394,7 @@ export default function Portfolio() {
         {!isGuest && <PortfolioInsights tickers={[...new Set(holdings.map(item => item.ticker))]} version={version} onImported={loadStocks} />}
       </section>}
       {section === 'holdings' && <>
-      {!isGuest && <SplitNotice version={transferRevision} onApplied={() => { loadStocks(); loadOptions(); }} />}
+      {!isGuest && <CorporateActions version={transferRevision} onApplied={() => { loadStocks(); loadOptions(); }} />}
       {/* ── Realized P/L Banner ─────────────────────────── */}
       {(closedStocks?.trades?.length > 0 || closedOpts?.trades?.length > 0) && (
         <div className={`realized-pnl-banner ${totalRealizedPnl >= 0 ? 'banner-positive' : 'banner-negative'}`}>
@@ -608,63 +609,7 @@ export default function Portfolio() {
 
       {/* ── Sold Stocks ───────────────────────────────────────── */}
       {tab === 'stocks' && view === 'sold' && (
-        <>
-          {closedStocks?.trades?.length > 0 ? (
-            <>
-              <div className="metrics-grid" style={{ marginTop: '0.5rem' }}>
-                <div className="metric">
-                  <span className="metric-label">Closed Trades</span>
-                  <span className="metric-value">{closedStocks.trades.length}</span>
-                </div>
-                <div className={`metric ${closedStocks.total_realized_pnl >= 0 ? 'metric-positive' : 'metric-negative'}`}>
-                  <span className="metric-label">Realized P/L</span>
-                  <span className={`metric-value ${closedStocks.total_realized_pnl >= 0 ? 'positive' : 'negative'}`}>
-                    ${closedStocks.total_realized_pnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </span>
-                </div>
-              </div>
-              <table className="portfolio-table">
-                <thead>
-                  <tr>
-                    <th>Ticker</th>
-                    <th>Shares</th>
-                    <th>Buy Price</th>
-                    <th>Sell Price</th>
-                    <th>P/L ($)</th>
-                    <th>P/L %</th>
-                    <th>Date</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {closedStocks.trades.map((t) => (
-                    <tr key={t.id}>
-                      <td><strong>{t.ticker}</strong></td>
-                      <td>{t.shares}</td>
-                      <td>${t.buy_price.toFixed(2)}</td>
-                      <td>${t.sell_price.toFixed(2)}</td>
-                      <td className={t.pnl >= 0 ? 'positive' : 'negative'}>${t.pnl.toFixed(2)}</td>
-                      <td className={t.pnl_pct >= 0 ? 'positive' : 'negative'}>{t.pnl_pct.toFixed(2)}%</td>
-                      <td>{new Date(t.closed_at).toLocaleDateString()}</td>
-                      <td className="action-cell">
-                        {confirmDelete?.type === 'closed-stock' && confirmDelete?.id === t.id ? (
-                          <>
-                            <button className="btn-icon btn-confirm-del" title="Confirm delete" onClick={() => handleDeleteClosed('closed-stock', t.id)}>✔</button>
-                            <button className="btn-icon" title="Cancel" onClick={() => setConfirmDelete(null)}>✕</button>
-                          </>
-                        ) : (
-                          <button className="btn-icon" title="Remove from history" onClick={() => setConfirmDelete({ type: 'closed-stock', id: t.id })}>🗑️</button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </>
-          ) : (
-            <p className="empty-state">No sold stocks yet. Sell a position to see it here.</p>
-          )}
-        </>
+        <ClosedStocks data={closedStocks} confirmDelete={confirmDelete} setConfirmDelete={setConfirmDelete} onDelete={handleDeleteClosed} />
       )}
 
       {/* ── Options Tab ───────────────────────────────────────── */}
@@ -887,77 +832,7 @@ export default function Portfolio() {
             Options tracking requires an account. Sign in to view closed options.
           </div>
         ) : (
-        <>
-          {closedOpts?.trades?.length > 0 ? (
-            <>
-              <div className="metrics-grid" style={{ marginTop: '0.5rem' }}>
-                <div className="metric">
-                  <span className="metric-label">Closed Trades</span>
-                  <span className="metric-value">{closedOpts.trades.length}</span>
-                </div>
-                <div className={`metric ${closedOpts.total_realized_pnl >= 0 ? 'metric-positive' : 'metric-negative'}`}>
-                  <span className="metric-label">Gross Realized P/L</span>
-                  <span className={`metric-value ${closedOpts.total_realized_pnl >= 0 ? 'positive' : 'negative'}`}>
-                    ${closedOpts.total_realized_pnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </span>
-                </div>
-                <div className="metric"><span className="metric-label">Recorded Fees</span><span className="metric-value">{closedOpts.total_fees == null ? 'Unavailable' : `$${closedOpts.total_fees.toFixed(2)}`}</span></div>
-                <div className="metric"><span className="metric-label">Net Realized P/L</span><span className="metric-value">{closedOpts.total_net_pnl == null ? 'Unavailable' : `$${closedOpts.total_net_pnl.toFixed(2)}`}</span></div>
-              </div>
-              <div className="table-scroll"><table className="portfolio-table">
-                <thead>
-                  <tr>
-                    <th>Ticker</th>
-                    <th>Type</th>
-                    <th>Side</th>
-                    <th>Strike</th>
-                    <th>Expiry</th>
-                    <th>Qty</th>
-                    <th>Open</th>
-                    <th>Close</th>
-                    <th>Gross P/L ($)</th>
-                    <th>Fees ($)</th>
-                    <th>Net P/L ($)</th>
-                    <th>Gross P/L %</th>
-                    <th>Date</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {closedOpts.trades.map((t) => (
-                    <tr key={t.id}>
-                      <td><strong>{t.ticker}</strong></td>
-                      <td className={t.option_type === 'call' ? 'positive' : 'negative'}>{t.option_type.toUpperCase()}</td>
-                      <td><span className={`side-badge side-${t.position}`}>{t.position.toUpperCase()}</span></td>
-                      <td>${t.strike.toFixed(2)}</td>
-                      <td>{t.expiry}</td>
-                      <td>{t.contracts}</td>
-                      <td>${t.open_premium.toFixed(2)}</td>
-                      <td>${t.close_premium.toFixed(2)}</td>
-                      <td className={t.pnl >= 0 ? 'positive' : 'negative'}>${t.pnl.toFixed(2)}</td>
-                      <td>{t.fees == null ? 'Unavailable' : `$${t.fees.toFixed(2)}`}</td>
-                      <td>{t.net_pnl == null ? 'Unavailable' : `$${t.net_pnl.toFixed(2)}`}</td>
-                      <td className={t.pnl_pct >= 0 ? 'positive' : 'negative'}>{t.pnl_pct.toFixed(2)}%</td>
-                      <td>{String(t.closed_at).slice(0, 10)}</td>
-                      <td className="action-cell">
-                        {confirmDelete?.type === 'closed-option' && confirmDelete?.id === t.id ? (
-                          <>
-                            <button className="btn-icon btn-confirm-del" title="Confirm delete" onClick={() => handleDeleteClosed('closed-option', t.id)}>✔</button>
-                            <button className="btn-icon" title="Cancel" onClick={() => setConfirmDelete(null)}>✕</button>
-                          </>
-                        ) : (
-                          <button className="btn-icon" title="Remove from history" onClick={() => setConfirmDelete({ type: 'closed-option', id: t.id })}>🗑️</button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table></div>
-            </>
-          ) : (
-            <p className="empty-state">No closed options yet. Close a position to see it here.</p>
-          )}
-        </>
+          <ClosedOptions data={closedOpts} confirmDelete={confirmDelete} setConfirmDelete={setConfirmDelete} onDelete={handleDeleteClosed} />
         )
       )}
       {!isGuest && <details className="portfolio-section"><summary>Import from broker CSV</summary><ImportCsv account={account} onImported={() => { loadStocks(); loadOptions(); loadClosed(); }} /></details>}

@@ -576,11 +576,11 @@ Guest watchlists are local to the browser. Signed-in lists synchronize to the ac
 
 Signed-in users can also:
 
-- **Group symbols into lists.** Each symbol belongs to one list (default **Main**); the **List** filter shows one list at a time, and new symbols added while a list is selected join it. A symbol cannot appear in two lists.
+- **Group symbols into lists.** A symbol can belong to up to ten lists (default **Main**). In the 📝 editor, type list names separated by commas or toggle existing lists with the buttons below the field; names are trimmed, matched case-insensitively and limited to 40 characters. The **List** filter shows every symbol in the chosen list, and new symbols added while a list is selected join it. Removing a symbol from the watchlist removes it from all lists.
 - **Keep a note** (up to 500 characters) per symbol with the 📝 button; the note shows under the company name.
 - **See next earnings** in the Earnings column, using the canonical Finnhub + Yahoo dates (earlier date wins). Dates within 14 days are highlighted with a day count; `*` marks dates the providers do not confirm. Unknown dates show `—`, which is not evidence that no report is scheduled. Up to 60 symbols are checked.
 
-Source: [frontend/src/components/Watchlist.jsx](frontend/src/components/Watchlist.jsx).
+Source: [frontend/src/components/Watchlist.jsx](frontend/src/components/Watchlist.jsx), [backend/routes_watchlist.py](backend/routes_watchlist.py).
 
 ## Portfolio: Holdings
 
@@ -590,7 +590,7 @@ Portfolio has **Holdings**, **Portfolio Risk**, and **Income & Performance**. Ho
 
 Signed-in users can label records with brokerage accounts (for example Taxable, Roth IRA) inside one login. The account bar's selector filters current stocks, options and closed history; **All accounts** combines them and shows a badge on records outside Default. New lots, options and imports go into the selected account (All accounts records into **Default**). Ticker-level sales consume FIFO lots from the selected account only, and covered-call assignment only uses shares in the option's account; assigned puts add shares to the option's account. Closed records inherit the lot's account. Existing records belong to Default. Names allow letters, numbers, spaces and `. _ & ' ( ) -`, up to 40 characters.
 
-Select an account to enter its **cash balance**. Free cash = cash minus gross short-put collateral (strike × 100 × contracts) for that account, without netting credits or protective wings. Cash is a user-entered balance, not a ledger: it does not change automatically when you record trades, and it is not broker buying power or margin. Risk, Doctor, tax, dividends, the ledger and the SPY comparison remain combined across accounts; Account ledger deposits and withdrawals are not assigned to accounts.
+Select an account to enter its **cash balance**. Free cash = cash minus gross short-put collateral (strike × 100 × contracts) for that account, without netting credits or protective wings. Cash is a user-entered balance, not a ledger: it does not change automatically when you record trades, and it is not broker buying power or margin. Risk, Doctor, tax, dividends, the ledger report and the SPY comparison remain combined across accounts. Account ledger deposits and withdrawals can name a brokerage account, which makes that account's value history flow-adjusted; entries without an account count toward Default.
 
 ### Stocks
 
@@ -626,15 +626,25 @@ After expiry (past the 4 p.m. Eastern close on the expiry date), an option shows
 
 When buying or selling to close, the optional **Wheel cycle** field, or the expiry prompt, links the new closed record to a named cycle after the close is saved. For a roll, close the old leg with the cycle name, then open the new leg. If the link fails, the close stays recorded and the message says it was not linked; link it later from Journal's Wheel cycles. Retries cannot double-link the same close.
 
-### Stock Splits
+### Stock Splits and Other Corporate Actions
 
 Holdings checks recorded tickers against the provider's split history. A split is offered only when lots acquired, or open options opened, before the split date exist and that split has not already been applied. **Apply adjustment** asks for confirmation, then in one transaction multiplies shares and divides cost per share for those lots. For whole-number forward splits (2-for-1, 10-for-1) it also multiplies contracts and divides strike and premium for open options spanning the date. Other ratios (3-for-2, reverse splits) create nonstandard adjusted contracts. Those options are left unchanged and flagged for a manual edit.
 
-Each split applies once per account; every change is captured by the audit trail and logged as a SPLIT transaction. Closed trades are not restated. Spin-offs, mergers, special dividends and cash-in-lieu are not detected. Lots dated at import time instead of the real acquisition date can be missed.
+Each split applies once per account; every change is captured by the audit trail and logged as a SPLIT transaction. Closed trades are not restated. Lots dated at import time instead of the real acquisition date can be missed.
 
-Common cash-settled index symbols cannot use the physical-share assignment workflow. Adjusted/nonstandard contracts, corporate actions and tax basis adjustments need external reconciliation. Source edits remain possible, but the signed-in account's audit history retains changes.
+Spin-offs and mergers are not published reliably by the free data sources, so you enter their terms under **Record a spin-off or merger**. Each asks for confirmation, runs in one transaction, is recorded once per ticker and date (a repeat is rejected), and is logged as a SPINOFF or MERGER transaction. Recorded actions are listed under the form.
 
-Source: [frontend/src/components/Portfolio.jsx](frontend/src/components/Portfolio.jsx), [backend/database.py](backend/database.py), [backend/portfolio_models.py](backend/portfolio_models.py).
+- **Spin-off:** every lot of the parent acquired before the ex-date receives *ratio* new shares per share. The new lot keeps the original acquisition date and account. The entered percentage of the lot's cost basis (from the company's Form 8937 basis notice) moves to the new lot, and the parent keeps the rest, so total basis is unchanged. Cash in lieu of fractional shares is not recorded; fractional new shares are kept.
+- **All-cash merger:** every lot held on the closing date is closed at the cash price, dated the closing date, and appears in Sold history and the tax lots.
+- **Stock merger:** every lot is converted in place to the acquirer at *ratio* new shares per share, with total basis, acquisition date and account unchanged.
+- **Cash-and-stock merger:** lots convert as in a stock merger, and the cash per share reduces the cost basis (not below zero). Any gain the cash triggers is **not** recorded; the result notes lots where the cash exceeded basis. Check your 1099-B.
+- Open options on the old ticker are never changed; the result says how many need a manual edit or close.
+
+Holdings also flags held tickers with no daily quote for more than seven days, a common sign of an acquisition or delisting, with a **Record merger** shortcut. The check runs only while SPY has a fresh quote, so a data outage does not flag every holding. Up to 40 tickers are checked, and quote dates are cached for six hours. A flag is a prompt to check, not confirmation of a deal. Special dividends and return-of-capital distributions are not handled.
+
+Common cash-settled index symbols cannot use the physical-share assignment workflow. Adjusted/nonstandard contracts and tax basis adjustments beyond the cases above need external reconciliation. Source edits remain possible, but the signed-in account's audit history retains changes.
+
+Source: [frontend/src/components/Portfolio.jsx](frontend/src/components/Portfolio.jsx), [frontend/src/components/Accounts.jsx](frontend/src/components/Accounts.jsx), [frontend/src/components/ClosedHistory.jsx](frontend/src/components/ClosedHistory.jsx), [backend/corporate_actions.py](backend/corporate_actions.py), [backend/routes_accounts.py](backend/routes_accounts.py), [backend/database.py](backend/database.py), [backend/portfolio_models.py](backend/portfolio_models.py).
 
 ## Portfolio: Portfolio Risk
 
@@ -702,7 +712,7 @@ This workspace includes the account value history, the portfolio history chart a
 
 On trading days at 3:45 p.m. Eastern (while option quotes are live) the scheduler records each account's value: entered cash + current stock value + option marks. Long options add and short options subtract `midpoint × 100 × contracts`. **Record value now** records today's snapshot immediately. A later recording on the same day replaces it. Any missing stock or option quote, or an account without a cash balance, makes that day **incomplete**. Incomplete days are left out of the chart and statistics rather than valued at zero.
 
-The chart follows the account selector. For **All accounts**, daily returns remove Account ledger deposits and withdrawals: `(value today - net flows since the previous snapshot) / previous value`. The results chain into a time-weighted return, and max drawdown is the largest peak-to-trough fall of that index. A single account's chart is **not** flow-adjusted, because ledger flows are not assigned to accounts. A deposit shown only as a higher cash balance looks like a gain unless it is also recorded in the Account ledger. Snapshot cadence, stale quotes, scheduler downtime and entered-cash accuracy limit precision. History starts when snapshots begin; past values are not reconstructed.
+The chart follows the account selector. Daily returns remove Account ledger deposits and withdrawals: `(value today - net flows since the previous snapshot) / previous value`. **All accounts** uses every flow; a single account uses the flows assigned to it, and flows recorded without an account count toward Default. A move between your own accounts needs a withdrawal from one and a deposit to the other; the pair cancels out in All accounts. The results chain into a time-weighted return, and max drawdown is the largest peak-to-trough fall of that index. A deposit shown only as a higher cash balance looks like a gain unless it is also recorded in the Account ledger. Snapshot cadence, stale quotes, scheduler downtime and entered-cash accuracy limit precision. History starts when snapshots begin; past values are not reconstructed.
 
 ### Portfolio Performance Chart
 
@@ -720,7 +730,7 @@ This view is **not a reconstructed Wheel-cycle ledger**. It deliberately omits a
 
 | Area | Purpose and criteria |
 | --- | --- |
-| Manual entries | Record fee, deposit, withdrawal, dividend, valuation, or cycle allocation. Monetary entries use cent precision; valuation can be zero, while other monetary entries must be positive. |
+| Manual entries | Record fee, deposit, withdrawal, dividend, valuation, or cycle allocation. Monetary entries use cent precision; valuation can be zero, while other monetary entries must be positive. Deposits and withdrawals can name a brokerage account (other entry types cannot); the account shows in the entry's Reference column. |
 | Occurred-at | Real timestamp, converted to UTC; future/invalid timestamps are rejected by validation. This differs from when the server recorded the event. |
 | Fee reference | Optionally link a fee to a supported owned ledger event. Fees are not invented for historical fills. |
 | Cycle allocation | Explicitly link shares/contracts from a source event to a named strategy/Wheel cycle. Ownership and remaining allocatable quantity are checked; the same quantity cannot be allocated repeatedly. |
@@ -755,7 +765,7 @@ When a destination already has financial ledger history, the merged report leave
 
 Files are authenticated with a domain-separated HMAC derived from the installation's `JWT_SECRET`, versioned, and limited to 10 MB. The signed payload is opaque JSON text within the outer JSON document to preserve exact numeric serialization across browsers. Edited files, accounting-report exports and unsupported formats are rejected. Imports require authentication and explicit confirmation; endpoints use the authenticated destination ID, never a client-selected destination. Export and preview/import responses are marked `Cache-Control: no-store`.
 
-The file is **not encrypted** and contains private financial information. Keep it private; do not edit it. Exports contain no account passwords, authentication tokens or session data. Alerts, push subscriptions, account settings, cash balances, account value snapshots, local planning drafts and shared paper-idea logs are outside this transfer. Brokerage-account labels, watchlist lists/notes and applied-split markers are included, so copied lots are not offered the same split again. Files require the same installation/signing secret; rotating `JWT_SECRET` invalidates earlier transfer signatures. No signing secret is included in the file.
+The file is **not encrypted** and contains private financial information. Keep it private; do not edit it. Exports contain no account passwords, authentication tokens or session data. Alerts, push subscriptions, account settings, cash balances, account value snapshots, local planning drafts and shared paper-idea logs are outside this transfer. Brokerage-account labels, watchlist lists/notes, applied-split markers and recorded spin-off/merger markers are included, so copied lots are not offered the same split again and the same corporate action cannot be applied twice. Symbols already on the destination watchlist keep the destination's lists. Files require the same installation/signing secret; rotating `JWT_SECRET` invalidates earlier transfer signatures. No signing secret is included in the file.
 
 The existing **Export report** in Account ledger is a read-only accounting summary, not an importable transfer file. Existing stock CSV import is also separate and does not restore a complete account.
 
@@ -1106,7 +1116,9 @@ Frontend-only dependency changes trigger regression checks but do not match the 
 
 ### Sessions, Passwords and Web Security Headers
 
-Passwords must be 6 characters to 72 bytes (bcrypt's limit); multibyte characters count as several bytes. Longer passwords are rejected at registration, and login treats them as invalid credentials. Access tokens last 60 minutes by default. Each refresh token is single-use: refreshing atomically consumes it and issues a new pair, so a replayed or concurrently reused token fails. Tabs in the same browser share the stored session and take turns refreshing through a browser lock; a waiting tab adopts the same account's newly rotated tokens instead of reusing the consumed one, and never adopts a different account's session. Browsers without the Web Locks API fall back to per-tab deduplication. Logout revokes all of the account's refresh tokens. Refresh tokens are stored in the database as issued, not hashed; database access controls therefore protect active sessions.
+Passwords must be 6 characters to 72 bytes (bcrypt's limit); multibyte characters count as several bytes. Longer passwords are rejected at registration, and login treats them as invalid credentials. Access tokens last 60 minutes by default. Each refresh token is single-use: refreshing atomically consumes it and issues a new pair, so a replayed or concurrently reused token fails. Tabs in the same browser share the stored session and take turns refreshing through a browser lock; a waiting tab adopts the same account's newly rotated tokens instead of reusing the consumed one, and never adopts a different account's session. Browsers without the Web Locks API fall back to per-tab deduplication. Logout revokes all of the account's refresh tokens. Refresh tokens are stored only as SHA-256 digests, so a copy of the database does not contain usable session tokens. Tokens issued before hashing was introduced are still accepted once and then replaced by a hashed token, so nobody is signed out by the upgrade; such legacy rows expire on their normal schedule.
+
+Rate limits are keyed on the client address that uvicorn derives from the trusted reverse proxy (`--proxy-headers` with a trusted-proxy list), not on a raw `X-Forwarded-For` header, which any caller could set to switch rate-limit buckets. The Oracle service trusts only the local Caddy proxy. The unused [render.yaml](render.yaml) is configured the same way for Render's proxy; any other host must also enable proxy headers or every request appears to come from the proxy.
 
 The Vercel frontend sends a Content Security Policy plus anti-framing, MIME-sniffing, referrer and permissions headers from [vercel.json](vercel.json). The policy permits scripts only from the app's own origin, Google Fonts styles/fonts, and network requests to the app origin, the Oracle API host and Sentry. Changing the production API host (`VITE_API_URL`) also requires updating `connect-src`, or browser API requests will be blocked. `vite preview` serves the same headers, so the browser regression suite fails on CSP violations. The native Capacitor app does not receive these hosting headers.
 
@@ -1133,8 +1145,10 @@ WHERE oid = 'public.idea_log'::regclass;
 
 Expect `true`, `false`, `false`, then rerun Supabase's Security Advisor and check the backend's options-track-record view. The transaction preserves records and blocks public-role table access even if legacy RLS policies remain. If the backend uses a non-owner role without `BYPASSRLS`, configure a narrowly scoped backend policy before enabling RLS rather than granting access to browser roles. The broader [Supabase RLS script](deploy/supabase_rls.sql) covers the other named StockPilot tables; verify their status separately. A warning alone does not establish that data was accessed: inspect available API/database logs to assess past exposure. Local tests do not verify production grants, policies, or historical access.
 
-The `account_cash`, `nav_snapshots` and `applied_splits` tables are created with RLS enabled and public-role grants revoked at PostgreSQL startup, and are included in the RLS script.
+The `account_cash`, `nav_snapshots`, `applied_splits`, `watchlist_lists` and `applied_actions` tables are created with RLS enabled and public-role grants revoked at PostgreSQL startup, and are included in the RLS script.
 
 ### Route Notes
 
 Holding edit/delete routes accept only integer IDs (`/api/portfolio/{id:int}`), so named routes such as `PUT /api/portfolio/cash` and `PUT /api/portfolio/income-goal` reach their own handlers.
+
+Authentication, watchlist/search, accounts/corporate actions and company research (analyst, financials, ownership, dividends, sparklines) live in `routes_*.py` modules that share the limiter, auth dependency and ticker validation in [backend/api_common.py](backend/api_common.py); the remaining endpoints are still in [backend/main.py](backend/main.py). An empty sparkline request now returns an empty result instead of a server error.
