@@ -28,6 +28,8 @@ import PnlCalendar, { dailyPnl, compactMoney } from './components/PnlCalendar';
 import ExpiryLadder from './components/ExpiryLadder';
 import { TradingRules, TrimPlanner } from './components/RiskTools';
 import { BuyZones, EventWeek } from './components/WatchlistExtras';
+import CommandPalette, { matchCommands } from './components/CommandPalette';
+import { lastLookChanges } from './components/SinceLastLook';
 
 beforeEach(() => {
   localStorage.clear(); sessionStorage.clear();
@@ -492,6 +494,37 @@ test('buy zones save a target and show the put that pays you to wait; event week
   expect(await screen.findByText(/earnings \(after close\)\*/)).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'ORCL' }));
   expect(onSelect).toHaveBeenCalledWith('ORCL');
+});
+
+test('command palette matches tools before tickers and runs the highlighted item from the keyboard', () => {
+  expect(matchCommands('trim', true).map(c => c.label)).toEqual(['Portfolio Risk: Trim planner', 'Open TRIM stock page']);
+  expect(matchCommands('amd', true).map(c => c.label)).toEqual(['Open AMD stock page']);
+  expect(matchCommands('status', false).some(c => c.label === 'System status')).toBe(false);
+  expect(matchCommands('risk ladder', true)[0].go).toEqual({ tab: 'portfolio', section: 'risk', anchor: 'expiry-ladder' });
+  const run = vi.fn();
+  const close = vi.fn();
+  render(<CommandPalette signedIn onClose={close} onRun={run} />);
+  const input = screen.getByRole('combobox', { name: 'Jump to' });
+  fireEvent.change(input, { target: { value: 'journal' } });
+  fireEvent.keyDown(input, { key: 'ArrowDown' });
+  expect(screen.getAllByRole('option')[1].getAttribute('aria-selected')).toBe('true');
+  fireEvent.keyDown(input, { key: 'Enter' });
+  expect(close).toHaveBeenCalled();
+  expect(run).toHaveBeenCalledWith({ tab: 'journal', anchor: 'edge-report' });
+});
+
+test('last-look changes report price move, new headlines and earnings changes', () => {
+  const previous = { at: 1, price: 100, earnings: '2026-10-20', headlines: ['https://a'] };
+  const changes = lastLookChanges(previous, { price: 110, earnings: '2026-10-27', lastEarnings: null,
+    articles: [{ url: 'https://a', title: 'Old' }, { url: 'https://b', title: 'New one' }] });
+  expect(changes.priceChangePct).toBeCloseTo(10);
+  expect(changes.headlines).toEqual([{ title: 'New one', url: 'https://b' }]);
+  expect(changes.earningsMoved).toEqual({ from: '2026-10-20', to: '2026-10-27' });
+  expect(changes.any).toBe(true);
+  expect(lastLookChanges(null, { price: 1, articles: [] })).toBeNull();
+  const reported = lastLookChanges(previous, { price: 100, earnings: '2027-01-20', lastEarnings: '2026-10-20', articles: [] });
+  expect(reported.reported).toBe('2026-10-20');
+  expect(lastLookChanges({ ...previous, earnings: null }, { price: 100, articles: [{ url: 'https://a' }] }).any).toBe(false);
 });
 
 test('editing a stock lot can correct its purchase date', async () => {

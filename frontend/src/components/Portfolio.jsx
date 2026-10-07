@@ -40,7 +40,16 @@ export default function Portfolio() {
   const isGuest = !user;
 
   const [tab, setTab] = useState('stocks');
-  const [section, setSection] = useState('holdings');
+  const [section, setSection] = useState(() => {
+    const requested = sessionStorage.getItem('portfolio_section');
+    sessionStorage.removeItem('portfolio_section');
+    return requested || 'holdings';
+  });
+  useEffect(() => {
+    const onGoto = event => { if (event.detail?.section) setSection(event.detail.section); };
+    window.addEventListener('stockpilot:goto', onGoto);
+    return () => window.removeEventListener('stockpilot:goto', onGoto);
+  }, []);
   const [insightsTab, setInsightsTab] = useState(null);
   const [rulesRevision, setRulesRevision] = useState(0);
   const [trimTicker, setTrimTicker] = useState(null);
@@ -393,12 +402,12 @@ export default function Portfolio() {
             onShowAlerts={() => document.getElementById('position-alerts')?.scrollIntoView({ behavior: 'smooth' })}
             onShowTax={() => { setInsightsTab('tax'); setSection('performance'); }}
             onTrim={ticker => { setTrimTicker(ticker); setTimeout(() => document.getElementById('trim-planner')?.scrollIntoView({ behavior: 'smooth' }), 0); }} />
-          <details className="risk-tool"><summary><h3>My trading rules</h3></summary><TradingRules onSaved={() => setRulesRevision(value => value + 1)} /></details>
+          <details className="risk-tool" id="trading-rules"><summary><h3>My trading rules</h3></summary><TradingRules onSaved={() => setRulesRevision(value => value + 1)} /></details>
           <h3 id="trim-planner">Trim planner</h3>
           <TrimPlanner tickers={[...new Set(holdings.map(item => item.ticker))].sort()} initialTicker={trimTicker} />
           <h3 id="position-alerts">Position alerts</h3><Today version={version} onRepair={repair} onAssign={id => { const option = options.find(item => item.id === id); if (option) handleAssign(option); }} />
           <h3>Earnings exposure</h3><Earnings version={version} />
-          <h3>Expiration ladder</h3><ExpiryLadder version={version} />
+          <h3 id="expiry-ladder">Expiration ladder</h3><ExpiryLadder version={version} />
           <PortfolioDoctor key={version} />
           <h3>Stress scenarios</h3><WhatIf options={options} holdings={holdings} />
           {holdings.length >= 2 && <CorrelationHeatmap tickers={[...new Set(holdings.map(item => item.ticker))]} />}
@@ -863,7 +872,7 @@ export default function Portfolio() {
           <ClosedOptions data={closedOpts} confirmDelete={confirmDelete} setConfirmDelete={setConfirmDelete} onDelete={handleDeleteClosed} />
         )
       )}
-      {!isGuest && <details className="portfolio-section"><summary>Import from broker CSV</summary><ImportCsv account={account} onImported={() => { loadStocks(); loadOptions(); loadClosed(); }} /></details>}
+      {!isGuest && <details className="portfolio-section" id="import-csv"><summary>Import from broker CSV</summary><ImportCsv account={account} onImported={() => { loadStocks(); loadOptions(); loadClosed(); }} /></details>}
       </>}
     </div>
   );

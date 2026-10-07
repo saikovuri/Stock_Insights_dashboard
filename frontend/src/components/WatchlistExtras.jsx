@@ -20,7 +20,7 @@ export function BuyZones({ onSelect }) {
     try { await saveBuyZone(symbol, value); setTicker(''); setPrice(''); setData(null); load(); } catch (e) { setError(e.message); }
     setBusy(false);
   };
-  return <div className="card buy-zones">
+  return <div className="card buy-zones" id="buy-zones">
     <h3>🎯 Buy zones</h3>
     <p className="structures-intro">Set the price you&apos;d be happy to buy at. Until it gets there, a cash-secured put at or below that price can pay you to wait:
       if assigned you buy at the strike minus the premium; if not, you keep the premium.</p>
@@ -57,7 +57,7 @@ export function EventWeek({ onSelect }) {
   if (error) return <div className="card"><p className="error-text">{error}</p></div>;
   const days = {};
   (data?.events || []).forEach(event => { (days[event.date] ||= []).push(event); });
-  return <div className="card event-week">
+  return <div className="card event-week" id="event-week">
     <h3>📅 Earnings &amp; ex-dividend: next 2 weeks</h3>
     {!data && <p className="loading-text">Checking dates for your watchlist and holdings…</p>}
     {data && !data.events.length && <p className="empty-state">No earnings or ex-dividend dates in the next 14 days for {data.checked} tickers.</p>}

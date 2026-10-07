@@ -302,6 +302,10 @@ The bundled app calls the URL in `VITE_API_URL`, or the fallback in `src/api/con
 | Expiration ladder, rules, trim planner | `expiry_ladder.py`, `trading_rules.py`, `trim_plan.py` | `components/ExpiryLadder.jsx`, `RiskTools.jsx` |
 | System status | `system_status.py`, `scheduler.HEARTBEAT` | `components/SystemStatus.jsx` |
 | Journal edge report and P&L calendar | (uses closed-trade APIs) | `components/Journal.jsx`, `PnlCalendar.jsx` |
+| Stock page: your positions, chart levels, since last look | `my_stock.py` | `components/MyStock.jsx`, `CandleChart.jsx`, `SinceLastLook.jsx` |
+| Watchlist buy zones, earnings/ex-div week | `buy_zones.py`, `routes_watchlist.py` | `components/WatchlistExtras.jsx` |
+| Ideas portfolio fit | `portfolio_fit.py` | `components/PortfolioFit.jsx` |
+| Command palette (Ctrl+K) | — | `components/CommandPalette.jsx` (add destinations to `COMMANDS`) |
 | Options math, wheel, covered calls, rolls | `options_analytics.py`, `wheel.py` | `components/WheelIdeas.jsx`, `WheelManager.jsx`, `RollRepair.jsx` |
 | Quotes and market data | `stock_data.py`, `providers.py`, `cache.py` | — |
 | AI | `llm.py`, `ai_brief.py`, `ai_chat.py`, `portfolio_doctor.py` | `components/AiChat.jsx`, `PortfolioDoctor.jsx` |

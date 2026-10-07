@@ -138,7 +138,7 @@ function GroupedOptionStats({ rows }) {
     <span className={pnlClass(group.expectancy)}>{money(group.expectancy)}</span> per close over {group.count} closes
     {' '}({percent(group.winRate)} wins, {money(group.net)} net)</li>;
   return <div className="journal-breakdown">
-    <div className="edge-report" aria-label="Your edge">
+    <div className="edge-report" id="edge-report" aria-label="Your edge">
       <h4>Your edge</h4>
       {edge.best.length || edge.worst.length ? <div className="edge-columns">
         {edge.best.length > 0 && <div><span className="positive">Working best</span><ul>{edge.best.map(line)}</ul></div>}

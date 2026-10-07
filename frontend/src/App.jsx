@@ -34,10 +34,13 @@ import Tour, { TOUR_KEY } from './components/Tour';
 import SystemStatus from './components/SystemStatus';
 import MyStock from './components/MyStock';
 import { BuyZones, EventWeek } from './components/WatchlistExtras';
+import SinceLastLook from './components/SinceLastLook';
+import CommandPalette from './components/CommandPalette';
 import { ProfileProvider, useProfile, PROFILES, ALL_OPTION_TABS } from './ProfileContext';
 import { fetchMetrics, fetchHistory, fetchNews, fetchAlerts, fetchEvents } from './api/stockApi';
 
 const VALID_TABS = ['dashboard', 'ideas', 'watchlist', 'portfolio', 'journal'];
+const EMPTY_LIST = [];
 // Old bookmarks keep working
 const LEGACY_TABS = { setups: 'ideas', screener: 'watchlist', tools: 'journal' };
 const SUB_TAB_LABELS = {
@@ -56,6 +59,14 @@ function AppShell() {
   const { user, logout, loading: authLoading } = useAuth();
   const [statusOpen, setStatusOpen] = useState(false);
   const [myLevels, setMyLevels] = useState([]);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  useEffect(() => {
+    const onKey = event => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); setPaletteOpen(true); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   const { theme, toggle: toggleTheme } = useTheme();
   const { profile, setProfile, config } = useProfile();
   const [activeTab, setActiveTab] = useState(getInitialTab);
@@ -162,6 +173,26 @@ function AppShell() {
     handleSearch(t);
   };
 
+  const scrollToAnchor = (id, tries = 20) => {
+    const element = document.getElementById(id);
+    if (element) {
+      if (element.tagName === 'DETAILS') element.open = true;
+      element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } else if (tries > 0) setTimeout(() => scrollToAnchor(id, tries - 1), 300);
+  };
+
+  const runCommand = (go) => {
+    if (go.action === 'theme') return toggleTheme();
+    if (go.action === 'status') return setStatusOpen(true);
+    if (go.ticker) return openTicker(go.ticker);
+    if (go.ideasTab) sessionStorage.setItem('ideas_tab', go.ideasTab);
+    if (go.section) sessionStorage.setItem('portfolio_section', go.section);
+    handleTabClick(go.tab);
+    window.dispatchEvent(new CustomEvent('stockpilot:goto', { detail: go }));
+    if (go.anchor) scrollToAnchor(go.anchor);
+    else window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   const changeProfile = (p) => {
     setProfile(p);
     const { period: np, interval: ni } = PROFILES[p].chart;
@@ -196,6 +227,7 @@ function AppShell() {
               title="Your trading style tailors charts, layout and AI analysis">
               {Object.entries(PROFILES).map(([k, p]) => <option key={k} value={k}>{p.icon} {p.label}</option>)}
             </select>
+            <button className="btn-theme" onClick={() => setPaletteOpen(true)} title="Jump to a ticker, tab or tool (Ctrl+K)" aria-label="Jump to (Ctrl+K)">⌘K</button>
             <button className="btn-theme" onClick={toggleTheme} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>
               {theme === 'dark' ? '☀️' : '🌙'}
             </button>
@@ -256,6 +288,8 @@ function AppShell() {
                 {subTab === 'overview' && (
                   <>
                     <Alerts alerts={alerts} />
+                    <SinceLastLook ticker={ticker} price={metrics.price} articles={newsData?.articles || EMPTY_LIST}
+                      earningsDate={events?.earnings_date} lastEarnings={events?.last_earnings} />
                     <KeyMetrics metrics={metrics} />
                     <AiBrief ticker={ticker} profile={profile} onSignIn={() => setShowLogin(true)} />
                     {show('thesis') && <ThesisCard ticker={ticker} />}
@@ -343,6 +377,7 @@ function AppShell() {
         {user && <>{' '}&middot; <button className="link-btn" onClick={() => setStatusOpen(true)}>System status</button></>}
       </footer>
       {statusOpen && <SystemStatus onClose={() => setStatusOpen(false)} />}
+      {paletteOpen && <CommandPalette signedIn={!!user} onClose={() => setPaletteOpen(false)} onRun={runCommand} />}
       {tourOpen && !showLogin && <Tour onClose={closeTour} />}
     </div>
   );

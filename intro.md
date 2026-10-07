@@ -53,6 +53,11 @@ An absent candidate does not necessarily mean a bad investment. It can mean miss
 
 The Dashboard has Overview, Analysis, Fundamentals, and News subtabs. When a row of subtabs is wider than the screen, it scrolls sideways without a scrollbar: fades and ‹ › arrows mark hidden tabs, and the selected tab scrolls into view. On phones the subtabs wrap into a grid instead. The trading-style selector changes defaults, ordering, and visibility; it is not an account risk limit. Sign-in enables account-specific features. Theme controls affect appearance only. Older `#setups`, `#screener`, and `#tools` links route to Ideas, Watchlist, and Journal respectively.
 
+**Jump to (Ctrl+K / ⌘K)** opens a command palette from anywhere; the ⌘K button in the header does the same.
+- Type words to filter destinations: every tab, each Ideas view, each Portfolio section, and the main tools (import broker CSV, expiration ladder, trim planner, trading rules, buy zones, edge report, P&L calendar). It also offers System status (signed in) and the theme toggle.
+- A single word that looks like a ticker also offers "Open TICKER stock page". It comes first only when no tool matches, so "trim" opens the trim planner rather than a ticker.
+- ↑/↓ choose, Enter runs, Esc or a click outside closes. Destinations inside a page open their section, expand collapsed panels, and scroll there once loaded.
+
 Source: [frontend/src/App.jsx](frontend/src/App.jsx).
 
 ## Trading Profiles and Dashboard
@@ -82,6 +87,7 @@ The market overview shows when its quotes were fetched, and a selected stock sho
 | Panel | What it contains |
 | --- | --- |
 | Alerts | Deterministic warnings derived from the stock's metrics. These differ from saved notification alerts. |
+| Since your last look | Appears when you reopen a stock at least an hour after your previous visit in the same browser. It shows the price change since then, up to three new headlines (by link, with a count), a moved next-earnings date, and a report that happened in between. The baseline is kept in this browser's local storage (up to 200 tickers) and updates only when an hour or more has passed, so quick revisits don't reset it. It is per device, not per account. |
 | Key metrics | Price and daily change, market capitalization, valuation and other reported stock statistics. Missing provider fields are not proof of zero or absence. |
 | AI Brief | Profile-aware narrative, cited headlines, bull/bear arguments, risks, catalysts, and technical context. AI interpretation may be wrong and is not the deterministic options eligibility engine. |
 | Thesis | A signed-in user's investment thesis and subsequent reviews. Normally hidden for day traders. |

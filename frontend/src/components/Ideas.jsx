@@ -240,6 +240,11 @@ export default function Ideas({ onSelect }) {
   const { profile } = useProfile();
   const [tab, setTab] = useState(() => sessionStorage.getItem('ideas_tab') || (profile === 'day' ? 'inplay' : 'setups'));
   const choose = t => { setTab(t); sessionStorage.setItem('ideas_tab', t); };
+  useEffect(() => {
+    const onGoto = event => { if (event.detail?.ideasTab) setTab(event.detail.ideasTab); };
+    window.addEventListener('stockpilot:goto', onGoto);
+    return () => window.removeEventListener('stockpilot:goto', onGoto);
+  }, []);
   return (
     <div className="ideas-page">
       <TabStrip label="Ideas views" activeKey={tab}>

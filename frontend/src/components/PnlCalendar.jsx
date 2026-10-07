@@ -71,7 +71,7 @@ export default function PnlCalendar({ rows }) {
   const detail = selected && days.get(selected);
   const label = `${MONTHS[cursor.m]} ${cursor.y}`;
 
-  return <div className="journal-breakdown pnl-calendar">
+  return <div className="journal-breakdown pnl-calendar" id="pnl-calendar">
     <div className="pnl-calendar-head">
       <h4>Daily realized P&L</h4>
       <div className="pnl-calendar-nav">
