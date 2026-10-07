@@ -39,6 +39,7 @@ function shortDate(value) {
 
 const Missing = ({ reason }) => <span className="muted-dash" title={reason}>—<span className="sr-only">{reason}</span></span>;
 const barWidth = value => `${Math.max(0, Math.min(100, value))}%`;
+const price = value => `$${Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
 
 function calendarDays(start, end) {
   const parse = value => {
@@ -275,8 +276,8 @@ function RecordedHistory({ optionsOnly = false, version = 0, onEdit, onDelete, b
             <span className="trade-sub">{metrics.option ? `$${row.strike} · exp ${shortDate(row.expiry) || row.expiry} · ` : ''}{size}</span></td>
           <td className="nowrap" data-label="Dates">{opened ? <>{opened} → {closed}</> : closed || <Missing reason="Close date unavailable" />}
             {timing && <span className="trade-sub">{timing}</span>}</td>
-          <td className="nowrap" data-label="Premium / price">{metrics.option && row.open_premium != null ? `${money(row.open_premium)} → ${money(row.close_premium)}`
-            : !metrics.option && row.buy_price != null ? `${money(row.buy_price)} → ${money(row.sell_price)}` : <Missing reason="Prices unavailable" />}</td>
+          <td className="nowrap" data-label="Premium / price">{metrics.option && row.open_premium != null ? `${price(row.open_premium)} → ${price(row.close_premium)}`
+            : !metrics.option && row.buy_price != null ? `${price(row.buy_price)} → ${price(row.sell_price)}` : <Missing reason="Prices unavailable" />}</td>
           <td data-label="Captured / return">{metrics.option && metrics.capture != null ? <div className="capture-cell">
               <span className={pnlClass(metrics.capture)}>{metrics.capture.toFixed(1)}%</span> <small>{metrics.label.toLowerCase()}</small>
               <span className="capture-bar" aria-hidden="true"><span className={metrics.capture < 0 ? 'negative-fill' : ''} style={{ width: barWidth(Math.abs(metrics.capture)) }} />

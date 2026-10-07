@@ -22,6 +22,7 @@ import TabStrip from './TabStrip';
 import Skeleton from './Skeleton';
 
 const GUEST_HOLDINGS_KEY = 'guest_holdings';
+const usd = (value) => `${value < 0 ? '-' : ''}$${Math.abs(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 function getGuestHoldings() {
   try { return JSON.parse(localStorage.getItem(GUEST_HOLDINGS_KEY) || '[]'); }
@@ -522,6 +523,7 @@ export default function Portfolio() {
                     const totalCurrent = totalShares * currentPrice;
                     const totalPnl = totalCurrent - totalInvested;
                     const totalPnlPct = totalInvested > 0 ? (totalPnl / totalInvested * 100) : 0;
+                    const weight = currentPrice != null && portfolio.total_current ? totalCurrent / portfolio.total_current * 100 : null;
                     const hasMultipleLots = lots.length > 1;
 
                     return (
@@ -537,8 +539,11 @@ export default function Portfolio() {
                           {hasMultipleLots && <span className="lot-count">{lots.length} lots</span>}
                           <span className="lot-avg">Avg ${avgBuy.toFixed(2)}</span>
                           <span className="lot-current">{currentPrice == null ? 'Unavailable' : `$${currentPrice.toFixed(2)}`}</span>
-                          <span className={`lot-pnl ${currentPrice == null ? '' : totalPnl >= 0 ? 'positive' : 'negative'}`}>
-                            {currentPrice == null ? 'Unavailable' : `$${totalPnl.toFixed(2)} (${totalPnlPct.toFixed(2)}%)`}
+                          <span className="lot-pnl-col">
+                            <span className={`lot-pnl ${currentPrice == null ? '' : totalPnl >= 0 ? 'positive' : 'negative'}`}>
+                              {currentPrice == null ? 'Unavailable' : `${usd(totalPnl)} (${totalPnlPct.toFixed(2)}%)`}
+                            </span>
+                            {weight != null && <span className="lot-value" title="Market value · share of all stock holdings shown">{usd(totalCurrent)} · {weight.toFixed(1)}%</span>}
                           </span>
                           {!hasMultipleLots && (
                             <span className="lot-actions">
@@ -731,8 +736,8 @@ export default function Portfolio() {
                       : o.strike - o.current_price;
                     const moneyness = o.current_price == null ? 'Unknown' : Math.abs(diff) < 0.5 ? 'ATM'
                       : diff > 0 ? 'ITM' : 'OTM';
-                    const moneyClass = moneyness === 'ITM' ? 'positive'
-                      : moneyness === 'OTM' ? 'negative' : '';
+                    const moneyClass = moneyness === 'ITM' ? ((o.position || 'long') === 'short' ? 'negative' : 'positive')
+                      : moneyness === 'OTM' ? ((o.position || 'long') === 'short' ? 'positive' : '') : '';
                     const side = o.position || 'long';
                     return (
                     <tr key={o.id || i} className={editOptIdx === o.id ? 'row-editing' : ''}>
@@ -749,12 +754,12 @@ export default function Portfolio() {
                       <td>{o.current_price == null ? 'Unavailable' : `$${o.current_price.toFixed(2)}`}</td>
                       <td className={moneyClass}>
                         <span className="moneyness-badge" title={
-                          moneyness === 'ITM' ? 'In the Money — has intrinsic value'
-                          : moneyness === 'OTM' ? 'Out of the Money — no intrinsic value (only time value)'
+                          moneyness === 'ITM' ? (side === 'short' ? 'In the Money — assignment and loss risk for this short option' : 'In the Money — has intrinsic value')
+                          : moneyness === 'OTM' ? (side === 'short' ? 'Out of the Money — on track to expire worthless if it stays here' : 'Out of the Money — no intrinsic value (only time value)')
                           : 'At the Money — strike ≈ current price'
                         }>{moneyness}</span>
                       </td>
-                      <td>
+                      <td className="nowrap">
                         {o.expiry}
                         <span className="dte-badge" title="Days to expiry">{o.dte}d</span>
                       </td>
@@ -767,7 +772,7 @@ export default function Portfolio() {
                       </td>
                       <td title="Implied Volatility">{o.iv ? `${o.iv}%` : '—'}</td>
                       <td className={o.pnl == null ? '' : o.pnl >= 0 ? 'positive' : 'negative'}>
-                        {o.pnl == null ? 'Unavailable' : `$${o.pnl.toFixed(2)} (${o.pnl_pct?.toFixed(1) ?? '0'}%)`}
+                        {o.pnl == null ? 'Unavailable' : `${usd(o.pnl)} (${o.pnl_pct?.toFixed(1) ?? '0'}%)`}
                       </td>
                       <td className="action-cell">
                         <button className="btn-icon" title="Close this option lot" onClick={() => {

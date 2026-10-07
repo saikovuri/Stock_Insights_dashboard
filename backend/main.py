@@ -1650,6 +1650,7 @@ def portfolio_import(request: Request, req: ImportRequest, user: dict = Depends(
             parsed["imported"] = parsed["result"]["imported"]
         else:
             parsed["imported"] = portfolio_insights.import_rows(uid, parsed["rows"], req.account)
+            parsed["cash"] = portfolio_insights.add_money_market_cash(uid, req.account, parsed.get("money_market_total"))
     return parsed
 
 

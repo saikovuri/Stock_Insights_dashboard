@@ -599,7 +599,7 @@ Select an account to enter its **cash balance**. Free cash = cash minus gross sh
 
 ### Stocks
 
-Record ticker, shares, entry cost/date; edit lots or record a sale. Selling from a chosen lot uses that lot; a ticker-level sale consumes lots FIFO. Closing more shares than recorded is rejected. Sold/Closed shows recorded realized trades, distinct from open mark-to-market P&L. Multiple purchases remain separate lots rather than silently overwriting acquisition history.
+Record ticker, shares, entry cost/date; edit lots or record a sale. Selling from a chosen lot uses that lot; a ticker-level sale consumes lots FIFO. Closing more shares than recorded is rejected. Sold/Closed shows recorded realized trades, distinct from open mark-to-market P&L. Multiple purchases remain separate lots rather than silently overwriting acquisition history. Each ticker row shows unrealized P/L with its market value and its percentage of all stock holdings shown beneath it. In the Options table, moneyness colours reflect risk to you: a short contract in the money is red and out of the money is green; a long contract in the money is green and out of the money is neutral.
 
 Guest stock holdings live only in browser storage; signed-in holdings are account data. This is a record keeper, not a broker connection. Entering a buy/sell does not place an order, and omitting a real position makes downstream analytics incomplete.
 
@@ -611,7 +611,7 @@ Signed-in users can expand **Import from broker CSV** in Holdings, choose **Open
 
 - Stock/ETF rows become new lots. Positive quantity and positive cost are required; total cost can be divided by quantity when per-share cost is absent. Short stock positions are skipped. Dots normalize to hyphens. Processing stops at 500 accepted rows.
 - Option symbols are recognized in OCC (`AAPL  250117C00150000`), Fidelity (`-AAPL250117C150`), Schwab (`AAPL 01/17/2025 150.00 C`) and E*TRADE (`AAPL Jan 17 '25 $150 Call`) styles. Negative quantity records a short; whole contracts are required. Premium per share is |total cost| / (contracts × 100), or the per-share average when no total is given. Brokers that report per-contract averages without a total will be misread by 100×, so check the preview. Already-expired options are skipped.
-- Cash/money-market summary rows are skipped. Missing, future or unrecognized acquisition dates fall back to the import date. Correct this before relying on holding-period/benchmark analytics.
+- Cash summary rows are skipped. Money-market fund symbols (three letters followed by `XX`, such as `VUSXX` or `SPAXX`) are not imported as shares. Their market value (or quantity × cost, or quantity at $1) is added to the selected account's cash balance, and the preview shows the total. Re-importing adds the amount again. Missing, future or unrecognized acquisition dates fall back to the import date; E*TRADE's positions export has no purchase dates, so its lots are dated on the import day. Correct this before relying on holding-period/benchmark analytics.
 - Positions import is an **append**, not broker synchronization or duplicate detection; reimporting the same positions duplicates lots.
 
 **Closed trade history** reads a realized gain/loss (closed lots) export with Quantity, Date sold/closed, Proceeds and Cost basis columns (plus Date acquired/opened and an optional Position/Side column).

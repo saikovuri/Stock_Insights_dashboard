@@ -4980,8 +4980,13 @@ button.signal-chip { cursor: pointer; }
 .account-table { margin-top: 0.5rem; }
 .account-badge {
   display: inline-block; margin-left: 0.4rem; padding: 0.05rem 0.45rem; border-radius: 999px; font-size: 0.7rem;
-  border: 1px solid var(--border); color: var(--text-secondary); vertical-align: middle;
+  border: 1px solid var(--border); color: var(--text-secondary); vertical-align: middle; white-space: nowrap;
 }
+.portfolio-table td.nowrap { white-space: nowrap; }
+.lot-value { color: var(--text-secondary); font-size: 0.85rem; white-space: nowrap; }
+.lot-pnl-col { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; line-height: 1.25; }
+.lot-pnl-col .lot-pnl { margin-left: 0; min-width: 0; white-space: nowrap; }
+.lot-pnl-col .lot-value { font-size: 0.75rem; }
 .split-notice { border: 1px solid var(--accent); border-radius: var(--radius-sm); padding: 0.5rem 0.75rem; margin-bottom: 0.75rem; }
 .split-notice p { margin: 0.25rem 0; }
 .nav-history .metrics-grid { margin-bottom: 0.5rem; }

@@ -282,8 +282,11 @@ _COLS = {
             "average price", "price paid", "unit cost", "cost basis per share", "avg cost basis"),
     "total": ("cost basis total", "cost basis", "total cost", "cost basis ($)", "book cost", "cost"),
     "acquired": ("date acquired", "acquired", "open date", "purchase date", "trade date", "acquisition date"),
+    "value": ("value", "market value", "current value", "total value"),
 }
 _SKIP = {"CASH", "PENDING", "TOTAL", "ACCOUNT", "MONEY", "SWEEP", "CORE"}
+# US money-market mutual funds use five-letter tickers ending in XX (VUSXX, SPAXX, SWVXX, ...).
+_MONEY_MARKET = re.compile(r"[A-Z]{3}XX")
 
 
 def _header(name: str) -> str:
@@ -330,7 +333,7 @@ def parse_broker_csv(text: str) -> dict:
             break
     if header_i is None:
         raise ValueError("Couldn't find Symbol and Quantity columns. Export positions as CSV from your broker.")
-    out, skipped = [], []
+    out, skipped, money_market = [], [], []
     for n, r in enumerate(rows[header_i + 1:], start=header_i + 2):
         get = lambda k: r[cols[k]] if cols.get(k) is not None and cols[k] < len(r) else None
         raw = (get("symbol") or "").strip().upper()
@@ -363,6 +366,15 @@ def parse_broker_csv(text: str) -> dict:
                 break
             continue
         sym = raw.rstrip("*").replace(" ", "")
+        if _MONEY_MARKET.fullmatch(sym):
+            amount = _num(get("value"))
+            if amount is None and qty:
+                amount = qty * (_num(get("avg")) or 1.0)
+            if amount and amount > 0:
+                money_market.append({"line": n, "ticker": sym, "amount": round(amount, 2)})
+            else:
+                skipped.append({"line": n, "symbol": sym, "reason": "money-market fund without a value"})
+            continue
         if not re.fullmatch(r"[A-Z]{1,5}([.-][A-Z])?", sym):
             skipped.append({"line": n, "symbol": raw, "reason": "not a recognized stock, ETF or option symbol"})
             continue
@@ -379,7 +391,8 @@ def parse_broker_csv(text: str) -> dict:
                     "acquired": _date(get("acquired"))})
         if len(out) >= 500:
             break
-    return {"rows": out, "skipped": skipped,
+    return {"rows": out, "skipped": skipped, "money_market": money_market,
+            "money_market_total": round(sum(m["amount"] for m in money_market), 2),
             "columns": {k: rows[header_i][v] for k, v in cols.items() if v is not None}}
 
 
@@ -492,6 +505,17 @@ def import_rows(user_id: int, rows: list[dict], account: str | None = None) -> i
             add_user_holding(user_id, r["ticker"], r["shares"], r["price"],
                              f"{r['acquired']} 00:00:00" if r.get("acquired") else None, account=account)
     return len(rows)
+
+
+def add_money_market_cash(user_id: int, account: str | None, amount: float) -> dict | None:
+    """Money-market balances are cash, not stock lots: add them to the account's entered cash balance."""
+    import accounts
+    import database
+    if not amount or amount <= 0:
+        return None
+    name = database.account_name(account) or database.DEFAULT_ACCOUNT
+    current = accounts._cash(user_id).get(name, {}).get("cash") or 0
+    return accounts.set_cash(user_id, name, round(current + amount, 2))
 
 
 def import_history(user_id: int, rows: list[dict], account: str | None = None) -> dict:

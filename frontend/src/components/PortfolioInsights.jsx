@@ -191,7 +191,7 @@ export function ImportCsv({ onImported, account = '' }) {
         const failed = r.result?.failed || [];
         setMsg(kind === 'history'
           ? `Imported ${r.result.imported} closed trade(s); ${r.result.duplicates} already recorded${failed.length ? `; ${failed.length} rejected: ${failed.map(f => `${f.symbol} (${f.reason})`).join('; ')}` : ''}.`
-          : `Imported ${r.imported} position(s).`);
+          : `Imported ${r.imported} position(s)${r.cash ? `; added ${usd(r.money_market_total)} of money-market funds to ${r.cash.account} cash (now ${usd(r.cash.cash)})` : ''}.`);
         setText(''); onImported?.();
       }
     } catch (e) { setMsg(e.message); }
@@ -215,7 +215,7 @@ export function ImportCsv({ onImported, account = '' }) {
       <div className="alert-form">
         <input type="file" accept=".csv,text/csv" aria-label="Broker CSV file" onChange={onFile} />
         <button className="btn-secondary btn-sm" disabled={!text || busy} onClick={() => run(false)}>Preview</button>
-        <button className="btn-primary btn-sm" disabled={!preview?.rows?.length || busy} onClick={() => run(true)}>
+        <button className="btn-primary btn-sm" disabled={!(preview?.rows?.length || preview?.money_market?.length) || busy} onClick={() => run(true)}>
           Import {preview?.rows?.length || ''} rows
         </button>
       </div>
@@ -234,6 +234,10 @@ export function ImportCsv({ onImported, account = '' }) {
                 <td>{r.opened_at || r.acquired || '—'}</td><td>{r.closed_at}</td></tr>)}</tbody>
             </>}
           </table></div>
+          {preview.money_market?.length > 0 && (
+            <p className="market-sub">Money-market funds are counted as cash, not stock: {preview.money_market.map(m => `${m.ticker} ${usd(m.amount)}`).join(', ')}.
+              {' '}Importing adds {usd(preview.money_market_total)} to the <b>{account || 'Default'}</b> cash balance.</p>
+          )}
           {preview.skipped.length > 0 && (
             <p className="market-sub">Skipped: {preview.skipped.map(s => `${s.symbol} (${s.reason})`).join('; ')}</p>
           )}

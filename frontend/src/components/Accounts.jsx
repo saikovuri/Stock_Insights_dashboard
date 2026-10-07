@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import { fetchAccounts, saveCash, fetchNavHistory, recordNavSnapshot, fetchCorporateActions, applySplit, recordSpinoff, recordMerger } from '../api/stockApi';
 
-const money = (value) => (value == null ? '—' : `$${Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 })}`);
+const money = (value) => (value == null ? '—' : `${Number(value) < 0 ? '-' : ''}$${Math.abs(Number(value)).toLocaleString(undefined, { maximumFractionDigits: 2 })}`);
 const ACCOUNT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 ._&'()-]{0,39}$/;
 
 export function AccountBar({ account, onChange, version, onCashSaved }) {
