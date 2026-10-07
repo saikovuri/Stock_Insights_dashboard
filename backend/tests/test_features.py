@@ -414,6 +414,39 @@ class FeatureTests(unittest.TestCase):
             self.client.put("/api/watchlist/buy-zones/KO", json={"price": None})
         self.assertEqual(buy_zones.get_zones(uid), {"NVDA": 170})
 
+    def test_portfolio_fit_scores_correlation_sector_size_and_cash(self):
+        import numpy as np
+        import pandas as pd
+        import accounts as accounts_module
+        import portfolio_fit
+        uid = new_user()
+        database.add_user_holding(uid, "AMD", 100, 50)
+        database.add_user_holding(uid, "MSFT", 10, 300)
+        accounts_module.set_cash(uid, "Default", 10000)
+        days = pd.bdate_range("2026-01-01", periods=120)
+        base = np.random.default_rng(1).normal(0, 0.02, len(days))
+        noise = np.random.default_rng(2).normal(0, 0.02, len(days))
+        paths = {"AMD": base, "MSFT": base * 0.5 + noise * 0.5, "NVDA": base + noise * 0.1, "KO": -base}
+        frame = lambda t: pd.DataFrame({"Close": 100 * np.cumprod(1 + paths[t])}, index=days)  # noqa: E731
+        sectors = {"AMD": "Semiconductors", "MSFT": "Software", "NVDA": "Semiconductors", "KO": "Beverages"}
+        with patch.object(portfolio_fit, "get_quote", side_effect=lambda t: {"price": {"AMD": 150, "MSFT": 300}[t]}), \
+             patch.object(portfolio_fit, "get_key_metrics", side_effect=lambda t: {"sector": sectors[t]}), \
+             patch("providers.finnhub_enabled", return_value=False), \
+             patch.object(portfolio_fit, "get_stock_data", side_effect=lambda t, **kw: frame(t)), \
+             patch.object(portfolio_fit, "get_or_fetch", side_effect=lambda key, fetch, ttl: fetch()), \
+             self.as_user(uid):
+            body = self.client.post("/api/portfolio/fit", json={"items": [
+                {"ticker": "NVDA", "cash_needed": 20000}, {"ticker": "KO", "cash_needed": 5000}, {"ticker": "AMD"}]}).json()
+            empty_user = new_user()
+            self.assertTrue(portfolio_fit.fit(empty_user, [{"ticker": "KO"}])["empty"])
+        fits = {f["ticker"]: f for f in body["items"]}
+        self.assertEqual(fits["KO"]["label"], "Good fit")
+        self.assertLess(fits["KO"]["correlation"], 0)
+        self.assertGreater(fits["NVDA"]["correlation"], 0.7)
+        self.assertIn("Needs $20,000", " ".join(r["text"] for r in fits["NVDA"]["reasons"]))
+        self.assertEqual(fits["NVDA"]["label"], "Poor fit", "correlated, heavy sector, cash doesn't fit")
+        self.assertIn("Already 83% of your stock value", " ".join(r["text"] for r in fits["AMD"]["reasons"]), "15000 / 18000")
+
     def test_next_steps_flag_cash_concentration_and_covered_calls(self):
         import accounts as accounts_module
         import next_steps

@@ -1271,6 +1271,27 @@ def portfolio_trim_plan(request: Request, ticker: str, target: float = Query(...
         raise _upstream_error(e)
 
 
+class FitItem(BaseModel):
+    ticker: str = Field(..., max_length=12)
+    cash_needed: Optional[float] = Field(None, ge=0, le=100_000_000)
+
+
+class FitRequest(BaseModel):
+    items: list[FitItem] = Field(..., min_length=1, max_length=40)
+
+
+@app.post("/api/portfolio/fit")
+@limiter.limit("20/minute")
+def portfolio_fit_endpoint(request: Request, req: FitRequest, user: dict = Depends(get_current_user)):
+    """Score how candidate stocks fit the signed-in user's holdings (correlation, sector, size, cash)."""
+    import portfolio_fit
+    items = [{"ticker": _valid_ticker(i.ticker), "cash_needed": i.cash_needed} for i in req.items]
+    try:
+        return portfolio_fit.fit(int(user["user_id"]), items)
+    except Exception as e:
+        raise _upstream_error(e)
+
+
 @app.get("/api/portfolio/expiry-ladder")
 @limiter.limit("20/minute")
 def portfolio_expiry_ladder(request: Request, user: dict = Depends(get_current_user)):

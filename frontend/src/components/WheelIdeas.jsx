@@ -3,12 +3,13 @@ import { fetchWheelIdeas, fetchWheelPlan } from '../api/stockApi';
 import Tip from './Tip';
 import WheelManager from './WheelManager';
 import WheelAsk from './WheelAsk';
+import { usePortfolioFit, FitBadge } from './PortfolioFit';
 
 const LIQ = { good: ['Liquid', 'positive'], ok: ['OK liquidity', ''], thin: ['Thin', 'negative'] };
 const money = v => `$${Math.round(v).toLocaleString()}`;
 const fmtDate = d => new Date(d + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
-function WheelCard({ c, onSelect, onManage }) {
+function WheelCard({ c, onSelect, onManage, fit }) {
   const [liqText, liqCls] = LIQ[c.liquidity] || LIQ.ok;
   return (
     <div className={`structure-card ${c.flags.length ? '' : 'safety-safer'}`}>
@@ -17,6 +18,7 @@ function WheelCard({ c, onSelect, onManage }) {
         {' '}<span className="market-sub">{c.name} · ${c.price}</span>
         {!c.flags.length && <span className="safety-badge safety-ok">🛡 Passes checks</span>}
       </div>
+      {fit && <FitBadge fit={fit} detailed />}
       <div className="structure-legs">
         <div className="structure-leg leg-sell">
           SELL ${c.strike} put · {fmtDate(c.expiry)}{c.monthly ? ' (monthly)' : ''} · {c.dte}d @ ${((c.bid + c.ask) / 2).toFixed(2)}
@@ -156,6 +158,7 @@ export default function WheelIdeas({ onSelect }) {
     .filter(c => !cash || c.capital <= Number(cash))
     .filter(c => c.earnings_date && c.liquidity !== 'thin')
     .filter(c => !safeOnly || !c.earnings_before_expiry);
+  const fits = usePortfolioFit(rows.slice(0, 12).map(c => ({ ticker: c.ticker, cash_needed: c.capital })));
 
   return (
     <>
@@ -192,7 +195,7 @@ export default function WheelIdeas({ onSelect }) {
       {loading && <p className="loading-text">Screening wheel candidates for {shortDated ? '7–20' : '21–50'} days to expiry…</p>}
       {!loading && !error && (rows.length ? (
         <div className="structures-grid income-grid">
-          {rows.slice(0, 12).map(c => <WheelCard key={c.ticker} c={c} onSelect={onSelect} onManage={manage} />)}
+          {rows.slice(0, 12).map(c => <WheelCard key={c.ticker} c={c} onSelect={onSelect} onManage={manage} fit={fits[c.ticker]} />)}
         </div>
       ) : (
         <p className="empty-state">No candidates match{cash ? ` ${money(Number(cash))} of cash` : ''} right now.</p>

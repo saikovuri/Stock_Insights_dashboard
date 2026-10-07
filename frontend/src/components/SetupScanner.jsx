@@ -1,6 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
 import { fetchScanner } from '../api/stockApi';
 import Tip from './Tip';
+import { usePortfolioFit, FitBadge } from './PortfolioFit';
+
+const FIT_ROWS = 25;
 
 const TAG_CLS = { breakout: 'signal-bullish', pullback: 'signal-bullish', golden_cross: 'signal-bullish', squeeze: '', oversold: 'signal-bearish' };
 const SHORT = { breakout: 'Breakout', pullback: 'Pullback', squeeze: 'Squeeze', oversold: 'Oversold', golden_cross: 'Golden X' };
@@ -89,6 +92,7 @@ export default function SetupScanner({ onSelect }) {
       .sort((a, b) => ((a[sort.key] ?? -1e9) > (b[sort.key] ?? -1e9) ? 1 : -1) * sort.dir)
       .slice(0, 150);
   }, [data, setup, sector, minRs, sort]);
+  const fits = usePortfolioFit(rows.slice(0, FIT_ROWS).map(r => ({ ticker: r.symbol })));
 
   if (error) return <div className="card"><p className="error-text">{error}</p></div>;
   if (!data) return <div className="card"><p className="loading-text">Loading scanner…</p></div>;
@@ -228,6 +232,7 @@ export default function SetupScanner({ onSelect }) {
                 {th('pct_from_high', 'From high')}
                 <th>Setups</th>
                 <th>Stop / Target <Tip term="atr_stop" /></th>
+                {Object.keys(fits).length > 0 && <th title={`How each of the top ${FIT_ROWS} rows fits your holdings`}>Fit</th>}
               </tr>
             </thead>
             <tbody>
@@ -244,6 +249,7 @@ export default function SetupScanner({ onSelect }) {
                   <td>{r.pct_from_high}%</td>
                   <td>{r.setups.map(s => <span key={s} className={`signal-chip ${TAG_CLS[s]}`}>{SHORT[s]}</span>)}</td>
                   <td className="market-sub">${r.stop} / ${r.target}</td>
+                  {Object.keys(fits).length > 0 && <td><FitBadge fit={fits[r.symbol]} /></td>}
                 </tr>
               ))}
             </tbody>

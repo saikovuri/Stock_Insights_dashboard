@@ -232,6 +232,19 @@ The result can legitimately be an empty plan. It does not buy stocks, sell puts,
 
 Scans older than three hours trigger a background refresh when requested; cached results can remain visible during rebuilding. Discovery freshness and planner eligibility are separate checks.
 
+### Fits My Portfolio
+
+For signed-in users with priced stock holdings, the first 12 Wheel candidate cards and the top 25 rows of the Setups table get a **fit** badge (Good fit 75+, OK fit 50-74, Poor fit under 50), with reasons on the card or in the badge tooltip (`POST /api/portfolio/fit`, cached 10 minutes). The score starts at 100 and subtracts:
+
+| Check | Deduction |
+| --- | --- |
+| Already held | More than 20% of stock value: 30. More than 10%: 15. |
+| Industry already heavy | More than 40% of stock value: 25. More than 25%: 10. |
+| Correlation | 6-month daily returns against your value-weighted portfolio (top 15 holdings, at least 40 overlapping days). Above 0.7: 35. Above 0.5: 20. Above 0.3: 10. |
+| Cash | When the idea needs cash (Wheel put collateral) and it exceeds your largest recorded free cash in any account: 20. |
+
+Industry uses Finnhub's classification for every ticker when available, so holdings and candidates are compared consistently. Otherwise it falls back to the stock's metrics sector. Missing correlation or cash data is shown as unavailable rather than scored. Fit says nothing about whether the trade itself is good; it only measures overlap with what you already own.
+
 ### Wheel Page Controls and Management Entry Points
 
 - **Cash available:** a display filter; one candidate contract must fit the entered cash. A blank value means no display cash cap. It is not the account-aware planner's reserve calculation.
