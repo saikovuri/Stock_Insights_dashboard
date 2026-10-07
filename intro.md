@@ -919,7 +919,16 @@ Missing/invalid premiums, nonpositive opening premium, invalid dates or reversed
 
 The recorded-option summary shows sample count, net P&L, net expectancy per close (mean net dollars), positive-net-result win rate, and profit factor (sum of positive net results / absolute sum of negative net results). Only options with a known net result are included; each close record counts once, including partial closes and breakevens. No losses displays **No losses**, not an infinite verified edge; an empty sample has unavailable expectancy, win rate and profit factor. These are historical statistics using recorded fees only, not forecasts or complete account returns.
 
-**Option results by** repeats those statistics per group, chosen with **Group by**: Strategy (short/long put/call), Ticker, Closing month, Exit reason (reviews; otherwise Not recorded) or Account. Groups sort by net P&L, or newest month first. Groups with fewer than 10 closes are flagged as too small to show a reliable edge. Manual stock-journal entries keep their separate per-setup breakdown.
+**Your edge** sits above the grouped table and ranks the strongest and weakest patterns by net expectancy per close. It takes up to three of each from five dimensions: strategy, days to expiry at entry, days held, how the trade was closed, and ticker. A group needs at least 5 option closes with net results to appear, and "Unknown" groups are ignored. One close counts in every dimension, so the lines overlap, and a single outlier can lift several groups. Read them as questions to investigate, not rules.
+
+**Option results by** repeats those statistics per group, chosen with **Group by**:
+- Strategy (short/long put/call).
+- Days to expiry at entry (opened date to expiry: 0-7, 8-21, 22-45, 46-90, 91+ days).
+- Days held (0-3, 4-14, 15-30, 31+).
+- How it was closed: Held to expiry when the close date is on or after expiry. Short options closed early are split by premium captured (50%+, under 50%, or at a loss). Long options closed early are "Closed before expiry".
+- Ticker, Closing month, Exit reason (from reviews; otherwise Not recorded) or Account.
+
+Bucketed groupings keep their natural order. The rest sort by net P&L, or newest month first. Groups with fewer than 10 closes are flagged as too small to show a reliable edge. Manual stock-journal entries keep their separate per-setup breakdown.
 
 **Review** in the last column opens a nonfinancial review dialog for an owned closed stock or option record with a ledger reference. Choose profit target, stop/risk limit, expiry, assignment, roll, discretionary exit, other, or leave the reason unrecorded. Short options additionally accept an optional capture target. Review notes are limited to 500 characters. Targets and exit reasons are self-reported after the trade; they are not verified pre-trade plans and do not execute any trade workflow.
 
@@ -1168,6 +1177,16 @@ This guide describes the current **React frontend and FastAPI backend**, includi
 All monetary examples and standard equity-option multipliers assume the app's USD/100-share conventions unless a view states otherwise. The application is a research and record-keeping tool, not an execution venue, broker-reconciled accounting system or comprehensive tax filing product. A visible idea, favorable score, AI verdict or completed checklist does not override missing-data warnings or independent eligibility/capital checks.
 
 Implementation references throughout the guide are the best starting point when rules change. Updating a threshold in code should also update its corresponding explanation here.
+
+### System Status
+
+Signed-in users have a **System status** link in the footer that opens a read-only diagnostic panel (`GET /api/status`, login required, 10 requests/minute). It shows:
+- the deployed version (git commit) and uptime;
+- live checks of the database, Finnhub quotes and Yahoo price history (cached for 5 minutes, with response times);
+- whether AI providers, Twelve Data, Sentry and ntfy are configured;
+- the scheduler heartbeat, when each background job last ran, and the last scheduler error type.
+
+It never returns secret values: provider error messages are redacted of configured keys and token-style URL parameters. Job times reset when the backend restarts, so "never" right after a restart or on a weekend is normal. A heartbeat older than five minutes while the scheduler is enabled is flagged as stuck.
 
 ### Build and Deployment Dependency Checks
 

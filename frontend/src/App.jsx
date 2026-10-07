@@ -31,6 +31,7 @@ import ShortAndSmartMoney from './components/ShortAndSmartMoney';
 import ThesisCard from './components/ThesisCard';
 import EconomicCalendar from './components/EconomicCalendar';
 import Tour, { TOUR_KEY } from './components/Tour';
+import SystemStatus from './components/SystemStatus';
 import { ProfileProvider, useProfile, PROFILES, ALL_OPTION_TABS } from './ProfileContext';
 import { fetchMetrics, fetchHistory, fetchNews, fetchAlerts, fetchEvents } from './api/stockApi';
 
@@ -51,6 +52,7 @@ function getInitialTab() {
 
 function AppShell() {
   const { user, logout, loading: authLoading } = useAuth();
+  const [statusOpen, setStatusOpen] = useState(false);
   const { theme, toggle: toggleTheme } = useTheme();
   const { profile, setProfile, config } = useProfile();
   const [activeTab, setActiveTab] = useState(getInitialTab);
@@ -332,7 +334,9 @@ function AppShell() {
       <footer className="app-footer">
         Data: Finnhub, Yahoo Finance, CBOE, SEC EDGAR, FINRA, Nasdaq &middot; AI-generated analysis can be wrong &middot; Not financial advice
         {' '}&middot; <button className="link-btn" onClick={() => { handleTabClick('dashboard'); setTourOpen(true); }}>Take the tour</button>
+        {user && <>{' '}&middot; <button className="link-btn" onClick={() => setStatusOpen(true)}>System status</button></>}
       </footer>
+      {statusOpen && <SystemStatus onClose={() => setStatusOpen(false)} />}
       {tourOpen && !showLogin && <Tour onClose={closeTour} />}
     </div>
   );

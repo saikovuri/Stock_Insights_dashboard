@@ -123,6 +123,14 @@ def api_health_check():
         if conn is not None:
             _release(conn)
 
+
+@app.get("/api/status")
+@limiter.limit("10/minute")
+def system_status_endpoint(request: Request, user: dict = Depends(get_current_user)):
+    """Configured services, provider reachability and scheduler activity. Never returns secret values."""
+    import system_status
+    return system_status.report()
+
 # ── Rate limiting ───────────────────────────────────────────────────────────
 
 app.state.limiter = limiter

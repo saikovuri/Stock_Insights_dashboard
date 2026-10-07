@@ -237,6 +237,26 @@ class FeatureTests(unittest.TestCase):
         self.assertNotEqual(before[:10], "2019-03-15", "omitting the date leaves it unchanged")
         self.assertEqual(edited.json()["account"], "Etrade")
 
+    def test_system_status_reports_services_without_secrets(self):
+        import pandas as pd
+        import system_status
+        self.assertEqual(self.client.get("/api/status").status_code, 401)
+        secret = "sk-test-secret-123"
+        bars = pd.DataFrame({"Close": [1.0]}, index=pd.to_datetime(["2026-10-06"]))
+        with patch.object(system_status, "_SECRETS", [secret]), \
+             patch("providers.finnhub_enabled", return_value=True), \
+             patch("providers.finnhub_quote", side_effect=RuntimeError(f"403 for url ...?token={secret}")), \
+             patch("stock_data.get_stock_data", return_value=bars), \
+             patch.object(system_status, "get_or_fetch", side_effect=lambda key, fetch, ttl: fetch()), \
+             self.as_user(new_user()):
+            body = self.client.get("/api/status").json()
+        checks = {c["name"]: c for c in body["checks"]}
+        self.assertTrue(checks["Database"]["ok"])
+        self.assertFalse(checks["Finnhub quotes"]["ok"])
+        self.assertNotIn(secret, str(body))
+        self.assertIn("2026-10-06", checks["Yahoo price history"]["detail"])
+        self.assertIn("jobs", body["scheduler"])
+
     def test_next_steps_flag_cash_concentration_and_covered_calls(self):
         import accounts as accounts_module
         import next_steps

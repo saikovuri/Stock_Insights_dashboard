@@ -16,7 +16,7 @@ import Accounting from './components/Accounting';
 import WheelIdeas from './components/WheelIdeas';
 import MarketContext from './components/MarketContext';
 import PreTradeChecklist from './components/PreTradeChecklist';
-import Journal, { recordedTradeMetrics, recordedOptionStats, groupedOptionStats } from './components/Journal';
+import Journal, { recordedTradeMetrics, recordedOptionStats, groupedOptionStats, edgeHighlights, howClosed } from './components/Journal';
 import SearchBar from './components/SearchBar';
 import { NavHistory, CorporateActions } from './components/Accounts';
 import { ImportCsv } from './components/PortfolioInsights';
@@ -1025,6 +1025,28 @@ test('journal groups option results by strategy, month, exit reason and account'
   expect(groupedOptionStats(rows, 'month').map(g => g.key)).toEqual(['2026-04', '2026-03']);
   expect(groupedOptionStats(rows, 'exit').find(g => g.key === 'Stop / risk limit').net).toBe(-30);
   expect(groupedOptionStats(rows, 'account').map(g => g.key).sort()).toEqual(['Default', 'IRA']);
+});
+
+test('edge report buckets by entry DTE, days held and how closed, and ranks patterns with enough closes', () => {
+  const close = (overrides) => ({ position: 'short', option_type: 'put', ticker: 'AMD', open_premium: 2, close_premium: 0.8,
+    opened_at: '2026-03-01', closed_at: '2026-03-06', expiry: '2026-03-13', net_pnl: 120, ...overrides });
+  expect(howClosed(close({}))).toBe('Closed early, 50%+ captured');
+  expect(howClosed(close({ close_premium: 1.5 }))).toBe('Closed early, under 50% captured');
+  expect(howClosed(close({ close_premium: 3 }))).toBe('Closed early at a loss');
+  expect(howClosed(close({ closed_at: '2026-03-13', close_premium: 0 }))).toBe('Held to expiry');
+  expect(howClosed(close({ position: 'long' }))).toBe('Closed before expiry');
+  const weekly = Array.from({ length: 5 }, () => close({}));
+  const leaps = Array.from({ length: 5 }, () => close({ ticker: 'TSLA', option_type: 'call', opened_at: '2025-01-02', expiry: '2026-06-18',
+    close_premium: 4, net_pnl: -200 }));
+  const rows = [...weekly, ...leaps, close({ ticker: 'ONE', net_pnl: 5000 })];
+  expect(groupedOptionStats(rows, 'dte').map(g => g.key)).toEqual(['8-21 days', '91+ days']);
+  expect(groupedOptionStats(rows, 'held').map(g => g.key)).toEqual(['4-14 days', '31+ days']);
+  const edge = edgeHighlights(rows);
+  expect(edge.best.map(g => g.key)).not.toContain('ONE');
+  expect(edge.best.length).toBeLessThanOrEqual(3);
+  expect(edge.best.every(g => g.count >= 5 && g.expectancy > 0)).toBe(true);
+  expect(edge.worst.map(g => g.expectancy)).toEqual([-200, -200, -200]);
+  expect(edge.worst.map(g => g.key)).not.toContain('Unknown');
 });
 
 test('ticker search suggests companies and supports keyboard selection', async () => {

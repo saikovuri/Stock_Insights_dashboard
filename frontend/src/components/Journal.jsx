@@ -79,8 +79,25 @@ export function recordedOptionStats(rows) {
     profitFactor: loss ? (gain / loss).toFixed(2) : values.length ? 'No losses' : 'Unavailable' };
 }
 
+const bucket = (value, edges) => value == null ? 'Unknown' : edges.find(([limit]) => value <= limit)?.[1] ?? edges.at(-1)[1];
+const DTE_BUCKETS = [[7, '0-7 days'], [21, '8-21 days'], [45, '22-45 days'], [90, '46-90 days'], [Infinity, '91+ days']];
+const HELD_BUCKETS = [[3, '0-3 days'], [14, '4-14 days'], [30, '15-30 days'], [Infinity, '31+ days']];
+const CLOSE_ORDER = ['Held to expiry', 'Closed early, 50%+ captured', 'Closed early, under 50% captured', 'Closed early at a loss', 'Closed before expiry', 'Unknown'];
+
+export function howClosed(row) {
+  const metrics = recordedTradeMetrics(row);
+  if (metrics.dteAtClose == null) return 'Unknown';
+  if (metrics.dteAtClose <= 0) return 'Held to expiry';
+  if (row.position !== 'short') return 'Closed before expiry';
+  if (metrics.capture == null) return 'Unknown';
+  return metrics.capture >= 50 ? 'Closed early, 50%+ captured' : metrics.capture >= 0 ? 'Closed early, under 50% captured' : 'Closed early at a loss';
+}
+
 export const GROUPINGS = {
   strategy: ['Strategy', row => `${row.position === 'short' ? 'Short' : 'Long'} ${row.option_type}`],
+  dte: ['Days to expiry at entry', row => bucket(calendarDays(row.opened_at, row.expiry), DTE_BUCKETS), [...DTE_BUCKETS.map(([, label]) => label), 'Unknown']],
+  held: ['Days held', row => bucket(recordedTradeMetrics(row).daysHeld, HELD_BUCKETS), [...HELD_BUCKETS.map(([, label]) => label), 'Unknown']],
+  closed: ['How it was closed', howClosed, CLOSE_ORDER],
   ticker: ['Ticker', row => row.ticker],
   month: ['Closing month', row => String(row.closed_at).slice(0, 7)],
   exit: ['Exit reason', row => EXIT_REASONS[row.review?.exit_reason] || 'Not recorded'],
@@ -88,21 +105,47 @@ export const GROUPINGS = {
 };
 
 export function groupedOptionStats(rows, grouping) {
-  const [, keyOf] = GROUPINGS[grouping];
+  const [, keyOf, order] = GROUPINGS[grouping];
   const groups = new Map();
   rows.filter(row => recordedTradeMetrics(row).option && finiteNumber(row.net_pnl)).forEach(row => {
     const key = keyOf(row);
     groups.set(key, [...(groups.get(key) || []), row]);
   });
   return [...groups.entries()].map(([key, members]) => ({ key, ...recordedOptionStats(members) }))
-    .sort((first, second) => grouping === 'month' ? second.key.localeCompare(first.key) : second.net - first.net);
+    .sort((first, second) => order ? order.indexOf(first.key) - order.indexOf(second.key)
+      : grouping === 'month' ? second.key.localeCompare(first.key) : second.net - first.net);
+}
+
+const EDGE_MIN_CLOSES = 5;
+const EDGE_DIMENSIONS = ['strategy', 'dte', 'held', 'closed', 'ticker'];
+
+/** Strongest and weakest patterns by net expectancy per close, ignoring groups under EDGE_MIN_CLOSES. */
+export function edgeHighlights(rows) {
+  const groups = EDGE_DIMENSIONS.flatMap(dimension => groupedOptionStats(rows, dimension)
+    .filter(group => group.count >= EDGE_MIN_CLOSES && group.key !== 'Unknown')
+    .map(group => ({ ...group, dimension: GROUPINGS[dimension][0] })));
+  const ranked = [...groups].sort((first, second) => second.expectancy - first.expectancy);
+  return { best: ranked.filter(group => group.expectancy > 0).slice(0, 3),
+    worst: ranked.filter(group => group.expectancy < 0).reverse().slice(0, 3) };
 }
 
 function GroupedOptionStats({ rows }) {
   const [grouping, setGrouping] = useState('strategy');
   const groups = groupedOptionStats(rows, grouping);
   if (!groups.length) return null;
+  const edge = edgeHighlights(rows);
+  const line = group => <li key={`${group.dimension}:${group.key}`}><strong>{group.dimension}: {group.key}</strong>{' '}
+    <span className={pnlClass(group.expectancy)}>{money(group.expectancy)}</span> per close over {group.count} closes
+    {' '}({percent(group.winRate)} wins, {money(group.net)} net)</li>;
   return <div className="journal-breakdown">
+    <div className="edge-report" aria-label="Your edge">
+      <h4>Your edge</h4>
+      {edge.best.length || edge.worst.length ? <div className="edge-columns">
+        {edge.best.length > 0 && <div><span className="positive">Working best</span><ul>{edge.best.map(line)}</ul></div>}
+        {edge.worst.length > 0 && <div><span className="negative">Costing you</span><ul>{edge.worst.map(line)}</ul></div>}
+      </div> : <p className="market-sub">Needs at least {EDGE_MIN_CLOSES} closed options in the same group (strategy, days to expiry, days held, how closed or ticker) before a pattern is shown.</p>}
+      <p className="market-sub">Ranked by net dollars per close using recorded fees. Groups overlap (one close counts in each dimension) and small samples mislead: treat these as questions to look into, not rules.</p>
+    </div>
     <div className="ivrank-header"><h4 style={{ margin: 0 }}>Option results by {GROUPINGS[grouping][0].toLowerCase()}</h4>
       <label className="market-sub">Group by{' '}<select value={grouping} onChange={event => setGrouping(event.target.value)}>
         {Object.entries(GROUPINGS).map(([key, [label]]) => <option key={key} value={key}>{label}</option>)}</select></label></div>

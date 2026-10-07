@@ -4327,6 +4327,10 @@ tr.alert-triggered {
 .next-step-points { font-size: 0.8rem; margin: 0 0 0.3rem; }
 .import-kind { flex-wrap: wrap; }
 .pnl-calendar-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; }
+.edge-report { margin-bottom: 0.8rem; }
+.edge-report h4 { margin: 0 0 0.3rem; }
+.edge-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 0.6rem; font-size: 0.85rem; }
+.edge-columns ul { margin: 0.2rem 0 0; padding-left: 1.1rem; }
 .pnl-calendar-head h4 { margin: 0; }
 .pnl-calendar-nav { display: flex; align-items: center; gap: 0.5rem; }
 .pnl-calendar-nav strong { min-width: 9.5rem; text-align: center; }

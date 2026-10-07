@@ -505,6 +505,7 @@ export const fetchTaxWarnings = () => getJson(`${BASE}/portfolio/tax`, 'Failed t
 // ── Options desk & track record ──────────────────────────────────
 export const fetchOptionActions = () => getJson(`${BASE}/portfolio/options/actions`, 'Failed to check positions', true);
 export const fetchNextSteps = () => getJson(`${BASE}/portfolio/next-steps`, 'Failed to load suggestions', true);
+export const fetchSystemStatus = () => getJson(`${BASE}/status`, 'Failed to load system status', true);
 export const fetchPortfolioEarnings = () => getJson(`${BASE}/portfolio/earnings`, 'Failed to load earnings', true);
 export const fetchWheelLedger = () => getJson(`${BASE}/portfolio/wheel-ledger`, 'Failed to load wheel ledger', true);
 export const fetchOptionsReview = () => getJson(`${BASE}/portfolio/options/review`, 'Failed to load review', true);

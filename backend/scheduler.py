@@ -7,7 +7,7 @@ workers is harmless because notifications are de-duplicated in the database.
 import logging
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import requests
@@ -382,6 +382,14 @@ def _run_position_checks() -> None:
                     push_ntfy(get_ntfy_topic(uid), title, a["text"], tags="wrench")
 
 
+# Read by the Status page: when the loop last ticked, what last ran, and the last failure.
+HEARTBEAT = {"started_at": None, "last_tick": None, "jobs": {}, "last_error": None}
+
+
+def _ran(job: str) -> None:
+    HEARTBEAT["jobs"][job] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
 def _loop() -> None:
     last_scan = datetime.min.replace(tzinfo=ET)
     last_briefing_day = None
@@ -398,14 +406,17 @@ def _loop() -> None:
     while True:
         try:
             now = datetime.now(ET)
+            HEARTBEAT["last_tick"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
             # Late in the session, while option quotes are still live, so marks are real
             if _market_open(now) and (now.hour, now.minute) >= (15, 45) and last_nav_day != now.date():
                 last_nav_day = now.date()
                 import accounts
                 accounts.snapshot_all()
+                _ran("account_value_snapshot")
             if _market_open(now) and (now.hour, now.minute) >= (10, 15) and last_positions_day != now.date():
                 last_positions_day = now.date()
                 _run_position_checks()
+                _ran("position_checks")
             if now.weekday() < 5 and (now.hour, now.minute) >= (16, 45) and last_settle_day != now.date():
                 last_settle_day = now.date()
                 import track_record
@@ -414,6 +425,7 @@ def _loop() -> None:
                 last_scan_day = now.date()
                 import scanner
                 scanner.run_scan()
+                _ran("setup_scan")
             # Wheel candidates need live option quotes, so refresh during the session only
             if _market_open(now) and now.hour >= 10 and now - last_wheel >= timedelta(hours=3):
                 last_wheel = now
@@ -427,6 +439,7 @@ def _loop() -> None:
             if _market_open(now) and now - last_scan >= timedelta(minutes=ALERT_SCAN_MINUTES):
                 last_scan = now
                 n = scan_alerts()
+                _ran("alert_scan")
                 if n:
                     log.info("Alert scan created %d notifications", n)
             # Near the close, when option quotes are live, so IV snapshots are comparable day to day
@@ -436,6 +449,7 @@ def _loop() -> None:
             if now.weekday() < 5 and now.hour >= BRIEFING_HOUR_ET and last_briefing_day != now.date():
                 last_briefing_day = now.date()
                 _run_briefings()
+                _ran("morning_briefing")
             if now.weekday() >= 5 and now.hour >= 9 and last_weekly_day != now.date():
                 last_weekly_day = now.date()
                 _run_weekly()
@@ -447,6 +461,8 @@ def _loop() -> None:
                 delete_old_notifications(30)
         except Exception as e:
             log.exception("Scheduler tick failed: %s", e)
+            HEARTBEAT["last_error"] = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                                       "error": type(e).__name__}
         time.sleep(60)
 
 
@@ -455,6 +471,7 @@ def start() -> None:
     if _started:
         return
     _started = True
+    HEARTBEAT["started_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
     threading.Thread(target=_loop, name="scheduler", daemon=True).start()
     log.info("Scheduler started (alerts every %d min in market hours, briefing at %d:00 ET)",
              ALERT_SCAN_MINUTES, BRIEFING_HOUR_ET)
