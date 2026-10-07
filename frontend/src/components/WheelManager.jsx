@@ -59,6 +59,7 @@ function CoveredCalls({ preset }) {
           <select className="tool-input covered-call-horizon" value={cadence} disabled={loading} onChange={e => { setCadence(e.target.value); setData(null); }}>
             <option value="all">All dates (0-120 days)</option>
             <option value="weekly">Weekly (1-7 days)</option>
+            <option value="leaps">Long-dated / LEAPS (6-26 months)</option>
           </select>
         </label>
         <button className="btn-primary btn-sm" disabled={!ticker.trim() || !(Number(basis) > 0) || loading} onClick={() => run()}>
@@ -66,6 +67,7 @@ function CoveredCalls({ preset }) {
         </button>
       </div>
       {cadence === 'weekly' && <p className="ivrank-note">Weekly calls have higher near-expiry gamma risk and less time to adjust.</p>}
+      {cadence === 'leaps' && <p className="ivrank-note">A long-dated call pays more up front but gives the stock months or years to rise through the strike. Buying it back after a rally can cost more than the premium received.</p>}
       {error && <p className="empty-state" role="alert">{error}</p>}
       {data && (
         <>
@@ -77,6 +79,7 @@ function CoveredCalls({ preset }) {
             </strong>
             <div>{data.note}</div>
             {earningsOverlap && <div>⚠️ Earnings {fmtDate(data.earnings_date)} before expiry — a gap up can call the shares away.</div>}
+            {data.unrealized_pct >= 50 && <div>⚠️ Shares are {data.unrealized_pct}% above your cost. Assignment sells them and realizes that gain (taxable outside retirement accounts). If you want to keep them, favor "Keep the shares" strikes, and buy back or roll up and out before the stock reaches the strike.</div>}
             {days === 0 && <div className="negative">Expires today: elevated gamma risk and limited time to adjust. Annualized returns are not forecasts.</div>}
           </div>
           {!!data.expirations?.length && <div className="income-controls">
@@ -113,13 +116,23 @@ function CoveredCalls({ preset }) {
                       <div className="covered-call-cost"><span>Projected cost/share</span><strong>
                         {i.premium_adjusted_cost == null ? 'Unavailable' : i.premium_adjusted_cost.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
                       </strong></div>
-                      <div><span>Return on cost</span><strong>{i.return_pct}% <small>({i.annualized_pct}%/yr)</small></strong></div>
+                      {i.yield_pct != null
+                        ? <div><span>Yield on stock value</span><strong>{i.yield_pct}% <small>({i.yield_annualized_pct}%/yr)</small></strong></div>
+                        : <div><span>Return on cost</span><strong>{i.return_pct}% <small>({i.annualized_pct}%/yr)</small></strong></div>}
                       <div><span>Strike above price</span><strong>+{i.otm_pct}%</strong></div>
-                      <div><span>Total gain if called</span><strong className="positive">{i.if_called_pct}%</strong></div>
+                      {i.if_called_from_today_pct != null
+                        ? <div><span>Gain from today if called</span><strong className="positive">{i.if_called_from_today_pct}%</strong></div>
+                        : <div><span>Total gain if called</span><strong className="positive">{i.if_called_pct}%</strong></div>}
+                      {i.gain_realized_if_called > 0 && <div><span>Gain realized if called</span><strong>{money(i.gain_realized_if_called)}</strong></div>}
                       <div><span>Chance of being called</span><strong>~{i.prob_called_pct}%</strong></div>
                       <div><span>Liquidity</span><strong className={liqCls}>{liqText}</strong></div>
                       {i.spread_pct != null && <div><span>Bid/ask spread</span><strong>{i.spread_pct}%</strong></div>}
                     </div>
+                    {i.upside_cap && <p className="ivrank-note covered-call-cap">
+                      Upside protection: also buy the ${i.upside_cap.strike} call @ ${i.upside_cap.mid} for a net {money(i.upside_cap.total_net)} credit.
+                      Above ${i.upside_cap.strike} the long call gains as fast as the short call loses, so you only give up the move
+                      from ${i.strike} to ${i.upside_cap.strike}.
+                    </p>}
                   </div>
                 );
               })}

@@ -1073,23 +1073,33 @@ def directional_ideas(ticker: str, direction: str, budget: float, risk: str) -> 
 
 def assigned_calls(ticker: str, cost_basis: float, shares: int = 100, cadence: str = "standard") -> dict:
     """All liquid covered-call candidates by qualifying expiry, at or above entered cost."""
-    if cadence not in {"all", "standard", "weekly"}:
+    if cadence not in {"all", "standard", "weekly", "leaps"}:
         raise ValueError("Invalid covered-call cadence")
+    leaps = cadence == "leaps"
     def _fetch():
         from concurrent.futures import ThreadPoolExecutor
         S = _spot(ticker)
         exps = _expirations(ticker)
         earnings = _earnings_date(ticker)
-        lower, upper = (1, 7) if cadence == "weekly" else (0, 120)
+        lower, upper = (1, 7) if cadence == "weekly" else (180, 800) if leaps else (0, 120)
+        # Long-dated chains quote wider and trade less; a weekly-grade spread/OI bar would reject nearly all of them.
+        max_spread, min_oi = (0.15, 100) if leaps else (0.08, 500)
         choices = sorted({expiry for expiry in exps if _live(expiry) and lower <= _dte(expiry) <= upper})
         if not choices:
             raise LookupError(f"No listed expirations within {lower}-{upper} days")
         contracts = shares // 100
 
-        def idea(r, e):
+        def idea(r, e, rows):
             K, mid = r["strike"], r["mid"]
             days = max(_dte(e), 1)
             label = "Keep the shares" if r["delta"] < 0.2 else "Balanced" if r["delta"] <= 0.32 else "Max premium"
+            cap = next((row for row in sorted(rows, key=lambda row: row["strike"]) if row["strike"] >= round(K * 1.1, 2)
+                        and row["ask"] >= row["bid"] > 0 and row["oi"] >= 100), None)
+            upside_cap = None
+            if cap and mid - cap["mid"] > 0:
+                upside_cap = {"strike": cap["strike"], "mid": round(cap["mid"], 2),
+                              "net_credit": round(mid - cap["mid"], 2),
+                              "total_net": round((mid - cap["mid"]) * 100 * contracts, 2)}
             return {
                 "label": label, "expiry": e, "dte": _dte(e), "strike": K, "delta": round(r["delta"], 2),
                 "mid": round(mid, 2), "bid": round(r["bid"], 2), "ask": round(r["ask"], 2),
@@ -1097,10 +1107,15 @@ def assigned_calls(ticker: str, cost_basis: float, shares: int = 100, cadence: s
                 "premium_adjusted_cost": round(cost_basis - mid * 100 * contracts / shares, 2),
                 "return_pct": round(mid / cost_basis * 100, 2),
                 "annualized_pct": round(mid / cost_basis * 365 / days * 100, 1),
+                "yield_pct": round(mid / S * 100, 2),
+                "yield_annualized_pct": round(mid / S * 365 / days * 100, 1),
                 "if_called_pct": round((K - cost_basis + mid) / cost_basis * 100, 2),
+                "if_called_from_today_pct": round((K - S + mid) / S * 100, 2),
+                "gain_realized_if_called": round((K - cost_basis) * 100 * contracts, 2),
                 "prob_called_pct": round(r["p_itm"] * 100), "otm_pct": round((K - S) / S * 100, 1),
                 "open_interest": r["oi"], "liquidity": "good",
                 "spread_pct": round((r["ask"] - r["bid"]) / mid * 100, 2),
+                "upside_cap": upside_cap,
             }
 
         def candidates(expiry):
@@ -1108,12 +1123,12 @@ def assigned_calls(ticker: str, cost_basis: float, shares: int = 100, cadence: s
                 calls, _ = _chain(ticker, expiry)
                 rows = _otm_rows(calls, "call", S, _years(expiry))
                 eligible = [row for row in rows if row["strike"] >= cost_basis
-                            and row["oi"] >= 500 and row["ask"] >= row["bid"] > 0
-                            and (row["ask"] - row["bid"]) / ((row["ask"] + row["bid"]) / 2) <= 0.08
+                            and row["oi"] >= min_oi and row["ask"] >= row["bid"] > 0
+                            and (row["ask"] - row["bid"]) / ((row["ask"] + row["bid"]) / 2) <= max_spread
                             and 0.10 <= row["delta"] <= 0.40 and row["mid"] / cost_basis >= 0.001]
                 return {"date": expiry, "dte": _dte(expiry), "monthly": _is_monthly(expiry),
                         "earnings_before_expiry": bool(earnings and earnings <= expiry),
-                        "ideas": [idea(row, expiry) for row in sorted(eligible, key=lambda row: row["strike"])]}
+                        "ideas": [idea(row, expiry, rows) for row in sorted(eligible, key=lambda row: row["strike"])]}
             except Exception as error:
                 log.info("Covered-call chain unavailable for %s %s: %s", ticker, expiry, error)
                 return {"date": expiry, "unavailable": True}
@@ -1124,7 +1139,7 @@ def assigned_calls(ticker: str, cost_basis: float, shares: int = 100, cadence: s
         first = dates[0] if dates else None
 
         gap = (S - cost_basis) / cost_basis * 100
-        note = ("OTM strikes at or above cost; open interest >= 500; bid/ask spread <= 8%; "
+        note = (f"OTM strikes at or above cost; open interest >= {min_oi}; bid/ask spread <= {max_spread:.0%}; "
                 "delta 0.10-0.40; quoted premium >= 0.1% of cost. These are screening rules, not a profit guarantee.")
         return {
             "ticker": ticker, "spot": round(S, 2), "cost_basis": round(cost_basis, 2), "shares": shares,
@@ -1138,7 +1153,7 @@ def assigned_calls(ticker: str, cost_basis: float, shares: int = 100, cadence: s
             "unavailable_expirations": [result["date"] for result in checked if result.get("unavailable")],
         }
 
-    return get_or_fetch(f"assigned-cc-v3:{ticker}:{cost_basis:.2f}:{shares}:{cadence}", _fetch, ttl=180)
+    return get_or_fetch(f"assigned-cc-v4:{ticker}:{cost_basis:.2f}:{shares}:{cadence}", _fetch, ttl=180)
 
 
 # ── Roll / repair a tested short option position ────────────────────────────

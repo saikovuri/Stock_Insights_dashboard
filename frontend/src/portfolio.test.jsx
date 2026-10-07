@@ -258,6 +258,23 @@ test('covered calls switch to weekly and show projected share cost without recor
   expect(fetch).toHaveBeenLastCalledWith('NVDA', 226.34, 100, 'all');
 });
 
+test('covered calls on a large gain show value-based yield, realized gain and the upside-protection call', async () => {
+  vi.spyOn(stockApi, 'fetchAssignedCalls').mockResolvedValue({ ticker: 'AMD', spot: 640, cost_basis: 60, shares: 100, contracts: 1,
+    expiry: '2027-06-17', dte: 253, cadence: 'leaps', unrealized_pct: 966.7, note: '',
+    ideas: [{ label: 'Balanced', strike: 700, expiry: '2027-06-17', dte: 253, delta: 0.25, mid: 40, total_premium: 4000,
+      premium_adjusted_cost: 20, open_interest: 150, liquidity: 'good', return_pct: 66.67, annualized_pct: 96.2, yield_pct: 6.25,
+      yield_annualized_pct: 9, otm_pct: 9.4, if_called_pct: 1133, if_called_from_today_pct: 15.63, gain_realized_if_called: 64000,
+      prob_called_pct: 22, upside_cap: { strike: 770, mid: 25, net_credit: 15, total_net: 1500 } }] });
+  render(<WheelManager preset={{ mode: 'assigned', ticker: 'AMD', costBasis: 60 }} />);
+  expect(await screen.findByText(/Shares are 966.7% above your cost/)).toBeTruthy();
+  expect(screen.getByText('Yield on stock value')).toBeTruthy();
+  expect(screen.queryByText('Return on cost')).toBeNull();
+  expect(screen.getByText('15.63%')).toBeTruthy();
+  expect(screen.getByText(/also buy the \$770 call @ \$25/)).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('Expiry horizon'), { target: { value: 'leaps' } });
+  expect(screen.getByText(/gives the stock months or years to rise through the strike/)).toBeTruthy();
+});
+
 test('covered calls list all qualifying dates and every strike on the selected date', async () => {
   const ideas = Array.from({ length: 5 }, (_, index) => ({ label: 'Balanced', strike: 250 + index, expiry: '2026-10-09',
     dte: 4, delta: 0.25, mid: 4, total_premium: 400, premium_adjusted_cost: 222.34, open_interest: 500, liquidity: 'good' }));

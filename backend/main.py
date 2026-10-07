@@ -1158,7 +1158,7 @@ def stock_option_expirations(request: Request, ticker: str):
 def stock_assigned_calls(request: Request, ticker: str,
                          cost_basis: float = Query(..., gt=0, le=100000),
                          shares: int = Query(100, ge=100, le=1000000),
-                         cadence: str = Query("all", pattern="^(all|standard|weekly)$")):
+                         cadence: str = Query("all", pattern="^(all|standard|weekly|leaps)$")):
     """Covered calls for assigned shares (wheel step 2), never below the cost basis."""
     ticker = _valid_ticker(ticker)
     try:

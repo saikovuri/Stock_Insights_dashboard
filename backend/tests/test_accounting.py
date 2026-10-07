@@ -91,6 +91,34 @@ class AccountingTests(unittest.TestCase):
                 self.assertEqual(client.get("/api/stock/NVDA/option-expirations").json()["expirations"], [
                     {"date": "2026-10-09", "dte": 4}])
 
+    def test_covered_calls_value_yield_leaps_and_upside_cap(self):
+        import options_analytics as analytics
+        expiries = {"2026-10-09": 2, "2027-06-17": 253, "2029-01-19": 834}
+        short = dict(strike=700, mid=40, bid=38, ask=43, delta=0.25, oi=150, p_itm=0.22)
+        cap = dict(strike=770, mid=25, bid=24, ask=26, delta=0.18, oi=120, p_itm=0.15)
+        with patch.object(analytics, "get_or_fetch", side_effect=lambda key, fetch, ttl: fetch()) as cache, \
+             patch.object(analytics, "_spot", return_value=640.0), \
+             patch.object(analytics, "_expirations", return_value=list(expiries)), \
+             patch.object(analytics, "_earnings_date", return_value=None), \
+             patch.object(analytics, "_live", return_value=True), \
+             patch.object(analytics, "_dte", side_effect=expiries.get), \
+             patch.object(analytics, "_years", return_value=0.7), \
+             patch.object(analytics, "_is_monthly", return_value=True), \
+             patch.object(analytics, "_chain", return_value=([], [])), \
+             patch.object(analytics, "_otm_rows", return_value=[short, cap]):
+            result = analytics.assigned_calls("AMD", 60, 100, "leaps")
+            self.assertTrue(cache.call_args.args[0].endswith(":leaps"))
+            self.assertEqual([e["date"] for e in result["expirations"]], ["2027-06-17"], "180-800 days only")
+            self.assertIn("open interest >= 100", result["note"])
+            idea = result["ideas"][0]
+            self.assertEqual((idea["yield_pct"], idea["if_called_from_today_pct"], idea["gain_realized_if_called"]),
+                             (6.25, round(100 / 640 * 100, 2), 64000), "yield and gain use today's price; realized gain uses cost")
+            self.assertEqual(idea["upside_cap"], {"strike": 770, "mid": 25, "net_credit": 15, "total_net": 1500})
+            self.assertIsNone(result["ideas"][1]["upside_cap"], "nothing 10% above the top strike")
+            with self.assertRaises(LookupError):
+                with patch.object(analytics, "_expirations", return_value=["2026-10-09"]):
+                    analytics.assigned_calls("AMD", 60, 100, "leaps")
+
     def test_assigned_calls_api_cadence_validation(self):
         import main
         from fastapi.testclient import TestClient
