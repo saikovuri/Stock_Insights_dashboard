@@ -286,6 +286,17 @@ _COLS = {
 _SKIP = {"CASH", "PENDING", "TOTAL", "ACCOUNT", "MONEY", "SWEEP", "CORE"}
 
 
+def _header(name: str) -> str:
+    """Lower-case header without unit markers, so "Price Paid $" and "Cost Basis ($)" match their plain aliases."""
+    name = re.sub(r"\s*(\(\$\)|\(%\)|\$|%)\s*$", "", str(name).strip().lower())
+    return " ".join(name.split())
+
+
+def _find_columns(row, aliases) -> dict:
+    names = [_header(c) for c in row]
+    return {key: next((j for j, n in enumerate(names) if n in {_header(a) for a in syn}), None) for key, syn in aliases.items()}
+
+
 def _num(v) -> float | None:
     s = str(v or "").strip().replace("$", "").replace(",", "").replace("%", "")
     neg = s.startswith("(") and s.endswith(")")
@@ -313,8 +324,7 @@ def parse_broker_csv(text: str) -> dict:
     rows = list(csv.reader(io.StringIO(text.lstrip("\ufeff"))))
     header_i, cols = None, {}
     for i, r in enumerate(rows[:30]):
-        names = [c.strip().lower() for c in r]
-        found = {k: next((j for j, n in enumerate(names) if n in syn), None) for k, syn in _COLS.items()}
+        found = _find_columns(r, _COLS)
         if found["symbol"] is not None and found["shares"] is not None:
             header_i, cols = i, found
             break
@@ -422,8 +432,7 @@ def parse_history_csv(text: str) -> dict:
     rows = list(csv.reader(io.StringIO(text.lstrip("\ufeff"))))
     header_i, cols = None, {}
     for i, r in enumerate(rows[:30]):
-        names = [c.strip().lower() for c in r]
-        found = {k: next((j for j, n in enumerate(names) if n in syn), None) for k, syn in _HISTORY_COLS.items()}
+        found = _find_columns(r, _HISTORY_COLS)
         if all(found[k] is not None for k in ("shares", "closed", "proceeds", "cost")) and (
                 found["symbol"] is not None or found["description"] is not None):
             header_i, cols = i, found

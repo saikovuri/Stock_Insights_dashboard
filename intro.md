@@ -607,7 +607,7 @@ Guest stock holdings live only in browser storage; signed-in holdings are accoun
 
 Signed-in users can expand **Import from broker CSV** in Holdings, choose **Open positions** or **Closed trade history**, preview recognized/skipped rows, then confirm. Rows go into the currently selected account. The file control rejects files over 1 MB; the server parses the text and does not store the file.
 
-**Open positions** searches the first 30 rows for Symbol and Quantity columns, accepting common aliases for per-share or total cost and acquisition date.
+**Open positions** searches the first 30 rows for Symbol and Quantity columns, accepting common aliases for per-share or total cost and acquisition date. Header matching ignores case and trailing unit markers such as `$`, `%` or `($)`, so E*TRADE's `Price Paid $` is read as the cost per share.
 
 - Stock/ETF rows become new lots. Positive quantity and positive cost are required; total cost can be divided by quantity when per-share cost is absent. Short stock positions are skipped. Dots normalize to hyphens. Processing stops at 500 accepted rows.
 - Option symbols are recognized in OCC (`AAPL  250117C00150000`), Fidelity (`-AAPL250117C150`), Schwab (`AAPL 01/17/2025 150.00 C`) and E*TRADE (`AAPL Jan 17 '25 $150 Call`) styles. Negative quantity records a short; whole contracts are required. Premium per share is |total cost| / (contracts × 100), or the per-share average when no total is given. Brokers that report per-contract averages without a total will be misread by 100×, so check the preview. Already-expired options are skipped.

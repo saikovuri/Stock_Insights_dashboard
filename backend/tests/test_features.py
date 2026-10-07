@@ -132,6 +132,16 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual([r["kind"] for r in positions["rows"]], ["stock", "option"])
         self.assertEqual((positions["rows"][1]["position"], positions["rows"][1]["premium"]), ("short", 2.5))
         self.assertIn("expired", positions["skipped"][0]["reason"])
+        etrade = insights.parse_broker_csv(
+            "Account Summary\nAccount,Net Account Value\nBrokerage -1234,\"$25,000.00\"\n\n"
+            "Symbol,Last Price $,Change $,Change %,Quantity,Price Paid $,Day's Gain $,Total Gain $,Total Gain %,Value $\n"
+            "MSFT,420.00,1.00,0.24%,10,\"$350.25\",10.00,697.50,19.91%,\"4,200.00\"\n"
+            "AAPL Jan 17 '30 $150 Put,2.10,0,0%,-1,2.75,0,65,23.6%,-210\n"
+            "CASH,,,,,,,,,\"1,000.00\"\nTOTAL,,,,,,,,,\"5,000.00\"\n")
+        self.assertEqual([(r["kind"], r["ticker"]) for r in etrade["rows"]], [("stock", "MSFT"), ("option", "AAPL")])
+        self.assertEqual(etrade["rows"][0]["price"], 350.25, "E*TRADE's 'Price Paid $' column is the cost per share")
+        self.assertEqual((etrade["rows"][1]["position"], etrade["rows"][1]["premium"]), ("short", 2.75))
+        self.assertEqual({s["reason"] for s in etrade["skipped"]}, {"cash / money market"})
         uid = new_user()
         insights.import_rows(uid, positions["rows"], "Roth")
         self.assertEqual({o["account"] for o in database.get_user_options(uid)}, {"Roth"})
