@@ -10,7 +10,7 @@ const fmtDate = d => new Date(d + 'T12:00:00').toLocaleDateString(undefined, { m
 function CoveredCalls({ preset }) {
   const [ticker, setTicker] = useState(preset?.ticker || '');
   const [basis, setBasis] = useState(preset?.costBasis ?? '');
-  const [shares, setShares] = useState(100);
+  const [shares, setShares] = useState(preset?.shares || 100);
   const [cadence, setCadence] = useState('all');
   const [selectedDate, setSelectedDate] = useState('');
   const [data, setData] = useState(null);
@@ -29,7 +29,7 @@ function CoveredCalls({ preset }) {
       setLoading(false);
     }
   };
-  useEffect(() => { if (preset?.ticker && preset?.costBasis) run(preset.ticker, preset.costBasis, 100); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (preset?.ticker && preset?.costBasis) run(preset.ticker, preset.costBasis, preset.shares || 100); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const selected = data?.expirations?.find(option => option.date === selectedDate) ?? data?.expirations?.[0];
   const ideas = selected?.ideas ?? data?.ideas ?? [];

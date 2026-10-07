@@ -504,6 +504,7 @@ export const fetchTaxWarnings = () => getJson(`${BASE}/portfolio/tax`, 'Failed t
 
 // ── Options desk & track record ──────────────────────────────────
 export const fetchOptionActions = () => getJson(`${BASE}/portfolio/options/actions`, 'Failed to check positions', true);
+export const fetchNextSteps = () => getJson(`${BASE}/portfolio/next-steps`, 'Failed to load suggestions', true);
 export const fetchPortfolioEarnings = () => getJson(`${BASE}/portfolio/earnings`, 'Failed to load earnings', true);
 export const fetchWheelLedger = () => getJson(`${BASE}/portfolio/wheel-ledger`, 'Failed to load wheel ledger', true);
 export const fetchOptionsReview = () => getJson(`${BASE}/portfolio/options/review`, 'Failed to load review', true);
@@ -518,8 +519,8 @@ export const deleteClosedTrade = (id) => sendJson(`${BASE}/portfolio/closed/${id
 export const deleteClosedOption = (id) => sendJson(`${BASE}/portfolio/options/closed/${id}`, 'DELETE', null, 'Failed to delete trade');
 export const fetchPremiumIncome = () => getJson(`${BASE}/portfolio/premium-income`, 'Failed to load premium income', true);
 export const saveIncomeGoal = (goal) => sendJson(`${BASE}/portfolio/income-goal`, 'PUT', { goal }, 'Failed to save goal');
-export const importPortfolioCsv = (csv, commit, kind = 'positions', account = '') =>
-  sendJson(`${BASE}/portfolio/import`, 'POST', { csv, commit, kind, ...(account ? { account } : {}) }, 'Import failed');
+export const importPortfolioCsv = (csv, commit, kind = 'positions', account = '', sourceAccount = '') =>
+  sendJson(`${BASE}/portfolio/import`, 'POST', { csv, commit, kind, ...(account ? { account } : {}), ...(sourceAccount ? { source_account: sourceAccount } : {}) }, 'Import failed');
 
 // ── Accounts, cash, account value, corporate actions ──────────────────────────────────
 export const fetchAccounts = () => getJson(`${BASE}/portfolio/accounts`, 'Failed to load accounts', true);

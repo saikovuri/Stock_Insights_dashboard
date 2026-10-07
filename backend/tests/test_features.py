@@ -166,6 +166,88 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(next(r for r in database.get_closed_options(uid) if r["ticker"] == "MSFT")["pnl"], 210)
         self.assertEqual(next(t for t in database.get_closed_trades(uid) if t["ticker"] == "MSFT")["pnl"], 200)
 
+    def test_fidelity_accounts_and_activity_history_rebuild_positions(self):
+        import portfolio_insights as insights
+        fidelity = ("Account Number,Account Name,Symbol,Description,Quantity,Last Price,Current Value,Cost Basis Total,Average Cost Basis,Type\n"
+                    "Z111,Individual,SPAXX**,HELD IN MONEY MARKET,,,$1200.00,,,Cash\n"
+                    "Z111,Individual,AAPL,APPLE INC,10,$200,$2000,$1500.00,$150.00,Cash\n"
+                    "Z222,ROTH IRA,FCASH**,HELD IN FCASH,,,$300.00,,,Cash\n"
+                    "Z222,ROTH IRA, -AAPL300117C250,AAPL JAN 17 2030 $250 CALL,-1,$5,-$500,$400.00,$4.00,Margin\n"
+                    "Z222,ROTH IRA,Pending Activity,,,,$12.00,,,\n"
+                    "\"The data and information in this spreadsheet is provided to you solely for your use.\"\n")
+        whole = insights.parse_broker_csv(fidelity)
+        self.assertEqual(whole["source_accounts"], ["Individual · Z111", "ROTH IRA · Z222"])
+        self.assertEqual(whole["money_market_total"], 1500)
+        roth = insights.parse_broker_csv(fidelity, "ROTH IRA · Z222")
+        self.assertEqual([(r["kind"], r["ticker"]) for r in roth["rows"]], [("option", "AAPL")])
+        self.assertEqual((roth["money_market"], roth["rows"][0]["premium"]), ([{"line": 4, "ticker": "FCASH", "amount": 300}], 4))
+
+        robinhood = ('"Activity Date","Process Date","Settle Date","Instrument","Description","Trans Code","Quantity","Price","Amount"\n'
+                     '"3/10/2026","3/10/2026","3/11/2026","AAPL","Apple\nCUSIP: 037833100","Sell","5","$210.00","$1,050.00"\n'
+                     '"3/02/2026","3/02/2026","3/02/2026","AAPL","Option Expiration for AAPL 2/27/2026 Put $180.00","OEXP","1","",""\n'
+                     '"2/20/2026","2/20/2026","2/23/2026","AAPL","AAPL 1/15/2027 Call $250.00","STO","2","$4.00","$800.00"\n'
+                     '"2/10/2026","2/10/2026","2/11/2026","AAPL","AAPL 2/27/2026 Put $180.00","STO","1","$2.00","$200.00"\n'
+                     '"2/05/2026","2/05/2026","2/06/2026","AAPL","Apple\nCUSIP: 037833100","Buy","10","$190.00","($1,900.00)"\n'
+                     '"1/05/2026","1/05/2026","1/06/2026","AAPL","Apple\nCUSIP: 037833100","Buy","100","$180.00","($18,000.00)"\n'
+                     '"1/04/2026","1/04/2026","1/04/2026","MSFT","Microsoft","Sell","3","$400.00","$1,200.00"\n'
+                     '"1/03/2026","1/03/2026","1/03/2026","AAPL","Cash Div: R/D 2025-12-01","CDIV","","","$5.00"\n'
+                     '"1/02/2026","1/02/2026","1/02/2026","","ACH Deposit","ACH","","","$20,000.00"\n'
+                     '"","","","","","","","","","The data provided is for informational purposes only."\n')
+        rh = insights.parse_activity_csv(robinhood)
+        stocks = [(r["shares"], r["price"], r["acquired"]) for r in rh["rows"] if r["kind"] == "stock"]
+        self.assertEqual(stocks, [(95, 180, "2026-01-05"), (10, 190, "2026-02-05")], "FIFO sale takes the oldest lot")
+        options = [r for r in rh["rows"] if r["kind"] == "option"]
+        self.assertEqual([(o["strike"], o["position"], o["contracts"], o["premium"]) for o in options], [(250, "short", 2, 4)])
+        self.assertEqual(rh["skipped"][0]["symbol"], "MSFT")
+        self.assertEqual(rh["ignored"], {"CDIV": 1})
+
+        webull = ("Name,Symbol,Side,Status,Filled,Total Qty,Price,Avg Price,Time-in-Force,Placed Time,Filled Time\n"
+                  "AAPL,AAPL300117C00250000,Sell,Filled,1,1,5.00,5.10,DAY,01/05/2026 09:30:00 EST,01/05/2026 09:30:05 EST\n"
+                  "AAPL,AAPL300117C00250000,Buy,Filled,1,1,2.00,1.90,DAY,02/05/2026 09:30:00 EST,02/05/2026 09:30:05 EST\n"
+                  "NVDA,NVDA,Buy,Filled,10,10,@MKT,120.50,DAY,01/02/2026 10:00:00 EST,01/02/2026 10:00:01 EST\n"
+                  "NVDA,NVDA,Buy,Cancelled,0,10,100.00,,GTC,01/03/2026 10:00:00 EST,\n")
+        wb = insights.parse_activity_csv(webull)
+        self.assertEqual([(r["kind"], r["ticker"], r.get("price")) for r in wb["rows"]], [("stock", "NVDA", 120.5)],
+                         "a buy that closes a short option leaves nothing open; Avg Price is the fill")
+        with self.assertRaisesRegex(ValueError, "Trans Code"):
+            insights.parse_activity_csv("Symbol,Quantity\nAAPL,1\n")
+        uid = new_user()
+        with self.as_user(uid):
+            preview = self.client.post("/api/portfolio/import", json={"csv": webull, "kind": "activity"}).json()
+            self.assertEqual(preview["trades"], 3)
+            done = self.client.post("/api/portfolio/import", json={"csv": fidelity, "commit": True,
+                                                                   "source_account": "Individual · Z111", "account": "Fido"}).json()
+        self.assertEqual((done["imported"], done["cash"]["cash"]), (1, 1200))
+        self.assertEqual([(h["ticker"], h["account"]) for h in database.get_user_holdings(uid)], [("AAPL", "Fido")])
+
+    def test_next_steps_flag_cash_concentration_and_covered_calls(self):
+        import accounts as accounts_module
+        import next_steps
+        uid = new_user()
+        database.add_user_holding(uid, "AMD", 300, 100, "2026-01-02 00:00:00", account="A")
+        database.add_user_holding(uid, "KO", 10, 60, "2026-01-02 00:00:00", account="A")
+        database.add_user_option(uid, "AMD", "call", 200, "2099-01-15", 3, 1, "short", account="A")
+        database.add_user_option(uid, "KO", "put", 50, "2099-01-15", 1, 2, "short", account="B")
+        accounts_module.set_cash(uid, "A", 20000)
+        accounts_module.set_cash(uid, "B", 4000)
+        actions = {"positions": [{"ticker": "KO", "strike": 50, "type": "put", "actions": [
+            {"level": "act", "text": "Take profit."}, {"level": "info", "text": "Later."}]}]}
+        quote = lambda t: {"price": {"AMD": 150, "KO": 60}[t]}
+        with patch.object(next_steps, "get_quote", side_effect=quote), patch("portfolio_insights.get_quote", side_effect=quote):
+            result = next_steps.build(uid, actions)
+        codes = [(i["level"], i["code"], i.get("account") or i.get("ticker")) for i in result["items"]]
+        self.assertEqual(codes[0], ("act", "options_act", None))
+        self.assertIn(("warn", "over_committed", "B"), codes)
+        self.assertIn(("warn", "concentration", "AMD"), codes)
+        self.assertIn(("idea", "idle_cash", "A"), codes)
+        call = next(i for i in result["items"] if i["code"] == "covered_call")
+        self.assertEqual((call["ticker"], call["link"]["shares"]), ("AMD", 200), "one of three blocks is already covered")
+        self.assertNotIn("KO", [i.get("ticker") for i in result["items"] if i["code"] == "covered_call"])
+        with self.as_user(uid), patch.object(next_steps, "get_quote", side_effect=quote), \
+             patch("portfolio_insights.get_quote", side_effect=quote), \
+             patch.object(self.main.options_desk, "position_actions", return_value={"positions": []}):
+            self.assertEqual(self.client.get("/api/portfolio/next-steps").status_code, 200)
+
     def test_split_detection_and_application_is_atomic_and_once(self):
         import corporate_actions
         uid = new_user()

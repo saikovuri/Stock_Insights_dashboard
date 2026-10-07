@@ -20,6 +20,7 @@ import { AccountBar, NavHistory, CorporateActions } from './Accounts';
 import { ClosedStocks, ClosedOptions } from './ClosedHistory';
 import TabStrip from './TabStrip';
 import Skeleton from './Skeleton';
+import NextSteps from './NextSteps';
 
 const GUEST_HOLDINGS_KEY = 'guest_holdings';
 const usd = (value) => `${value < 0 ? '-' : ''}$${Math.abs(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -38,6 +39,7 @@ export default function Portfolio() {
 
   const [tab, setTab] = useState('stocks');
   const [section, setSection] = useState('holdings');
+  const [insightsTab, setInsightsTab] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [transferRevision, setTransferRevision] = useState(0);
   const [account, setAccountState] = useState(() => localStorage.getItem('portfolio_account') || '');
@@ -382,7 +384,11 @@ export default function Portfolio() {
       {portfolio?.as_of && <p className="as-of">Quotes as of {new Date(portfolio.as_of).toLocaleTimeString()}{optionsSummary?.as_of ? ` · option marks ${new Date(optionsSummary.as_of).toLocaleTimeString()}` : ''}</p>}
       {section === 'risk' && <section className="portfolio-section">
         {isGuest ? <p>Sign in to review portfolio risk.</p> : <>
-          <h3>Position alerts</h3><Today version={version} onRepair={repair} onAssign={id => { const option = options.find(item => item.id === id); if (option) handleAssign(option); }} />
+          <h3>Suggested next steps</h3>
+          <NextSteps version={version}
+            onShowAlerts={() => document.getElementById('position-alerts')?.scrollIntoView({ behavior: 'smooth' })}
+            onShowTax={() => { setInsightsTab('tax'); setSection('performance'); }} />
+          <h3 id="position-alerts">Position alerts</h3><Today version={version} onRepair={repair} onAssign={id => { const option = options.find(item => item.id === id); if (option) handleAssign(option); }} />
           <h3>Earnings exposure</h3><Earnings version={version} />
           <PortfolioDoctor key={version} />
           <h3>Stress scenarios</h3><WhatIf options={options} holdings={holdings} />
@@ -393,7 +399,7 @@ export default function Portfolio() {
       {section === 'performance' && <section className="portfolio-section">
         {!isGuest && <NavHistory account={account} />}
         {holdings.length > 0 && !portfolio?.incomplete && <PortfolioChart holdings={holdings} closedTrades={closedStocks} />}
-        {!isGuest && <PortfolioInsights tickers={[...new Set(holdings.map(item => item.ticker))]} version={version} onImported={loadStocks} />}
+        {!isGuest && <PortfolioInsights key={insightsTab || ''} initialTab={insightsTab} tickers={[...new Set(holdings.map(item => item.ticker))]} version={version} onImported={loadStocks} />}
       </section>}
       {section === 'holdings' && <>
       {!isGuest && <CorporateActions version={transferRevision} onApplied={() => { loadStocks(); loadOptions(); }} />}

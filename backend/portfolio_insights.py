@@ -282,7 +282,9 @@ _COLS = {
             "average price", "price paid", "unit cost", "cost basis per share", "avg cost basis"),
     "total": ("cost basis total", "cost basis", "total cost", "cost basis ($)", "book cost", "cost"),
     "acquired": ("date acquired", "acquired", "open date", "purchase date", "trade date", "acquisition date"),
-    "value": ("value", "market value", "current value", "total value"),
+    "value": ("value", "market value", "current value", "total value", "mkt val (market value)"),
+    "account": ("account number", "account #", "account"),
+    "account_name": ("account name", "account description"),
 }
 _SKIP = {"CASH", "PENDING", "TOTAL", "ACCOUNT", "MONEY", "SWEEP", "CORE"}
 # US money-market mutual funds use five-letter tickers ending in XX (VUSXX, SPAXX, SWVXX, ...).
@@ -298,6 +300,11 @@ def _header(name: str) -> str:
 def _find_columns(row, aliases) -> dict:
     names = [_header(c) for c in row]
     return {key: next((j for j, n in enumerate(names) if n in {_header(a) for a in syn}), None) for key, syn in aliases.items()}
+
+
+def _source_account(get) -> str:
+    """Broker account label for files that list several accounts (Fidelity, Vanguard)."""
+    return " · ".join(v.strip() for v in (get("account_name"), get("account")) if v and v.strip())
 
 
 def _num(v) -> float | None:
@@ -323,7 +330,7 @@ def _date(v) -> str | None:
     return None
 
 
-def parse_broker_csv(text: str) -> dict:
+def parse_broker_csv(text: str, source_account: str | None = None) -> dict:
     rows = list(csv.reader(io.StringIO(text.lstrip("\ufeff"))))
     header_i, cols = None, {}
     for i, r in enumerate(rows[:30]):
@@ -333,13 +340,30 @@ def parse_broker_csv(text: str) -> dict:
             break
     if header_i is None:
         raise ValueError("Couldn't find Symbol and Quantity columns. Export positions as CSV from your broker.")
-    out, skipped, money_market = [], [], []
+    out, skipped, money_market, sources = [], [], [], []
     for n, r in enumerate(rows[header_i + 1:], start=header_i + 2):
         get = lambda k: r[cols[k]] if cols.get(k) is not None and cols[k] < len(r) else None
         raw = (get("symbol") or "").strip().upper()
         if not raw:
             continue
-        if "**" in raw or any(w in raw for w in _SKIP):
+        source = _source_account(get)
+        if source and source not in sources:
+            sources.append(source)
+        if source_account and source != source_account:
+            continue
+        sym = raw.rstrip("*").replace(" ", "")
+        # Fidelity marks its core cash position with ** (SPAXX**, FDRXX**, FCASH**).
+        if raw.endswith("**") or _MONEY_MARKET.fullmatch(sym):
+            amount = _num(get("value"))
+            qty = _num(get("shares"))
+            if amount is None and qty:
+                amount = qty * (_num(get("avg")) or 1.0)
+            if amount and amount > 0:
+                money_market.append({"line": n, "ticker": sym, "amount": round(amount, 2)})
+            else:
+                skipped.append({"line": n, "symbol": sym, "reason": "cash / money market without a value"})
+            continue
+        if any(w in raw for w in _SKIP):
             skipped.append({"line": n, "symbol": raw, "reason": "cash / money market"})
             continue
         qty = _num(get("shares"))
@@ -365,16 +389,6 @@ def parse_broker_csv(text: str) -> dict:
             if len(out) >= 500:
                 break
             continue
-        sym = raw.rstrip("*").replace(" ", "")
-        if _MONEY_MARKET.fullmatch(sym):
-            amount = _num(get("value"))
-            if amount is None and qty:
-                amount = qty * (_num(get("avg")) or 1.0)
-            if amount and amount > 0:
-                money_market.append({"line": n, "ticker": sym, "amount": round(amount, 2)})
-            else:
-                skipped.append({"line": n, "symbol": sym, "reason": "money-market fund without a value"})
-            continue
         if not re.fullmatch(r"[A-Z]{1,5}([.-][A-Z])?", sym):
             skipped.append({"line": n, "symbol": raw, "reason": "not a recognized stock, ETF or option symbol"})
             continue
@@ -393,6 +407,7 @@ def parse_broker_csv(text: str) -> dict:
             break
     return {"rows": out, "skipped": skipped, "money_market": money_market,
             "money_market_total": round(sum(m["amount"] for m in money_market), 2),
+            "source_accounts": sources, "source_account": source_account,
             "columns": {k: rows[header_i][v] for k, v in cols.items() if v is not None}}
 
 
@@ -407,6 +422,9 @@ _OPTION_FORMATS = (
     # E*Trade / generic: AAPL JAN 17 '25 $150 CALL
     (re.compile(r"([A-Z]{1,6}) ([A-Z]{3}) (\d{1,2}) '?(\d{2}) \$?(\d+(?:\.\d+)?) (CALL|PUT)"),
      lambda m: (m[1], 2000 + int(m[4]), _MONTHS.get(m[2], 0), int(m[3]), m[6][0], float(m[5]))),
+    # Robinhood activity description: AAPL 1/17/2025 Call $150.00
+    (re.compile(r"([A-Z]{1,6}) (\d{1,2})/(\d{1,2})/(\d{4}) (CALL|PUT) \$?(\d+(?:\.\d+)?)"),
+     lambda m: (m[1], int(m[4]), int(m[2]), int(m[3]), m[5][0], float(m[6]))),
 )
 
 
@@ -492,6 +510,194 @@ def parse_history_csv(text: str) -> dict:
         if len(out) >= 1000:
             break
     return {"rows": out, "skipped": skipped,
+            "columns": {k: rows[header_i][v] for k, v in cols.items() if v is not None}}
+
+
+_ACTIVITY_COLS = {
+    "date": ("activity date", "trade date", "filled time", "run date", "transaction date", "date", "settlement date"),
+    "symbol": ("instrument", "symbol", "ticker"),
+    "description": ("description", "name", "security description"),
+    "action": ("trans code", "side", "action", "transaction type", "activity"),
+    "shares": ("quantity", "filled", "qty", "filled qty", "shares"),
+    "price": ("avg price", "fill price", "price", "execution price"),
+    "amount": ("amount", "net amount"),
+    "status": ("status",),
+    "account": ("account number", "account #", "account"),
+    "account_name": ("account name", "account description"),
+}
+_OPEN_CODES, _CLOSE_CODES = {"BTO", "STO"}, {"BTC", "STC"}
+_EXPIRY_CODES = {"OEXP", "OASGN", "OEXCS"}
+
+
+def _ranked_columns(row, aliases) -> dict:
+    """Like _find_columns, but earlier aliases win (Webull has both "Price" and the fill "Avg Price")."""
+    names = [_header(c) for c in row]
+    return {key: next((names.index(_header(a)) for a in syn if _header(a) in names), None) for key, syn in aliases.items()}
+
+
+def _activity_date(v) -> str | None:
+    s = str(v or "").strip()
+    m = re.search(r"(\d{4})-(\d{1,2})-(\d{1,2})", s)
+    if m:
+        y, mo, d = int(m[1]), int(m[2]), int(m[3])
+    else:
+        m = re.search(r"(\d{1,2})/(\d{1,2})/(\d{2,4})", s)
+        if not m:
+            return _date(s)
+        mo, d, y = int(m[1]), int(m[2]), int(m[3])
+        y += 2000 if y < 100 else 0
+    try:
+        day = date(y, mo, d)
+    except ValueError:
+        return None
+    return day.isoformat() if day <= date.today() else None
+
+
+def _option_in_text(text: str) -> dict | None:
+    t = re.sub(r"\s+", " ", str(text or "").upper())
+    for pattern, _ in _OPTION_FORMATS:
+        m = pattern.search(t)
+        if m and (found := parse_option_symbol(m.group(0))):
+            return found
+    return None
+
+
+def parse_activity_csv(text: str, source_account: str | None = None) -> dict:
+    """Rebuild open positions from a transaction/order history export (Robinhood activity, Webull orders,
+    Fidelity account history): buys and sells replay FIFO into lots with real purchase dates."""
+    rows = list(csv.reader(io.StringIO(text.lstrip("\ufeff"))))
+    header_i, cols = None, {}
+    for i, r in enumerate(rows[:30]):
+        found = _ranked_columns(r, _ACTIVITY_COLS)
+        if all(found[k] is not None for k in ("date", "action", "shares")) and (
+                found["symbol"] is not None or found["description"] is not None):
+            header_i, cols = i, found
+            break
+    if header_i is None:
+        raise ValueError("Couldn't find Date, Action/Side/Trans Code and Quantity columns. "
+                         "Export account activity or filled orders as CSV from your broker.")
+    trades, skipped, ignored, sources = [], [], defaultdict(int), []
+    for n, r in enumerate(rows[header_i + 1:], start=header_i + 2):
+        get = lambda k: r[cols[k]] if cols.get(k) is not None and cols[k] < len(r) else None
+        source = _source_account(get)
+        if source and source not in sources:
+            sources.append(source)
+        if source_account and source != source_account:
+            continue
+        status = (get("status") or "").strip().upper()
+        if status and ("CANCEL" in status or "FILLED" not in status):
+            continue
+        action = " ".join((get("action") or "").upper().split())
+        raw = (get("symbol") or "").strip().upper()
+        description = get("description") or ""
+        option = parse_option_symbol(raw) if raw else None
+        option = option or _option_in_text(description)
+        if not action or not (raw or option):
+            continue
+        day = _activity_date(get("date"))
+        qty, price, amount = _num(get("shares")), _num(get("price")), _num(get("amount"))
+        buy = (action in {"BUY", "B", "BTO", "BTC", "DRIP"} or "BOUGHT" in action or action.startswith("BUY")
+               or (not option and "REINVEST" in action))
+        sell = action in {"SELL", "S", "STO", "STC"} or "SOLD" in action or action.startswith("SELL")
+        closes_option = action in _EXPIRY_CODES or (not buy and not sell and any(
+            w in action for w in ("EXPIRED", "EXPIRATION", "ASSIGNED", "ASSIGNMENT", "EXERCISED", "EXERCISE")))
+        if option and closes_option:
+            trades.append({"line": n, "day": day, "kind": "close", "option": option, "qty": abs(qty) if qty else None})
+            continue
+        if not (buy or sell):
+            ignored[action[:20]] += 1
+            continue
+        if not qty or not day:
+            skipped.append({"line": n, "symbol": raw or description[:40], "reason": "missing quantity or date"})
+            continue
+        qty = abs(qty)
+        if not price and amount:
+            price = abs(amount) / qty / (100 if option else 1)
+        if not price or price <= 0:
+            skipped.append({"line": n, "symbol": raw or description[:40], "reason": "missing price"})
+            continue
+        intent = ("open" if action in _OPEN_CODES or "TO OPEN" in action or "OPENING" in action else
+                  "close" if action in _CLOSE_CODES or "TO CLOSE" in action or "CLOSING" in action else None)
+        if option:
+            trades.append({"line": n, "day": day, "kind": "option", "option": option, "side": "buy" if buy else "sell",
+                           "qty": qty, "price": price, "intent": intent})
+            continue
+        sym = raw.rstrip("*").replace(" ", "")
+        if _MONEY_MARKET.fullmatch(sym) or not re.fullmatch(r"[A-Z]{1,5}([.-][A-Z])?", sym):
+            ignored[f"{sym[:12]} (not a stock)"] += 1
+            continue
+        trades.append({"line": n, "day": day, "kind": "stock", "ticker": sym.replace(".", "-"),
+                       "side": "buy" if buy else "sell", "qty": qty, "price": price})
+    dated = [t["day"] for t in trades if t["day"]]
+    if len(dated) > 1 and dated[0] > dated[-1]:
+        trades.reverse()  # newest-first exports
+    trades.sort(key=lambda t: t["day"] or "9999-12-31")
+
+    lots, broken = defaultdict(list), set()
+    contracts, broken_opts = {}, set()
+    for t in trades:
+        if t["kind"] == "stock":
+            if t["side"] == "buy":
+                lots[t["ticker"]].append([t["qty"], t["price"], t["day"]])
+                continue
+            left = t["qty"]
+            while left > 1e-9 and lots[t["ticker"]]:
+                lot = lots[t["ticker"]][0]
+                used = min(lot[0], left)
+                lot[0] -= used
+                left -= used
+                if lot[0] <= 1e-9:
+                    lots[t["ticker"]].pop(0)
+            if left > 1e-6:
+                broken.add(t["ticker"])
+            continue
+        o = t["option"]
+        key = (o["ticker"], o["expiry"], o["option_type"], o["strike"])
+        pos = contracts.setdefault(key, {"net": 0, "avg": 0.0})
+        if t["kind"] == "close":
+            pos["net"] = 0 if not t["qty"] else (max(pos["net"] - t["qty"], 0) if pos["net"] > 0 else min(pos["net"] + t["qty"], 0))
+            continue
+        signed = t["qty"] if t["side"] == "buy" else -t["qty"]
+        if pos["net"] and (pos["net"] > 0) != (signed > 0):
+            closing = min(abs(signed), abs(pos["net"]))
+            pos["net"] += closing if signed > 0 else -closing
+            rest = abs(signed) - closing
+            if rest and t["intent"] == "close":
+                broken_opts.add(key)
+                rest = 0
+            if rest:
+                pos["net"], pos["avg"] = (rest if signed > 0 else -rest), t["price"]
+        elif t["intent"] == "close":
+            broken_opts.add(key)
+        else:
+            held = abs(pos["net"])
+            pos["avg"] = (pos["avg"] * held + t["price"] * abs(signed)) / (held + abs(signed))
+            pos["net"] += signed
+
+    out = []
+    for ticker, held in lots.items():
+        if ticker in broken:
+            skipped.append({"line": None, "symbol": ticker, "reason": "more shares sold than bought in this file; the history "
+                            "doesn't reach the original purchase (or includes transfers or splits)"})
+            continue
+        for shares, price, day in held:
+            if shares > 1e-9:
+                out.append({"kind": "stock", "ticker": ticker, "shares": round(shares, 6), "price": round(price, 4), "acquired": day})
+    today = date.today().isoformat()
+    for key, pos in contracts.items():
+        ticker, expiry, kind, strike = key
+        label = f"{ticker} {expiry} ${strike:g} {kind}"
+        if key in broken_opts:
+            skipped.append({"line": None, "symbol": label, "reason": "closing trade without its opening trade in this file"})
+        elif pos["net"] and expiry < today:
+            skipped.append({"line": None, "symbol": label, "reason": "option already expired"})
+        elif pos["net"]:
+            out.append({"kind": "option", "ticker": ticker, "expiry": expiry, "option_type": kind, "strike": strike,
+                        "contracts": int(abs(pos["net"])), "position": "long" if pos["net"] > 0 else "short",
+                        "premium": round(pos["avg"], 4)})
+    return {"rows": out[:500], "skipped": skipped, "money_market": [], "money_market_total": 0,
+            "trades": len(trades), "first_date": min(dated) if dated else None, "last_date": max(dated) if dated else None,
+            "ignored": dict(ignored), "source_accounts": sources, "source_account": source_account,
             "columns": {k: rows[header_i][v] for k, v in cols.items() if v is not None}}
 
 

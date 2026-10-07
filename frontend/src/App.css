@@ -4319,6 +4319,13 @@ tr.alert-triggered {
 .desk-act { color: #34d399; }
 .desk-warn { color: #fbbf24; }
 .desk-info { color: var(--text-secondary); }
+.next-step-detail { font-size: 0.82rem; color: var(--text-secondary); margin: 0; }
+.next-step-act { border-left: 3px solid var(--negative, #f87171); }
+.next-step-warn { border-left: 3px solid #fbbf24; }
+.next-step-idea { border-left: 3px solid var(--accent); }
+.next-step .wheel-manager { margin-top: 0.5rem; }
+.next-step-points { font-size: 0.8rem; margin: 0 0 0.3rem; }
+.import-kind { flex-wrap: wrap; }
 .whatif-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.6rem 1rem; margin: 0.4rem 0 0.8rem; }
 .whatif-controls label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.78rem; color: var(--text-muted); }
 .whatif-controls input[type=range] { width: 100%; accent-color: var(--accent); }

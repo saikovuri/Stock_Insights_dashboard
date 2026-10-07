@@ -605,14 +605,33 @@ Guest stock holdings live only in browser storage; signed-in holdings are accoun
 
 ### Import From a Broker CSV
 
-Signed-in users can expand **Import from broker CSV** in Holdings, choose **Open positions** or **Closed trade history**, preview recognized/skipped rows, then confirm. Rows go into the currently selected account. The file control rejects files over 1 MB; the server parses the text and does not store the file.
+Signed-in users can expand **Import from broker CSV** in Holdings, choose **Open positions**, **Transaction history** or **Closed trade history**, preview recognized/skipped rows, then confirm. Rows go into the currently selected account. The file control rejects files over 1 MB; the server parses the text and does not store the file.
+
+| Broker | What to export | Import type |
+| --- | --- | --- |
+| E*TRADE, Schwab, Vanguard | Positions CSV | Open positions |
+| Fidelity | Positions CSV (Portfolio_Positions). Several accounts in one file can be imported together or one at a time. | Open positions |
+| Robinhood | Reports → Account activity CSV. Robinhood has no positions export. | Transaction history |
+| Webull | Filled orders export. Stocks and options come as separate files. | Transaction history |
+| Any broker with realized gain/loss | Closed lots CSV | Closed trade history |
+
+These layouts were implemented from the brokers' published column names and checked against test fixtures, not against every real export variant. Check the preview, including the detected columns, before importing.
 
 **Open positions** searches the first 30 rows for Symbol and Quantity columns, accepting common aliases for per-share or total cost and acquisition date. Header matching ignores case and trailing unit markers such as `$`, `%` or `($)`, so E*TRADE's `Price Paid $` is read as the cost per share.
 
 - Stock/ETF rows become new lots. Positive quantity and positive cost are required; total cost can be divided by quantity when per-share cost is absent. Short stock positions are skipped. Dots normalize to hyphens. Processing stops at 500 accepted rows.
 - Option symbols are recognized in OCC (`AAPL  250117C00150000`), Fidelity (`-AAPL250117C150`), Schwab (`AAPL 01/17/2025 150.00 C`) and E*TRADE (`AAPL Jan 17 '25 $150 Call`) styles. Negative quantity records a short; whole contracts are required. Premium per share is |total cost| / (contracts × 100), or the per-share average when no total is given. Brokers that report per-contract averages without a total will be misread by 100×, so check the preview. Already-expired options are skipped.
-- Cash summary rows are skipped. Money-market fund symbols (three letters followed by `XX`, such as `VUSXX` or `SPAXX`) are not imported as shares. Their market value (or quantity × cost, or quantity at $1) is added to the selected account's cash balance, and the preview shows the total. Re-importing adds the amount again. Missing, future or unrecognized acquisition dates fall back to the import date; E*TRADE's positions export has no purchase dates, so its lots are dated on the import day. Correct this before relying on holding-period/benchmark analytics.
+- Cash summary rows are skipped. Money-market fund symbols (three letters followed by `XX`, such as `VUSXX` or `SPAXX`) and Fidelity core positions marked `**` (such as `SPAXX**` or `FCASH**`) are not imported as shares. Their market value (or quantity × cost, or quantity at $1) is added to the selected account's cash balance, and the preview shows the total. Re-importing adds the amount again. Missing, future or unrecognized acquisition dates fall back to the import date; E*TRADE's positions export has no purchase dates, so its lots are dated on the import day. Correct this before relying on holding-period/benchmark analytics.
+- When the file has an Account Number/Account Name column with more than one account (Fidelity, Vanguard), the preview offers a picker: import all of them into the selected app account, or one broker account at a time into different app accounts.
 - Positions import is an **append**, not broker synchronization or duplicate detection; reimporting the same positions duplicates lots.
+
+**Transaction history** rebuilds open positions from an activity or filled-orders export. It needs Date, Action/Side/Trans Code and Quantity columns, plus a symbol or description. Price comes from the fill price (`Avg Price` is preferred over Webull's order `Price`) or from amount ÷ quantity.
+
+- Rows are replayed oldest first; newest-first files are reversed. Cancelled or unfilled orders, dividends, deposits, interest, transfers and other non-trade rows are ignored, and the preview counts them by type. Dividend reinvestments count as buys.
+- Stock buys become lots with their real purchase date; sells consume the oldest lots first (FIFO). If a file sells more shares of a ticker than it bought (history starting after the purchase, a transfer in, or a split), that ticker is skipped instead of guessed.
+- Options are recognized from OCC symbols (Webull) or descriptions such as `AAPL 1/15/2027 Call $250.00` (Robinhood). Buys and sells net per contract into long or short positions at the average opening premium. Expirations, assignments and exercises (`OEXP`, `OASGN`, `OEXCS` or those words) close the contract. When the action says open or close (`BTO`/`STO`/`BTC`/`STC`, "to open", "opening"), a close without its opening trade in the file is reported instead of becoming a reversed position. Webull's plain Buy/Sell has no open/close marker, so an earlier-opened contract outside the file is misread. Expired contracts still open are skipped.
+- The shares delivered by an assignment are imported only if the broker lists them as a buy or sell row. Fees, wash-sale adjustments and cash balances are not imported.
+- Like positions import, this appends lots and does not detect positions already recorded.
 
 **Closed trade history** reads a realized gain/loss (closed lots) export with Quantity, Date sold/closed, Proceeds and Cost basis columns (plus Date acquired/opened and an optional Position/Side column).
 
@@ -652,6 +671,23 @@ Common cash-settled index symbols cannot use the physical-share assignment workf
 Source: [frontend/src/components/Portfolio.jsx](frontend/src/components/Portfolio.jsx), [frontend/src/components/Accounts.jsx](frontend/src/components/Accounts.jsx), [frontend/src/components/ClosedHistory.jsx](frontend/src/components/ClosedHistory.jsx), [backend/corporate_actions.py](backend/corporate_actions.py), [backend/routes_accounts.py](backend/routes_accounts.py), [backend/database.py](backend/database.py), [backend/portfolio_models.py](backend/portfolio_models.py).
 
 ## Portfolio: Portfolio Risk
+
+### Suggested Next Steps
+
+The top of Portfolio Risk gathers open issues and opportunities across all accounts into one list, ordered Act, Warn, Idea, then Info. These are rule-based checks on recorded positions and cash, not investment advice. They do not place trades.
+
+| Item | Rule | Shortcut |
+| --- | --- | --- |
+| Options needing action / a look | Count of positions whose top Position Alert is Act or Warn, with the first three listed. | Scrolls to Position alerts. |
+| Over-committed account | Entered cash is below short-put collateral (`strike × 100 × contracts`). Margin accounts may accept this. | — |
+| Short puts without cash | An account has short puts but no cash balance entered. | — |
+| Concentration | A ticker is more than 25% of stock market value (two or more priced tickers). Suggests trimming, covered calls or a protective put/collar. | — |
+| Uncommitted cash | Free cash of at least $5,000 after put collateral. Points to cash-secured put ideas. | Opens Ideas → Wheel. |
+| Covered-call capacity | Each account/ticker with at least one 100-share block not already covered by a recorded short call. The top five by cost are shown. | Opens the covered-call finder inline for that ticker, average cost and uncovered shares. |
+| Tax-loss review | Lots down at least 10% from cost, largest losses first. | Opens Income & Performance → Tax. |
+| Turning long-term | Profitable short-term lots that turn long-term within 60 days. | Opens Income & Performance → Tax. |
+
+Covered-call capacity counts recorded shares per account and does not see shares pledged elsewhere at the broker. Lots dated on the import day make the long-term check wrong until corrected.
 
 ### Position Alerts
 
@@ -707,7 +743,7 @@ What-if changes assumptions for held stocks/options and estimates resulting P&L;
 
 The correlation heatmap uses three-month daily log returns, aligned on matching start/end date pairs, with at least five common observations and nonzero variance required. It is distinct from Doctor's one-year data and the Wheel planner's six-month check. Correlation is not a permanent relationship or proof of diversification. Sector allocation is based on recorded stock exposure. Missing marks prevent complete stock-value charts; no chart can infer unrecorded accounts or positions.
 
-Sources: [backend/options_desk.py](backend/options_desk.py), [backend/portfolio_doctor.py](backend/portfolio_doctor.py), [frontend/src/components/Portfolio.jsx](frontend/src/components/Portfolio.jsx).
+Sources: [backend/next_steps.py](backend/next_steps.py), [backend/options_desk.py](backend/options_desk.py), [backend/portfolio_doctor.py](backend/portfolio_doctor.py), [frontend/src/components/NextSteps.jsx](frontend/src/components/NextSteps.jsx), [frontend/src/components/Portfolio.jsx](frontend/src/components/Portfolio.jsx).
 
 ## Portfolio: Income & Performance
 

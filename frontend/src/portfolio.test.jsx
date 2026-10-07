@@ -1125,8 +1125,41 @@ test('broker import previews closed trade history into the selected account', as
   fireEvent.change(screen.getByLabelText('Broker CSV file'), { target: { files: [{ size: 100, text: async () => 'Symbol,Quantity\nX,1' }] } });
   fireEvent.click(await screen.findByRole('button', { name: 'Preview' }));
   expect(await screen.findByText('short 1 × $380 put 2025-03-21')).toBeTruthy();
-  expect(run).toHaveBeenCalledWith('Symbol,Quantity\nX,1', false, 'history', 'Roth');
+  expect(run).toHaveBeenCalledWith('Symbol,Quantity\nX,1', false, 'history', 'Roth', '');
   fireEvent.click(screen.getByRole('button', { name: /Import 1 rows/ }));
   expect(await screen.findByText(/Imported 1 closed trade\(s\); 0 already recorded/)).toBeTruthy();
   expect(refresh).toHaveBeenCalled();
+});
+
+test('transaction history import summarizes the replay and filters to one broker account', async () => {
+  const stock = { kind: 'stock', ticker: 'AAPL', shares: 95, price: 180, acquired: '2026-01-05' };
+  const run = vi.spyOn(stockApi, 'importPortfolioCsv')
+    .mockResolvedValueOnce({ columns: {}, skipped: [], rows: [stock, { ...stock, ticker: 'MSFT' }], trades: 6, first_date: '2026-01-02',
+      last_date: '2026-03-10', ignored: { CDIV: 2 }, source_accounts: ['Individual · Z1', 'Roth · Z2'] })
+    .mockResolvedValueOnce({ columns: {}, skipped: [], rows: [stock], trades: 3, ignored: {}, source_accounts: ['Individual · Z1', 'Roth · Z2'] });
+  render(<ImportCsv account="Robinhood" />);
+  fireEvent.click(screen.getByRole('button', { name: 'Transaction history' }));
+  fireEvent.change(screen.getByLabelText('Broker CSV file'), { target: { files: [{ size: 100, text: async () => 'csv' }] } });
+  fireEvent.click(await screen.findByRole('button', { name: 'Preview' }));
+  expect(await screen.findByText(/6 trade\(s\) from 2026-01-02 to 2026-03-10 rebuild 2 open position\(s\)\. Not trades \(ignored\): CDIV ×2/)).toBeTruthy();
+  expect(screen.getAllByText('2026-01-05', { selector: 'td' })).toHaveLength(2);
+  fireEvent.change(screen.getByLabelText('Broker account in file'), { target: { value: 'Roth · Z2' } });
+  await waitFor(() => expect(run).toHaveBeenLastCalledWith('csv', false, 'activity', 'Robinhood', 'Roth · Z2'));
+  expect(await screen.findByRole('button', { name: /Import 1 rows/ })).toBeTruthy();
+});
+
+test('next steps list suggestions and open covered calls inline', async () => {
+  vi.spyOn(auth, 'useAuth').mockReturnValue({ user: { id: 1 } });
+  vi.spyOn(stockApi, 'fetchNextSteps').mockResolvedValue({ note: 'Rule-based.', items: [
+    { level: 'act', code: 'options_act', title: '1 option position(s) need action', points: ['KO $50 put: Take profit.'],
+      detail: 'Details in Position alerts below.', link: { kind: 'alerts' } },
+    { level: 'idea', code: 'covered_call', ticker: 'AMD', account: 'A', title: 'AMD: 2 uncovered 100-share block(s) in A',
+      detail: 'Average cost $100.00.', link: { kind: 'covered_calls', ticker: 'AMD', cost_basis: 100, shares: 200 } }] });
+  const calls = vi.spyOn(stockApi, 'fetchAssignedCalls').mockResolvedValue({ ticker: 'AMD', spot: 150, cost_basis: 100, shares: 200,
+    contracts: 2, ideas: [], expirations: [], note: '' });
+  const { default: NextSteps } = await import('./components/NextSteps');
+  render(<NextSteps version="1" onShowAlerts={vi.fn()} onShowTax={vi.fn()} />);
+  expect(await screen.findByText('KO $50 put: Take profit.')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Show covered calls' }));
+  await waitFor(() => expect(calls).toHaveBeenCalledWith('AMD', 100, 200, 'all'));
 });

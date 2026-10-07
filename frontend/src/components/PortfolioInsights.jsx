@@ -174,18 +174,19 @@ export function ImportCsv({ onImported, account = '' }) {
   const [preview, setPreview] = useState(null);
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [source, setSource] = useState('');
 
   const onFile = async (e) => {
     const f = e.target.files?.[0];
     if (!f) return;
     if (f.size > 1_000_000) { setMsg('File is larger than 1 MB.'); return; }
     setText(await f.text());
-    setPreview(null); setMsg(null);
+    setPreview(null); setMsg(null); setSource('');
   };
-  const run = async (commit) => {
+  const run = async (commit, sourceAccount = source) => {
     setBusy(true); setMsg(null);
     try {
-      const r = await importPortfolioCsv(text, commit, kind, account);
+      const r = await importPortfolioCsv(text, commit, kind, account, sourceAccount);
       setPreview(r);
       if (commit) {
         const failed = r.result?.failed || [];
@@ -199,17 +200,21 @@ export function ImportCsv({ onImported, account = '' }) {
   };
   const describe = (r) => r.kind === 'option'
     ? `${r.position} ${r.contracts} × $${r.strike} ${r.option_type} ${r.expiry}` : `${r.shares} shares`;
+  const pick = (k) => { setKind(k); setPreview(null); setSource(''); };
 
   return (
     <>
-      <div className="chart-toggle" role="group" aria-label="Import type">
-        <button className={kind === 'positions' ? 'active' : ''} onClick={() => { setKind('positions'); setPreview(null); }}>Open positions</button>
-        <button className={kind === 'history' ? 'active' : ''} onClick={() => { setKind('history'); setPreview(null); }}>Closed trade history</button>
+      <div className="chart-toggle import-kind" role="group" aria-label="Import type">
+        <button className={kind === 'positions' ? 'active' : ''} onClick={() => pick('positions')}>Open positions</button>
+        <button className={kind === 'activity' ? 'active' : ''} onClick={() => pick('activity')}>Transaction history</button>
+        <button className={kind === 'history' ? 'active' : ''} onClick={() => pick('history')}>Closed trade history</button>
       </div>
       <p className="structures-intro">
         {kind === 'positions'
-          ? <>Export <b>positions</b> as CSV from Fidelity, Schwab, E*TRADE, Vanguard or any broker (Symbol, Quantity and a cost-basis column). Stocks/ETFs become lots; option symbols (OCC, Fidelity, Schwab or E*TRADE style) become option positions, with negative quantities recorded as short. Cash and expired options are skipped.</>
-          : <>Export <b>realized gain/loss</b> (closed lots) as CSV (Quantity, Date acquired, Date sold, Proceeds, Cost basis). Closed options are recorded through the audited history path and closed stock lots as sold trades. Re-importing the same rows adds nothing.</>}
+          ? <>Export <b>positions</b> as CSV from Fidelity, Schwab, E*TRADE, Vanguard or any broker (Symbol, Quantity and a cost-basis column). Stocks/ETFs become lots; option symbols (OCC, Fidelity, Schwab or E*TRADE style) become option positions, with negative quantities recorded as short. Money-market funds are added to cash; expired options are skipped. Robinhood and Webull don't export positions: use Transaction history.</>
+          : kind === 'activity'
+            ? <>For <b>Robinhood</b> (Reports → Account activity CSV), <b>Webull</b> (Orders → export filled orders; stock and option files separately) or Fidelity/Schwab transaction history. Buys and sells are replayed oldest first into lots with their real purchase dates; option opens, closes, expirations and assignments net into open contracts. The file must reach back to when each position was opened.</>
+            : <>Export <b>realized gain/loss</b> (closed lots) as CSV (Quantity, Date acquired, Date sold, Proceeds, Cost basis). Closed options are recorded through the audited history path and closed stock lots as sold trades. Re-importing the same rows adds nothing.</>}
         {' '}Rows go into <b>{account || 'Default'}</b>. The file is parsed on the server and not stored.
       </p>
       <div className="alert-form">
@@ -222,9 +227,20 @@ export function ImportCsv({ onImported, account = '' }) {
       {msg && <p className="notif-msg">{msg}</p>}
       {preview && (
         <>
+          {preview.source_accounts?.length > 1 && (
+            <label className="market-sub">This file has {preview.source_accounts.length} broker accounts. Import{' '}
+              <select className="tool-input" aria-label="Broker account in file" value={source} disabled={busy}
+                onChange={e => { setSource(e.target.value); run(false, e.target.value); }}>
+                <option value="">all of them</option>
+                {preview.source_accounts.map(a => <option key={a} value={a}>{a}</option>)}
+              </select>
+            </label>
+          )}
+          {kind === 'activity' && <p className="market-sub">{preview.trades} trade(s){preview.first_date ? ` from ${preview.first_date} to ${preview.last_date}` : ''} rebuild {preview.rows.length} open position(s).
+            {Object.keys(preview.ignored || {}).length > 0 && ` Not trades (ignored): ${Object.entries(preview.ignored).map(([k, n]) => `${k} ×${n}`).join(', ')}.`}</p>}
           <p className="market-sub">Detected columns: {Object.entries(preview.columns).map(([k, v]) => `${k} = "${v}"`).join(', ')}</p>
           <div className="table-scroll"><table className="market-table">
-            {kind === 'positions' ? <>
+            {kind !== 'history' ? <>
               <thead><tr><th>Ticker</th><th>Position</th><th>Cost / share</th><th>Acquired</th></tr></thead>
               <tbody>{preview.rows.map((r, i) => <tr key={i}><td>{r.ticker}</td><td>{describe(r)}</td><td>${r.kind === 'option' ? r.premium : r.price}</td><td>{r.kind === 'option' ? '—' : r.acquired || 'today'}</td></tr>)}</tbody>
             </> : <>
@@ -249,8 +265,8 @@ export function ImportCsv({ onImported, account = '' }) {
 
 const TABS = [['combined', 'Combined P&L'], ['accounting', 'Account ledger'], ['income', 'Premium cash flow'], ['spy', 'vs S&P 500'], ['divs', 'Dividends'], ['tax', 'Tax'], ['weekly', 'Weekly review']];
 
-export default function PortfolioInsights({ tickers, version, onImported }) {
-  const [tab, setTab] = useState('combined');
+export default function PortfolioInsights({ tickers, version, onImported, initialTab }) {
+  const [tab, setTab] = useState(initialTab || 'combined');
   return (
     <div className="card portfolio-insights">
       <TabStrip label="Income and performance views" activeKey={tab}>

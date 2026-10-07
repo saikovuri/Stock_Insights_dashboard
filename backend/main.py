@@ -39,6 +39,7 @@ import intraday
 import backtester
 import wheel
 import options_desk
+import next_steps
 import track_record
 from providers import finnhub_enabled, finnhub_quote, finnhub_peers, finnhub_profile, \
     finra_short_interest
@@ -1218,6 +1219,17 @@ def portfolio_option_actions(request: Request, user: dict = Depends(get_current_
         raise _upstream_error(e)
 
 
+@app.get("/api/portfolio/next-steps")
+@limiter.limit("20/minute")
+def portfolio_next_steps(request: Request, user: dict = Depends(get_current_user)):
+    uid = int(user["user_id"])
+    try:
+        actions = get_or_fetch(f"opt-actions:{uid}:{_options_version(uid)}", lambda: options_desk.position_actions(uid), ttl=120)
+        return next_steps.build(uid, actions)
+    except Exception as e:
+        raise _upstream_error(e)
+
+
 @app.get("/api/portfolio/earnings")
 @limiter.limit("20/minute")
 def portfolio_earnings(request: Request, user: dict = Depends(get_current_user)):
@@ -1631,16 +1643,21 @@ def portfolio_tax(request: Request, user: dict = Depends(get_current_user)):
 class ImportRequest(BaseModel):
     csv: str = Field(..., min_length=10, max_length=1_000_000)
     commit: bool = False
-    kind: Literal["positions", "history"] = "positions"
+    kind: Literal["positions", "history", "activity"] = "positions"
     account: Optional[str] = Field(None, pattern=ACCOUNT_PATTERN)
+    source_account: Optional[str] = Field(None, max_length=120)
 
 
 @app.post("/api/portfolio/import")
 @limiter.limit("10/minute")
 def portfolio_import(request: Request, req: ImportRequest, user: dict = Depends(get_current_user)):
-    parse = portfolio_insights.parse_history_csv if req.kind == "history" else portfolio_insights.parse_broker_csv
     try:
-        parsed = parse(req.csv)
+        if req.kind == "history":
+            parsed = portfolio_insights.parse_history_csv(req.csv)
+        elif req.kind == "activity":
+            parsed = portfolio_insights.parse_activity_csv(req.csv, req.source_account)
+        else:
+            parsed = portfolio_insights.parse_broker_csv(req.csv, req.source_account)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     if req.commit:
