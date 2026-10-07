@@ -25,6 +25,7 @@ import RollRepair from './components/RollRepair';
 import WheelCycles from './components/WheelCycles';
 import AccountTransfer from './components/AccountTransfer';
 import PnlCalendar, { dailyPnl, compactMoney } from './components/PnlCalendar';
+import ExpiryLadder from './components/ExpiryLadder';
 
 beforeEach(() => {
   localStorage.clear(); sessionStorage.clear();
@@ -415,6 +416,27 @@ test('P&L calendar totals each close day, shades wins and losses, and pages back
   } finally {
     vi.useRealTimers();
   }
+});
+
+test('expiration ladder shows assignment cash, risk-aware moneyness and the lower-gain lot plan', async () => {
+  const plan = (gain, basis, longTerm) => ({ gain, short_term_gain: longTerm ? 0 : gain, long_term_gain: longTerm ? gain : 0, uncovered_shares: 0,
+    lots: [{ lot_id: basis, acquired: '2019-01-02', shares: 100, basis, gain, long_term: longTerm }] });
+  vi.spyOn(stockApi, 'fetchExpiryLadder').mockResolvedValue({ note: 'Model note.', free_cash: { Default: 5000, E: 1000 }, expiries: [{
+    expiry: '2026-12-18', dte: 72, contracts: 3, cash_if_all_puts_assigned: 14000, cash_if_itm_puts_assigned: 14000,
+    shares_if_itm_calls_assigned: 100, gain_if_itm_calls_assigned: 52000, positions: [
+      { id: 1, ticker: 'AMD', account: 'E', type: 'call', position: 'short', strike: 580, contracts: 1, spot: 640, itm: true, distance_pct: -9.4,
+        chance_itm_pct: 70, shares_if_assigned: 100, proceeds_if_assigned: 58000, gain_difference: 44000,
+        oldest_first: plan(52000, 60, true), highest_cost_first: plan(8000, 500, false) },
+      { id: 2, ticker: 'KO', account: 'Default', type: 'put', position: 'short', strike: 70, contracts: 2, spot: 65, itm: true, cash_if_assigned: 14000 },
+      { id: 3, ticker: 'QQQ', account: 'E', type: 'put', position: 'long', strike: 550, contracts: 1, spot: 700, itm: false, intrinsic_now: 0 }] }] });
+  render(<ExpiryLadder version="1" />);
+  expect(await screen.findByText(/in-the-money puts need \$14,000/)).toBeTruthy();
+  expect(screen.getByText(/\$44,000 less gain with highest-cost lots/)).toBeTruthy();
+  expect(screen.getByText(/Highest-cost lots first: \$8,000 \(short-term \$8,000/)).toBeTruthy();
+  const inTheMoney = screen.getAllByText('in the money');
+  expect(inTheMoney.every(element => element.className === 'negative')).toBe(true);
+  expect(screen.getByText('out of the money').className).toBe('market-sub');
+  expect(screen.getByText(/\(free cash \$5,000\)/)).toBeTruthy();
 });
 
 test('editing a stock lot can correct its purchase date', async () => {

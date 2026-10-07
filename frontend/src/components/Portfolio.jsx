@@ -21,6 +21,7 @@ import { ClosedStocks, ClosedOptions } from './ClosedHistory';
 import TabStrip from './TabStrip';
 import Skeleton from './Skeleton';
 import NextSteps from './NextSteps';
+import ExpiryLadder from './ExpiryLadder';
 
 const GUEST_HOLDINGS_KEY = 'guest_holdings';
 const usd = (value) => `${value < 0 ? '-' : ''}$${Math.abs(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -390,6 +391,7 @@ export default function Portfolio() {
             onShowTax={() => { setInsightsTab('tax'); setSection('performance'); }} />
           <h3 id="position-alerts">Position alerts</h3><Today version={version} onRepair={repair} onAssign={id => { const option = options.find(item => item.id === id); if (option) handleAssign(option); }} />
           <h3>Earnings exposure</h3><Earnings version={version} />
+          <h3>Expiration ladder</h3><ExpiryLadder version={version} />
           <PortfolioDoctor key={version} />
           <h3>Stress scenarios</h3><WhatIf options={options} holdings={holdings} />
           {holdings.length >= 2 && <CorrelationHeatmap tickers={[...new Set(holdings.map(item => item.ticker))]} />}

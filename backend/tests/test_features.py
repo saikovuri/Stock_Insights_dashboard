@@ -287,6 +287,31 @@ class FeatureTests(unittest.TestCase):
             again = self.client.post("/api/portfolio/import", json={"csv": csv_text, "account": "Etrade", "mode": "sync"}).json()
         self.assertEqual(again["reconcile"]["changes"], 0, "re-syncing the same file is a no-op")
 
+    def test_expiry_ladder_cash_needs_and_tax_smart_lot_delivery(self):
+        import expiry_ladder
+        uid = new_user()
+        database.add_user_holding(uid, "AMD", 100, 60, "2019-01-02 00:00:00", account="E")
+        database.add_user_holding(uid, "AMD", 100, 500, (date.today() - timedelta(days=30)).isoformat() + " 00:00:00", account="E")
+        soon = (date.today() + timedelta(days=60)).isoformat()
+        first = database.add_user_option(uid, "AMD", "call", 580, soon, 10, 1, "short", account="E")
+        database.add_user_option(uid, "AMD", "call", 650, "2099-12-15", 10, 2, "short", account="E")
+        database.add_user_option(uid, "KO", "put", 70, soon, 1, 2, "short")
+        database.add_user_option(uid, "SPY", "put", 400, "2026-01-16", 1, 1, "short")
+        with patch.object(expiry_ladder, "get_quote", side_effect=lambda t: {"price": {"AMD": 640, "KO": 65}[t]}):
+            result = expiry_ladder.build(uid, {"positions": [{"id": first["id"], "delta": 0.7}]})
+        self.assertEqual([e["expiry"] for e in result["expiries"]], [soon, "2099-12-15"], "expired options are left out")
+        june = result["expiries"][0]
+        self.assertEqual((june["cash_if_itm_puts_assigned"], june["shares_if_itm_calls_assigned"]), (14000, 100))
+        call = next(p for p in june["positions"] if p["type"] == "call")
+        self.assertEqual(call["chance_itm_pct"], 70)
+        self.assertEqual(call["oldest_first"]["gain"], 52000, "oldest lot has the $60 basis")
+        self.assertEqual(call["highest_cost_first"]["gain"], 8000, "highest-cost lot has the $500 basis")
+        self.assertEqual(call["gain_difference"], 44000)
+        self.assertEqual((call["oldest_first"]["long_term_gain"], call["highest_cost_first"]["short_term_gain"]), (52000, 8000))
+        december = next(p for p in result["expiries"][1]["positions"])
+        self.assertEqual(december["oldest_first"]["lots"][0]["basis"], 500, "the first call already took the oldest lot")
+        self.assertEqual(december["oldest_first"]["uncovered_shares"], 100, "only one 100-share lot is left for two contracts")
+
     def test_next_steps_flag_cash_concentration_and_covered_calls(self):
         import accounts as accounts_module
         import next_steps

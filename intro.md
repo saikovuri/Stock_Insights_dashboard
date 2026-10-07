@@ -720,6 +720,24 @@ Open option records are checked individually using the exact contract quote, can
 
 Ex-dividend estimates prefer an announced date, otherwise project the last interval from recent payment history. Insufficient history or a gap over twice the recent payment interval can suppress the estimate. Verify issuer announcements and broker exercise handling.
 
+### Expiration Ladder and Tax-Smart Assignment
+
+Portfolio Risk lists every recorded option with expiry today or later, grouped by expiry date in order. Each date shows contract count, cash that in-the-money short puts would need, shares that in-the-money short calls would deliver with the gain realized, and collateral that out-of-the-money puts reserve.
+
+Per position it shows:
+- in or out of the money from the latest quote, coloured by risk to you: a short in the money is red and out of the money green; a long in the money is green;
+- the strike's distance from the stock price, and the chance of finishing in the money as the option's |delta| (a model estimate, shown when Position alerts has a quote);
+- for short puts, the cash needed if assigned next to the account's free cash;
+- for long options, today's intrinsic value.
+
+For short calls, **If assigned** compares two ways of delivering 100 × contracts shares from the recorded lots in the same account and ticker:
+- **Oldest lots first** (a common broker default, FIFO);
+- **Highest-cost lots first** (smallest realized gain).
+
+Each shows the realized gain split into short-term and long-term, judged at expiry: more than 365 days held counts as long-term. The highest-cost plan also lists the lots it would use. Calls are processed in expiry order and each plan keeps its own pool of shares, so two calls never deliver the same shares. Shares not recorded in the account are flagged, because assignment would leave a short stock position.
+
+Brokers apply the account's cost-basis method in force at assignment, so set it beforehand if you want a particular choice. Gains are before fees, wash-sale adjustments and premium received. Long-term/short-term uses acquisition dates as recorded: lots dated on an import day need correcting first. Not tax advice.
+
 ### Earnings Exposure
 
 Combines recorded stock/option tickers, listing earnings within the next 30 days and reports within the past ten days. It flags option expiries spanning the report, displays date confidence, and can estimate stock-dollar movement as `shares * spot * mean absolute historical reaction`. This is a scenario magnitude, not expected P&L or a probability. Unknown dates are listed as unavailable, not cleared.

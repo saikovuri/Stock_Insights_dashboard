@@ -1228,6 +1228,18 @@ def portfolio_option_actions(request: Request, user: dict = Depends(get_current_
         raise _upstream_error(e)
 
 
+@app.get("/api/portfolio/expiry-ladder")
+@limiter.limit("20/minute")
+def portfolio_expiry_ladder(request: Request, user: dict = Depends(get_current_user)):
+    import expiry_ladder
+    uid = int(user["user_id"])
+    try:
+        actions = get_or_fetch(f"opt-actions:{uid}:{_options_version(uid)}", lambda: options_desk.position_actions(uid), ttl=120)
+        return expiry_ladder.build(uid, actions)
+    except Exception as e:
+        raise _upstream_error(e)
+
+
 @app.get("/api/portfolio/next-steps")
 @limiter.limit("20/minute")
 def portfolio_next_steps(request: Request, user: dict = Depends(get_current_user)):
