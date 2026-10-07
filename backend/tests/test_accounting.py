@@ -898,6 +898,14 @@ class RiskTests(unittest.TestCase):
 
 
 class WheelExpiryTests(unittest.TestCase):
+    def test_quality_pool_keeps_stocks_exactly_at_their_52_week_high(self):
+        import wheel
+        base = {"trend": "uptrend", "atr_pct": 1.5, "rs_rating": 80, "price": 120}
+        rows = [{**base, "symbol": "HIGH", "pct_from_high": 0.0}, {**base, "symbol": "NEG0", "pct_from_high": -0.0},
+                {**base, "symbol": "FAR", "pct_from_high": -25.0}, {**base, "symbol": "NONE", "pct_from_high": None}]
+        self.assertEqual(sorted(r["symbol"] for r in wheel._quality_pool(rows)), ["HIGH", "NEG0"])
+        self.assertTrue(wheel._quality_checks({**base, "pct_from_high": 0.0})[2]["ok"])
+
     def test_scan_routes_window_and_writes_matching_cache(self):
         import wheel
         row = {"symbol": "PYPL", "price": 52.8}
@@ -918,8 +926,10 @@ class WheelExpiryTests(unittest.TestCase):
 
     def test_expiry_windows_boundaries_and_earnings(self):
         import wheel
-        from datetime import date, timedelta
-        expiries = {days: (date.today() + timedelta(days=days)).isoformat() for days in (6, 7, 14, 20, 21, 35, 50, 51)}
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+        today = datetime.now(ZoneInfo("America/New_York")).date()  # DTE is counted on the New York calendar
+        expiries = {days: (today + timedelta(days=days)).isoformat() for days in (6, 7, 14, 20, 21, 35, 50, 51)}
         with patch.object(wheel.oa, "_live", return_value=True), patch.object(wheel.oa, "_is_monthly", return_value=False):
             self.assertEqual(wheel._pick_expiry(list(expiries.values()), None), expiries[35])
             self.assertEqual(wheel._pick_expiry(list(expiries.values()), None, True), expiries[14])
@@ -1047,23 +1057,29 @@ class ResearchDataTests(unittest.TestCase):
 
 
 class DirectionalSafeguardsTests(unittest.TestCase):
-    def evaluate(self, liquidity="good", earnings_offset=60):
+    def evaluate(self, liquidity="good", earnings_offset=60, risk="moderate", direction="bear", fund=False,
+                 expiry_offsets=(30,), shares=False):
         from contextlib import ExitStack
-        from datetime import date, timedelta
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
         import options_analytics as analytics
-        expiry = (date.today() + timedelta(days=30)).isoformat()
-        earnings = (date.today() + timedelta(days=earnings_offset)).isoformat() if earnings_offset is not None else None
-        idea = {"kind": "long", "liquidity": liquidity, "cost": 100}
-        values = {"_spot": 100, "_expirations": [expiry], "_liquid_expiry": (expiry, None),
+        today = datetime.now(ZoneInfo("America/New_York")).date()
+        expiries = [(today + timedelta(days=days)).isoformat() for days in expiry_offsets]
+        earnings = (today + timedelta(days=earnings_offset)).isoformat() if earnings_offset is not None else None
+        idea = {"kind": "long", "liquidity": liquidity, "cost": 100, "stretched": False, "legs": [{"delta": 0.75}]}
+        values = {"_spot": 100, "_expirations": expiries,
                   "_chain": (None, None), "_otm_rows": [], "_atm_iv": 0.3,
-                  "volatility_overview": {"level": "normal"}, "_earnings_date": earnings,
+                  "volatility_overview": {"level": "normal"}, "_earnings_date": earnings, "_is_fund": fund,
                   "_earnings_extra": {}, "_long_option": (idea, None), "_debit_spread": (None, None)}
         with ExitStack() as stack:
             for name, value in values.items():
                 stack.enter_context(patch.object(analytics, name, return_value=value))
+            # Latest offered expiry within the candidates, or none: mirrors the real picker's contract.
+            stack.enter_context(patch.object(analytics, "_liquid_expiry",
+                                             side_effect=lambda ticker, exps, *args: (max(exps), None) if exps else (None, None)))
             stack.enter_context(patch.object(analytics, "get_or_fetch", side_effect=lambda key, fetch, **kwargs: fetch()))
             record = stack.enter_context(patch.object(analytics.track_record, "record_directional"))
-            result = analytics.directional_ideas("AAPL", "bear", 200, "moderate")
+            result = analytics.directional_ideas("AAPL", direction, 20000 if shares else 200, risk)
         return result, record
 
     def test_ineligible_directional_ideas_are_not_recommended_or_recorded(self):
@@ -1080,6 +1096,27 @@ class DirectionalSafeguardsTests(unittest.TestCase):
         self.assertEqual(len(result["ideas"]), 1)
         self.assertTrue(result["ideas"][0]["best"])
         record.assert_called_once()
+
+    def test_moves_to_the_last_liquid_expiry_before_earnings(self):
+        result, _ = self.evaluate(earnings_offset=25, expiry_offsets=(18, 30))
+        self.assertEqual(result["dte"], 18)
+        self.assertIn("before earnings", result["expiry_note"])
+        self.assertIsNone(result["no_trade_reason"])
+        self.assertFalse(result["earnings_before_expiry"])
+
+    def test_funds_without_earnings_and_leaps_through_earnings_are_not_blocked(self):
+        fund, _ = self.evaluate(earnings_offset=None, fund=True)
+        self.assertEqual([i["kind"] for i in fund["ideas"]], ["long"])
+        unknown, _ = self.evaluate(earnings_offset=None, fund=False)
+        self.assertEqual(unknown["ideas"], [])
+        leaps, _ = self.evaluate(earnings_offset=40, risk="low", expiry_offsets=(365,))
+        self.assertEqual([i["kind"] for i in leaps["ideas"]], ["long"])
+        self.assertTrue(leaps["earnings_before_expiry"])
+
+    def test_shares_survive_the_option_earnings_block(self):
+        result, _ = self.evaluate(earnings_offset=10, direction="bull", shares=True)
+        self.assertEqual([i["kind"] for i in result["ideas"]], ["shares"])
+        self.assertIn("Shares are still shown", result["no_trade_reason"])
 
 
 if __name__ == "__main__":

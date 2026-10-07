@@ -138,6 +138,7 @@ export default function Structures({ ticker }) {
           {em && <> · expected move ±{em.pct}% (${em.low}–${em.high}) <Tip term="expected_move" /></>}
           {data.iv_level && <> · options {data.iv_level === 'high' ? 'expensive' : data.iv_level === 'low' ? 'cheap' : 'fairly priced'}</>}
           {data.expiry_note && <div className="structure-why">✓ {data.expiry_note}</div>}
+          {!data.earnings_date && data.no_earnings_expected && <div className="structure-why">✓ ETF / fund: no company earnings. Macro events can still move it.</div>}
         </div>
       )}
 

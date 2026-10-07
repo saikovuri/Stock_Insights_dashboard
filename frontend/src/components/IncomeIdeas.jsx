@@ -63,7 +63,7 @@ const MODES = {
   },
 };
 
-function assessIncomeIdea(idea, { mode, cash, risk, shares, earnings, expiry }) {
+function assessIncomeIdea(idea, { mode, cash, risk, shares, earnings, expiry, noEarnings = false }) {
   const spread = mode === 'pcs' || mode === 'ic';
   const quoteValid = spread
     ? [idea.credit, idea.natural_credit, idea.width].every(Number.isFinite)
@@ -72,8 +72,8 @@ function assessIncomeIdea(idea, { mode, cash, risk, shares, earnings, expiry }) 
   const blocked = [];
   const warnings = [];
   if (!quoteValid) blocked.push('Valid two-sided quote unavailable; sizing disabled.');
-  if (!earnings) blocked.push('Earnings date unavailable; sizing disabled.');
-  else if (!expiry || earnings <= expiry) blocked.push('Earnings occur on or before expiry; sizing disabled.');
+  if (!earnings && !noEarnings) blocked.push('Earnings date unavailable; sizing disabled.');
+  else if (earnings && (!expiry || earnings <= expiry)) blocked.push('Earnings occur on or before expiry; sizing disabled.');
 
   const available = Number(mode === 'cc' ? shares : mode === 'csp' ? cash : risk);
   const required = mode === 'cc' ? 100 : mode === 'csp' ? idea.capital_required : idea.max_loss;
@@ -185,7 +185,7 @@ export default function IncomeIdeas({ ticker }) {
   const erAhead = erDays != null && erDays >= 0;
   const spansEr = exp => erAhead && exp >= er;
   const safeExp = erAhead ? data.expirations.filter(e => e.date < er).at(-1) : null;
-  const settings = { mode, cash, risk, shares, earnings: er, expiry: data?.expiry };
+  const settings = { mode, cash, risk, shares, earnings: er, expiry: data?.expiry, noEarnings: !!data?.no_earnings_expected };
 
   return (
     <div className="card income-ideas">
@@ -263,6 +263,9 @@ export default function IncomeIdeas({ ticker }) {
       )}
       {data && erAhead && !spansEr(data.expiry) && (
         <p className="income-er-clear">✓ Earnings {fmtDate(er)} ({erDays}d) is after this expiry.</p>
+      )}
+      {data && !er && data.no_earnings_expected && (
+        <p className="income-er-clear">✓ ETF / fund: no company earnings. Macro events (Fed, CPI, jobs) can still move it.</p>
       )}
       {loading && <p className="loading-text">Loading option chain…</p>}
       {error && <p className="empty-state">{error}</p>}

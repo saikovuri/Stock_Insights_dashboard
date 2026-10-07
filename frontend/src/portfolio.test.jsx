@@ -809,6 +809,8 @@ test('income ideas never offer zero contracts or unknown earnings', () => {
   expect(eligibleIncomeIdeas(ideas, settings)).toHaveLength(0);
   expect(eligibleIncomeIdeas(ideas, { ...settings, cash: '10000' })).toHaveLength(1);
   expect(eligibleIncomeIdeas(ideas, { ...settings, cash: '10000', earnings: null })).toHaveLength(0);
+  expect(eligibleIncomeIdeas(ideas, { ...settings, cash: '10000', earnings: null, noEarnings: true })).toHaveLength(1);
+  expect(eligibleIncomeIdeas(ideas, { ...settings, cash: '10000', earnings: '2027-01-10', noEarnings: true })).toHaveLength(0);
 });
 
 const pyplPut = { label: 'Conservative', strike: 50, bid: .32, ask: .4, mid: .36, premium: 36,
@@ -941,7 +943,8 @@ test('signed-in watchlist filters lists, saves notes and shows next earnings', a
     { ticker: 'AAPL', name: 'Apple', price: 200 }, { ticker: 'KO', name: 'Coca-Cola', price: 60 }] })));
   vi.spyOn(stockApi, 'fetchWatchlistItems').mockResolvedValue({ items: [
     { ticker: 'AAPL', list_name: 'Growth', note: 'Buy under 180' }, { ticker: 'KO', list_name: 'Income', note: '' }] });
-  const soon = new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10);
+  const ahead = new Date(Date.now() + 5 * 86400000);
+  const soon = `${ahead.getFullYear()}-${String(ahead.getMonth() + 1).padStart(2, '0')}-${String(ahead.getDate()).padStart(2, '0')}`;
   vi.spyOn(stockApi, 'fetchWatchlistEarnings').mockResolvedValue({ items: [
     { ticker: 'AAPL', next: soon, timing: 'after close', confirmed: true }, { ticker: 'KO', next: null }] });
   const save = vi.spyOn(stockApi, 'updateWatchlistItem').mockResolvedValue({ ok: true });

@@ -28,12 +28,17 @@ _lock = threading.Lock()
 _running = set()
 
 
+def _num(value, missing):
+    """0.0 is a real reading (e.g. exactly at the 52-week high); only a missing value gets the failing default."""
+    return missing if value is None else value
+
+
 def _quality_pool(rows: list[dict]) -> list[dict]:
     """Stocks you'd be fine owning if assigned: steady uptrend, calm, near highs, not lagging the market."""
     pool = [r for r in rows
-            if r.get("trend") == "uptrend" and (r.get("atr_pct") or 99) <= 3.5
-            and (r.get("pct_from_high") or -99) >= -20 and (r.get("rs_rating") or 0) >= 40
-            and 10 <= (r.get("price") or 0) <= 1000]
+            if r.get("trend") == "uptrend" and _num(r.get("atr_pct"), 99) <= 3.5
+            and _num(r.get("pct_from_high"), -99) >= -20 and _num(r.get("rs_rating"), 0) >= 40
+            and 10 <= _num(r.get("price"), 0) <= 1000]
     # Prefer leaders that move least: high relative strength per unit of daily range
     pool.sort(key=lambda r: r["rs_rating"] / max(r["atr_pct"], 0.5), reverse=True)
     return pool[:MAX_CANDIDATES]
@@ -320,8 +325,8 @@ def _quality_checks(r: dict) -> list[dict]:
     rs = r.get("rs_rating")
     return [
         {"ok": r.get("trend") == "uptrend", "text": f"Trend: {r.get('trend')} (price and 50-day above the 200-day)"},
-        {"ok": (r.get("atr_pct") or 99) <= 3.5, "text": f"Average daily range {r.get('atr_pct')}% (≤ 3.5% is calm enough)"},
-        {"ok": (r.get("pct_from_high") or -99) >= -20, "text": f"{r.get('pct_from_high')}% from its 52-week high (within 20%)"},
+        {"ok": _num(r.get("atr_pct"), 99) <= 3.5, "text": f"Average daily range {r.get('atr_pct')}% (≤ 3.5% is calm enough)"},
+        {"ok": _num(r.get("pct_from_high"), -99) >= -20, "text": f"{r.get('pct_from_high')}% from its 52-week high (within 20%)"},
         {"ok": rs is not None and rs >= 40, "text": f"Relative strength {rs if rs is not None else 'n/a'} (≥ 40 = not lagging)"},
     ]
 

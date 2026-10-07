@@ -159,7 +159,7 @@ All of the following are required:
 | Relative-strength rating | At least 40 | Exclude weaker relative performers. |
 | Stock price | $10 through $1,000 inclusive | Bound the candidate price range. |
 
-Qualifying stocks are sorted by `RS rating / max(ATR%, 0.5)`. Only the first 60 proceed to options analysis. This favors relative strength per unit of daily range, not the highest possible option yield. Missing inputs generally fail the pool. Implementation detail: this pool uses truthiness-based defaults for some numeric fields; an exact zero distance from the high is currently treated like a missing distance and excluded.
+Qualifying stocks are sorted by `RS rating / max(ATR%, 0.5)`. Only the first 60 proceed to options analysis. This favors relative strength per unit of daily range, not the highest possible option yield. Missing inputs fail the pool; a real zero reading counts as a value, so a stock closing exactly at its 52-week high (0% below) qualifies. The same rule applies to **Ask about a stock** quality checks.
 
 These are technical quality proxies. The scanner is not certifying balance-sheet quality, a fair valuation, or that the user would actually want to own the shares after assignment.
 
@@ -281,7 +281,9 @@ The general liquid-expiry selector considers the six expiries nearest the reques
 
 Finnhub and Yahoo earnings dates are combined. Reported/past dates are removed from upcoming candidates; the earliest remaining date is selected. Source disagreement can produce an estimated/unconfirmed label. Agreement from multiple sources, or near-date agreement within one day, drives the confirmation heuristic. This is provider corroboration, not issuer confirmation. Results are cached for six hours.
 
-Unknown earnings are **not cleared event risk**. They block Directional recommendations, Income contract sizing, and the Wheel capital plan. Other descriptive tools may still show data and warnings.
+Unknown earnings are **not cleared event risk**. They block short-horizon Directional option recommendations, Income contract sizing, and the Wheel capital plan. Other descriptive tools may still show data and warnings.
+
+ETFs, funds and indexes (Yahoo quote type ETF, MUTUALFUND or INDEX, cached for a week) have no company earnings, so a missing date is reported as **no earnings expected** instead of unknown and does not block Directional or Income sizing. Fed, CPI and jobs releases can still move them; check the macro calendar. If the quote type lookup fails, the symbol is treated as a stock and the unknown-earnings block applies. Earnings timing uses the New York calendar date, the same clock as expiry DTE.
 
 ## Options Hub: Volatility
 
@@ -333,7 +335,7 @@ The frontend now keeps returned ideas visible even when they cannot be sized:
 
 - Wide single-leg spreads above 20%, OI below 100, unknown OI, and thin/unknown liquidity produce execution cautions rather than hiding the idea.
 - Missing/crossed/non-finite quotes block sizing. Spread sizing requires valid credit/width data and a positive natural credit no greater than midpoint credit.
-- Unknown earnings or earnings on/before expiry block sizing.
+- Unknown earnings (except for ETFs/funds) or earnings on/before expiry block sizing.
 - Missing/insufficient cash, share coverage or risk budget blocks sizing; the card remains visible with its reason.
 - Covered-call quantity is whole hundreds of entered shares; CSP quantity is whole contracts fitting strike collateral; spread quantity is whole units fitting maximum loss. These calculator inputs are not independently checked against a broker account or other outstanding orders.
 
@@ -356,9 +358,11 @@ The user supplies bullish/bearish direction, budget, and a risk/time-horizon sel
 
 These are preferred windows, unlike the strict Wheel scan windows. LEAPS can fall back to the longest expiry if at least 120 days away; the general final fallback chooses nearest target within 0-1,000 days. Always inspect returned DTE. "Low" is a relative category within this calculator, not low risk in absolute terms.
 
+For Extreme, High and Moderate, when the chosen expiry is on or after a known earnings date, the calculator moves to the best liquid expiry **before** the report. It searches from half the plan's minimum DTE up to its maximum, so Moderate can drop to about two weeks. The expiry note says so, including when the result is shorter than the plan's usual window. LEAPS cannot avoid reports and are not moved.
+
 The long-option builder first seeks the target delta. If unaffordable, it can choose an affordable alternative with delta at least 0.20 and marks it as stretched. Debit spreads buy near target delta and sell near an expected-move-based strike; they can narrow the wing until one spread fits the budget. Whole quantities are `floor(budget / unit cost)`. Midpoints determine the initial cost estimates.
 
-Only ideas finally classified as good/OK liquidity remain eligible. Unknown earnings or earnings on/before the selected expiry suppress **all** recommendations, including the shares comparison. No liquid affordable candidate produces an explicit no-trade reason; there is no thin-market recommendation fallback.
+Only ideas finally classified as good/OK liquidity remain eligible. For Extreme/High/Moderate, unknown earnings (except ETFs/funds) or earnings on/before every liquid expiry suppress the **option** recommendations. Shares have no expiry, so they stay available with a note that they also gap on a report. LEAPS (Low) are not blocked by earnings; any report before expiry is shown as an earnings warning, because IV crush and gaps are part of holding long-dated options. No liquid affordable candidate produces an explicit no-trade reason; there is no thin-market recommendation fallback.
 
 The deterministic "best fit" order is:
 

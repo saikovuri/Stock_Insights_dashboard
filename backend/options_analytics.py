@@ -112,6 +112,11 @@ def _dte(expiry: str) -> int:
     return (datetime.strptime(expiry, "%Y-%m-%d").date() - datetime.now(_ET).date()).days
 
 
+def _days_until(day: str) -> int:
+    """Calendar days from today in New York, the same clock expiries use."""
+    return (datetime.strptime(day, "%Y-%m-%d").date() - datetime.now(_ET).date()).days
+
+
 def _close_at(expiry: str) -> datetime:
     return datetime.strptime(expiry, "%Y-%m-%d").replace(hour=16, tzinfo=_ET)
 
@@ -217,11 +222,26 @@ def _earnings_date(ticker: str) -> str | None:
     return earnings_info(ticker).get("next")
 
 
+_FUND_TYPES = {"ETF", "MUTUALFUND", "INDEX"}
+
+
+def _is_fund(ticker: str) -> bool:
+    """ETFs, funds and indexes have no company earnings, so a missing report date is expected, not unknown risk."""
+    def _fetch():
+        return (yf.Ticker(ticker).get_info() or {}).get("quoteType") or ""
+    try:
+        return get_or_fetch(f"quote-type:{ticker}", _fetch, ttl=7 * 86400) in _FUND_TYPES
+    except Exception as error:
+        log.info("Quote type unavailable for %s: %s", ticker, error)
+        return False
+
+
 def _earnings_extra(ticker: str) -> dict:
     i = earnings_info(ticker)
     return {"earnings_confirmed": i.get("next_confirmed", False), "earnings_alt": i.get("next_alt"),
             "earnings_timing": i.get("next_timing"), "last_earnings": i.get("last"),
-            "last_earnings_timing": i.get("last_timing"), "days_since_earnings": i.get("days_since_last")}
+            "last_earnings_timing": i.get("last_timing"), "days_since_earnings": i.get("days_since_last"),
+            "no_earnings_expected": not i.get("next") and _is_fund(ticker)}
 
 
 def _past_earnings_moves(ticker: str) -> list[dict]:
@@ -368,7 +388,7 @@ def volatility_overview(ticker: str) -> dict:
                           "low": round(S - move, 2), "high": round(S + move, 2)})
 
         earnings = _earnings_date(ticker)
-        e_days = (datetime.strptime(earnings, "%Y-%m-%d").date() - date.today()).days if earnings else None
+        e_days = _days_until(earnings) if earnings else None
         earnings_in_window = e_days is not None and monthly is not None and 0 <= e_days <= _dte(monthly)
 
         return {
@@ -484,7 +504,7 @@ def income_ideas(ticker: str, expiry: str | None = None) -> dict:
         T = _years(exp)
         calls, puts = _chain(ticker, exp)
 
-        e_days = (datetime.strptime(earnings, "%Y-%m-%d").date() - date.today()).days if earnings else None
+        e_days = _days_until(earnings) if earnings else None
         earnings_before = e_days is not None and 0 <= e_days <= d
 
         call_rows, put_rows = _otm_rows(calls, "call", S, T), _otm_rows(puts, "put", S, T)
@@ -954,6 +974,7 @@ def directional_ideas(ticker: str, direction: str, budget: float, risk: str) -> 
             raise LookupError("No listed options")
         plan = _RISK_PLANS[risk]
         lo, hi, target_dte = plan["dte"]
+        earnings = _earnings_date(ticker)
         exp, exp_note = _liquid_expiry(ticker, exps, target_dte, lo, hi, S)
         if not exp and risk == "low":
             longest = max(exps, key=_dte)
@@ -961,6 +982,14 @@ def directional_ideas(ticker: str, direction: str, budget: float, risk: str) -> 
         exp = exp or _pick_expiry(exps, target_dte, 0, 1000)
         if not exp:
             raise LookupError("No suitable expirations")
+        # Short-horizon plans avoid holding through a report when an earlier liquid expiry exists; LEAPS can't.
+        if earnings and earnings <= exp and risk != "low":
+            pre, _ = _liquid_expiry(ticker, [e for e in exps if e < earnings], target_dte, max(lo // 2, 0), hi, S)
+            if pre:
+                exp_note = (f"Moved to {pre}, the last liquid expiry before earnings on {earnings}, so the trade "
+                            f"doesn't hold through the report" + (" (shorter than this plan's usual window)."
+                                                                 if _dte(pre) < lo else "."))
+                exp = pre
         d = _dte(exp)
         T = _years(exp)
         kind = "call" if direction == "bull" else "put"
@@ -973,8 +1002,8 @@ def directional_ideas(ticker: str, direction: str, budget: float, risk: str) -> 
             iv_level = volatility_overview(ticker).get("level")
         except Exception:
             iv_level = None
-        earnings = _earnings_date(ticker)
-        e_days = (datetime.strptime(earnings, "%Y-%m-%d").date() - date.today()).days if earnings else None
+        e_days = _days_until(earnings) if earnings else None
+        no_earnings = not earnings and _is_fund(ticker)
 
         ideas, needed = {}, []
         if direction == "bull":
@@ -1005,14 +1034,18 @@ def directional_ideas(ticker: str, direction: str, budget: float, risk: str) -> 
         args = (direction, risk, budget, S, iv_level == "high")
         eligible = {key: idea for key, idea in ideas.items() if idea.get("liquidity") in ("good", "ok")}
         no_trade_reason = None
-        if not earnings:
-            no_trade_reason = "Earnings date is unavailable. Event risk is not cleared."
-        elif earnings <= exp:
-            no_trade_reason = "Earnings occur by the selected expiry. No directional trade passes the event-risk checks."
+        if not earnings and not no_earnings and risk != "low":
+            no_trade_reason = "Earnings date is unavailable, so option event risk is not cleared."
+        elif earnings and earnings <= exp and risk != "low":
+            no_trade_reason = ("Earnings occur by every liquid expiry in this timeframe, so no option trade passes the "
+                               "event-risk check.")
         elif not eligible:
             no_trade_reason = "No liquid candidate fits this budget. Thin or unknown liquidity is not eligible."
-        if no_trade_reason:
-            eligible = {}
+        if no_trade_reason and eligible:
+            # Shares have no expiry; the option event-risk block does not apply to them.
+            eligible = {key: idea for key, idea in eligible.items() if key == "shares"}
+            if eligible:
+                no_trade_reason += " Shares are still shown; they also gap on a report, so size for it."
         best, why = _pick_best(eligible, *args)
         ordered = sorted(eligible.values(), key=lambda idea: idea["kind"] != best)
         for i in ordered:
@@ -1033,7 +1066,7 @@ def directional_ideas(ticker: str, direction: str, budget: float, risk: str) -> 
             track_record.record_directional(result)
         return result
 
-    return get_or_fetch(f"directional-v2:{ticker}:{direction}:{risk}:{budget}", _fetch, ttl=180)
+    return get_or_fetch(f"directional-v3:{ticker}:{direction}:{risk}:{budget}", _fetch, ttl=180)
 
 
 # ── Covered calls after assignment (wheel step 2) ───────────────────────────
@@ -1140,7 +1173,7 @@ def _roll_candidate(r, wing, K, width, close_mid, credit, kind, e, cur_dte, earn
         "opening_credit_natural": round((r["bid"] - (wing["ask"] if wing else 0)) * 100, 2),
         "delta": round(r["delta"], 2), "prob_otm_pct": round((1 - r["p_itm"]) * 100),
         "open_interest": oi, "liquidity": _liquidity(oi, worst),
-        "spans_earnings": bool(earnings and date.today().isoformat() <= earnings <= e),
+        "spans_earnings": bool(earnings and datetime.now(_ET).date().isoformat() <= earnings <= e),
     }
     if credit is not None:
         if kind == "call":
