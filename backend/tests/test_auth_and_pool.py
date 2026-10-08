@@ -72,6 +72,17 @@ class AuthTests(unittest.TestCase):
         self.assertEqual(self.client.post("/api/auth/login", json={"username": username, "password": "é" * 37}).status_code, 401)
         self.assertEqual(self.client.post("/api/auth/login", json={"username": username, "password": "é" * 36}).status_code, 200)
 
+    def test_registration_requires_the_invite_code_when_configured(self):
+        import main
+        from unittest.mock import patch
+        main.limiter.reset()
+        body = {"username": uuid4().hex[:12], "password": "secret123", "display_name": "x"}
+        with patch.dict("os.environ", {"REGISTRATION_CODE": "letmein"}):
+            self.assertEqual(self.client.post("/api/auth/register", json=body).status_code, 403)
+            self.assertEqual(self.client.post("/api/auth/register", json={**body, "invite_code": "wrong"}).status_code, 403)
+            self.assertEqual(self.client.post("/api/auth/register", json={**body, "invite_code": " letmein "}).status_code, 200)
+        main.limiter.reset()
+
     def test_refresh_token_is_single_use_under_concurrency(self):
         from fastapi.testclient import TestClient
         import main

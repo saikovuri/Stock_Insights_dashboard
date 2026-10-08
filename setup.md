@@ -95,6 +95,7 @@ Paste the values you saved in section 1. If you are starting fresh, every key be
 | `SCHEDULER_ENABLED` | Optional | `1` (default) runs the alert scan and morning briefing. Use `0` for one-off scripts. |
 | `ALERT_SCAN_MINUTES`, `BRIEFING_HOUR_ET`, `PRICE_CHANGE_ALERT`, `VOLUME_SPIKE_ALERT` | Optional | Alert timing and thresholds. |
 | `NTFY_SERVER` | Optional | Phone push server (default https://ntfy.sh). Each user enters their topic in the app. |
+| `REGISTRATION_CODE` | Optional | When set, creating an account requires this invite code (existing users can still sign in). Unset means open sign-up. |
 | `TOKEN_EXPIRE_MINUTES`, `REFRESH_EXPIRE_DAYS` | Optional | Session length (defaults: 60 minutes and 30 days). |
 | `EXTERNAL_CONTEXT_ENABLED` | Optional | `0` turns off the Reddit attention and prediction-market feeds. |
 | `RESEARCH_UNIVERSE_SOURCE` | Optional | Dated S&P constituent snapshots for the scanner (see README). |
@@ -352,9 +353,9 @@ Ordered by value for effort. Each item names where to start.
    - add "earnings within 7 days" for stock holdings, not only options (reuse `options_analytics.earnings_info`);
    - add a "dismiss for 7 days" button (store dismissed codes in a small table or in `localStorage`).
 7. **Stress test with a missing quote** (SNDK case). Offer "exclude positions without quotes" with a clear warning instead of blocking the whole scenario (`WhatIf` in `OptionsDesk.jsx`).
-8. **Restrict sign-up on the public server.**
-   - `/api/auth/register` is open to anyone who finds the URL. Each user sees only their own data, but strangers would use your free API quotas.
-   - Add `REGISTRATION_ENABLED=0` (or an invite code) in `routes_auth.py`, set it in the VM's `.env` and restart.
+8. **Restrict sign-up on the public server** (built; needs one setting).
+   - `/api/auth/register` is open while `REGISTRATION_CODE` is unset. Each user sees only their own data, but strangers would use your free API quotas.
+   - On the VM: `echo 'REGISTRATION_CODE=<a code you choose>' >> ~/stock-insights/backend/.env`, then `sudo systemctl restart stock-insights`. The sign-up form then asks for the code; give it only to people you invite.
 9. **Housekeeping:**
    - replace the deprecated `datetime.utcnow()` in `database.py` (around line 1412) with `datetime.now(timezone.utc)`;
    - once a month, run `npm outdated` / `pip list --outdated`, upgrade one package at a time, run `scripts/check.ps1`, then push.

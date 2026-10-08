@@ -1,5 +1,7 @@
 """Registration, login, refresh-token rotation and logout."""
 
+import hmac
+import os
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -19,6 +21,7 @@ class RegisterRequest(BaseModel):
     username: str
     password: str
     display_name: str
+    invite_code: str | None = None
 
 
 class LoginRequest(BaseModel):
@@ -46,6 +49,10 @@ def _issue_tokens(user: dict) -> dict:
 @router.post("/api/auth/register")
 @limiter.limit("5/minute")
 def register(request: Request, req: RegisterRequest):
+    # Unset = open sign-up; set REGISTRATION_CODE to make new accounts invite-only
+    code = os.getenv("REGISTRATION_CODE", "").strip()
+    if code and not hmac.compare_digest((req.invite_code or "").strip().encode(), code.encode()):
+        raise HTTPException(status_code=403, detail="A valid invite code is required to create an account")
     if len(req.username) < 3:
         raise HTTPException(status_code=400, detail="Username must be at least 3 characters")
     if len(req.password) < 6:

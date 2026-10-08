@@ -7,6 +7,8 @@ export default function LoginPage({ onBack }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
+  const [inviteCode, setInviteCode] = useState('');
+  const [needsInvite, setNeedsInvite] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -16,11 +18,12 @@ export default function LoginPage({ onBack }) {
     setLoading(true);
     try {
       if (isRegister) {
-        await register(username, password, displayName || username);
+        await register(username, password, displayName || username, inviteCode.trim());
       } else {
         await login(username, password);
       }
     } catch (err) {
+      if (isRegister && /invite code/i.test(err.message)) setNeedsInvite(true);
       setError(err.message);
     } finally {
       setLoading(false);
@@ -93,6 +96,14 @@ export default function LoginPage({ onBack }) {
               autoComplete={isRegister ? 'new-password' : 'current-password'}
             />
           </div>
+
+          {isRegister && needsInvite && (
+            <div className="form-group">
+              <label htmlFor="invite-code">Invite code</label>
+              <input id="invite-code" type="text" value={inviteCode} onChange={e => setInviteCode(e.target.value)}
+                placeholder="Ask the site owner" required autoComplete="off" />
+            </div>
+          )}
 
           {error && <div className="login-error">{error}</div>}
 
