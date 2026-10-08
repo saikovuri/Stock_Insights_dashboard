@@ -1240,6 +1240,7 @@ class TradingRulesRequest(BaseModel):
     max_position_pct: Optional[float] = Field(None, ge=1, le=100)
     min_free_cash_pct: Optional[float] = Field(None, ge=0, le=100)
     take_profit_pct: Optional[float] = Field(None, ge=1, le=100)
+    stop_loss_multiple: Optional[float] = Field(None, ge=0.5, le=10)
     no_calls_below_cost: bool = False
     no_short_through_earnings: bool = False
 
@@ -1288,6 +1289,17 @@ def portfolio_fit_endpoint(request: Request, req: FitRequest, user: dict = Depen
     items = [{"ticker": _valid_ticker(i.ticker), "cash_needed": i.cash_needed} for i in req.items]
     try:
         return portfolio_fit.fit(int(user["user_id"]), items)
+    except Exception as e:
+        raise _upstream_error(e)
+
+
+@app.get("/api/portfolio/account-value")
+@limiter.limit("30/minute")
+def portfolio_account_value(request: Request, user: dict = Depends(get_current_user)):
+    """Recorded stock value plus entered cash, used to size option ideas as a share of the account."""
+    import portfolio_fit
+    try:
+        return portfolio_fit.account_value(int(user["user_id"]))
     except Exception as e:
         raise _upstream_error(e)
 

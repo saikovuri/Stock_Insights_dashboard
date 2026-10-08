@@ -4309,6 +4309,10 @@ tr.alert-triggered {
 .safety-ok { background: rgba(52,211,153,0.15); color: #34d399; }
 .safety-warn { background: rgba(251,191,36,0.15); color: #fbbf24; }
 .safety-bad { background: rgba(248,113,113,0.15); color: #f87171; }
+.post-earnings-badge { margin-left: 0.4rem; font-size: 0.68rem; font-weight: 700; padding: 0.1rem 0.45rem; border-radius: 999px;
+  vertical-align: middle; background: rgba(52,211,153,0.12); color: var(--positive); white-space: nowrap; }
+.assign-share, .limit-hint { font-size: 0.78rem; margin: 0.35rem 0 0; line-height: 1.4; }
+.limit-hint { color: var(--text-secondary); }
 .structure-card.safety-safer { border-color: rgba(52,211,153,0.45); }
 .idea-checks { list-style: none; padding: 0; margin: 0 0 0.5rem; font-size: 0.76rem; display: flex; flex-direction: column; gap: 0.15rem; }
 

@@ -512,6 +512,7 @@ export const fetchBuyZones = () => getJson(`${BASE}/watchlist/buy-zones`, 'Faile
 export const saveBuyZone = (ticker, price) => sendJson(`${BASE}/watchlist/buy-zones/${encodeURIComponent(ticker)}`, 'PUT', { price }, 'Failed to save buy zone');
 export const fetchWatchlistEvents = (days = 14) => getJson(`${BASE}/watchlist/events?days=${days}`, 'Failed to load upcoming dates', true);
 export const fetchPortfolioFit = (items) => sendJson(`${BASE}/portfolio/fit`, 'POST', { items }, 'Failed to score portfolio fit');
+export const fetchAccountValue = () => getJson(`${BASE}/portfolio/account-value`, 'Failed to load account value', true);
 export const fetchTradingRules = () => getJson(`${BASE}/rules`, 'Failed to load rules', true);
 export const saveTradingRules = (rules) => sendJson(`${BASE}/rules`, 'PUT', rules, 'Failed to save rules');
 export const fetchTrimPlan = (ticker, target, steps, spacing) =>

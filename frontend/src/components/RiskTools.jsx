@@ -6,6 +6,7 @@ const NUMBER_RULES = [
   ['max_position_pct', 'Max % of stock value in one stock', 1, 100],
   ['min_free_cash_pct', 'Keep at least this % of each account as free cash', 0, 100],
   ['take_profit_pct', 'Take profit on short options at % of premium captured', 1, 100],
+  ['stop_loss_multiple', 'Close short options when the loss reaches this multiple of the credit (e.g. 2)', 0.5, 10],
 ];
 
 export function TradingRules({ onSaved }) {
@@ -22,7 +23,7 @@ export function TradingRules({ onSaved }) {
     setBusy(true); setMsg(null);
     try {
       const body = { ...form };
-      NUMBER_RULES.forEach(([key]) => { body[key] = form[key] === '' ? null : Number(form[key]); });
+      NUMBER_RULES.forEach(([key]) => { body[key] = form[key] === '' || form[key] == null ? null : Number(form[key]); });
       await saveTradingRules(body);
       setMsg('Rules saved. Broken rules show in Suggested next steps and in a daily notification.');
       onSaved?.();
@@ -32,7 +33,7 @@ export function TradingRules({ onSaved }) {
   return <form className="trading-rules" onSubmit={save} aria-label="My trading rules">
     <p className="structures-intro">Rules you set for yourself. Leave a number blank to turn that rule off.</p>
     {NUMBER_RULES.map(([key, label, min, max]) => <label key={key}>{label}
-      <input className="tool-input" type="number" min={min} max={max} step="any" value={form[key]}
+      <input className="tool-input" type="number" min={min} max={max} step="any" value={form[key] ?? ''}
         onChange={e => setForm({ ...form, [key]: e.target.value })} placeholder="off" /></label>)}
     <label className="checkbox-row"><input type="checkbox" checked={!!form.no_calls_below_cost}
       onChange={e => setForm({ ...form, no_calls_below_cost: e.target.checked })} /> Never sell a call below my average cost</label>

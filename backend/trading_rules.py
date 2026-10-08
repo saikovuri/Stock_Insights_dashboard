@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 import database
 
-DEFAULTS = {"max_position_pct": None, "min_free_cash_pct": None, "take_profit_pct": None,
+DEFAULTS = {"max_position_pct": None, "min_free_cash_pct": None, "take_profit_pct": None, "stop_loss_multiple": None,
             "no_calls_below_cost": False, "no_short_through_earnings": False}
 
 
@@ -54,6 +54,15 @@ def violations(rules: dict, holdings: list[dict], options: list[dict], prices: d
                           "title": f"Rule: {len(hits)} short option(s) reached your {rules['take_profit_pct']:g}% take-profit",
                           "points": [f"{p['ticker']} ${p['strike']:g} {p['type']} {p['expiry']}: {p['profit_captured_pct']}% captured" for p in hits[:5]],
                           "detail": "Buy to close to lock in the gain, or update the rule.", "link": {"kind": "alerts"}})
+    if rules.get("stop_loss_multiple") is not None:
+        hits = [p for p in actions.get("positions", []) if p.get("position") == "short"
+                and p.get("loss_multiple") is not None and p["loss_multiple"] >= rules["stop_loss_multiple"]]
+        if hits:
+            items.append({"level": "act", "code": "rule_stop_loss",
+                          "title": f"Rule: {len(hits)} short option(s) hit your {rules['stop_loss_multiple']:g}× credit stop",
+                          "points": [f"{p['ticker']} ${p['strike']:g} {p['type']} {p['expiry']}: loss {p['loss_multiple']:g}× the credit"
+                                     for p in hits[:5]],
+                          "detail": "Your rule is to buy to close here rather than roll and hope.", "link": {"kind": "alerts"}})
     if rules.get("no_calls_below_cost"):
         cost, shares = defaultdict(float), defaultdict(float)
         for h in holdings:

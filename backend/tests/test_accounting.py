@@ -176,6 +176,46 @@ class AccountingTests(unittest.TestCase):
              patch.object(scanner.requests, "get", side_effect=RuntimeError("offline")):
             self.assertEqual(scanner._index_universe("test", "https://example.test", "Ticker", "Company", "test", []), cached)
 
+    def test_short_option_guardrails_stop_pin_and_roll_count(self):
+        import options_desk
+        import trading_rules
+        from datetime import date
+        option = {"option_type": "put", "strike": 100.0, "expiry": date.today().isoformat(), "position": "short",
+                  "premium": 2.0, "contracts": 1}
+        codes = lambda acts: {a["code"]: a["level"] for a in acts}  # noqa: E731
+        with patch.object(options_desk.oa, "_dte", return_value=0), patch.object(options_desk.oa, "_live", return_value=True):
+            pinned = codes(options_desk._actions(option, 100.6, {"mid": 6.1, "delta": -0.5}, 0, {}, None, rolls=3))
+            self.assertEqual((pinned["pin_risk"], pinned["stop_loss"], pinned["roll_count"]), ("act", "act", "warn"))
+            clear = codes(options_desk._actions(option, 102.0, {"mid": 5.9, "delta": -0.3}, 0, {}, None, rolls=2))
+            self.assertNotIn("pin_risk", clear)  # 2% away
+            self.assertNotIn("stop_loss", clear)  # 1.95x, under the 2x stop
+            self.assertEqual(clear["roll_count"], "info")
+        # Two buy-to-close rolls chained back from the open put; an expired-worthless close does not count
+        closes = [{"ticker": "AMD", "option_type": "put", "position": "short", "close_premium": 3.1, "opened_at": "2026-08-01",
+                   "closed_at": "2026-09-02 15:00:00", "account": "IRA"},
+                  {"ticker": "AMD", "option_type": "put", "position": "short", "close_premium": 4.0, "opened_at": "2026-07-01",
+                   "closed_at": "2026-08-01 15:00:00", "account": "IRA"},
+                  {"ticker": "AMD", "option_type": "put", "position": "short", "close_premium": 0.0, "opened_at": "2026-06-01",
+                   "closed_at": "2026-07-01 20:00:00", "account": "IRA"}]
+        open_put = {"id": 7, "ticker": "AMD", "option_type": "put", "position": "short", "date_added": "2026-09-02 15:01:00", "account": "IRA"}
+        with patch.object(database, "_run", return_value=closes):
+            self.assertEqual(options_desk._roll_counts(1, [open_put, {**open_put, "id": 8, "account": "Other"}]), {7: 2, 8: 0})
+        positions = {"positions": [{"position": "short", "loss_multiple": 2.4, "ticker": "TSLA", "strike": 375.0, "type": "put",
+                                    "expiry": "2026-10-23"}]}
+        rule = {**trading_rules.DEFAULTS, "stop_loss_multiple": 2}
+        items = trading_rules.violations(rule, [], [], {}, positions, [])
+        self.assertEqual([i["code"] for i in items], ["rule_stop_loss"])
+        self.assertEqual(trading_rules.violations({**rule, "stop_loss_multiple": 3}, [], [], {}, positions, []), [])
+
+    def test_account_value_adds_quoted_stocks_and_entered_cash(self):
+        import portfolio_fit
+        holdings = [{"ticker": "AMD", "shares": 100, "buy_price": 60.0}, {"ticker": "OLD", "shares": 10, "buy_price": 5.0}]
+        with patch.object(portfolio_fit, "get_or_fetch", side_effect=lambda key, fetch, ttl=0: fetch()), \
+             patch.object(portfolio_fit.database, "get_user_holdings", return_value=holdings), \
+             patch.object(portfolio_fit, "get_quote", side_effect=lambda t: {"price": 150.0} if t == "AMD" else {}), \
+             patch.object(portfolio_fit.accounts, "list_accounts", return_value={"accounts": [{"cash": 20000.0}, {"cash": None}]}):
+            self.assertEqual(portfolio_fit.account_value(1), {"value": 35050.0, "stocks": 15050.0, "cash": 20000.0, "cash_entered": True})
+
     def test_short_put_through_earnings_offers_roll_ins_before_the_report(self):
         import pandas as pd
         import options_analytics as oa

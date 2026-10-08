@@ -19,6 +19,9 @@ log = logging.getLogger(__name__)
 TAKE_PROFIT = 0.50
 TESTED_DELTA = 0.40
 GAMMA_DAYS = 7
+STOP_MULTIPLE = 2.0  # close a short option once the loss reaches 2x the credit received
+PIN_PCT = 1.0  # expiry-day distance from the strike that counts as pinned
+ROLL_LIMIT = 3
 _LEVEL = {"act": 0, "warn": 1, "info": 2}
 
 
@@ -85,7 +88,33 @@ def _contract(ticker: str, kind: str, strike: float, expiry: str, S: float) -> d
     return {"mid": mid, "iv": iv, "delta": delta, "bid": bid, "ask": ask}
 
 
-def _actions(o: dict, S: float, c: dict, shares_held: float, earnings: dict, div: dict | None) -> list[dict]:
+def _roll_counts(user_id: int, options: list[dict]) -> dict[int, int]:
+    """Rolls behind each open short option: a bought-back short of the same ticker, type and account closed within a
+    day of when this one (and then each predecessor) was opened."""
+    import database
+    rows = database._run(f"SELECT ticker, option_type, position, close_premium, opened_at, closed_at, account "
+                         f"FROM closed_options WHERE user_id={database.PH}", (user_id,), "all")
+    closes = [r for r in rows if r["position"] == "short" and (r["close_premium"] or 0) > 0]
+    account = lambda row: row.get("account") or database.DEFAULT_ACCOUNT  # noqa: E731
+    counts = {}
+    for o in options:
+        if o.get("position") != "short":
+            continue
+        n, opened, used = 0, _d(o.get("date_added")), set()
+        while opened and n < 20:
+            match = next((i for i, r in enumerate(closes) if i not in used and r["ticker"] == o["ticker"]
+                          and r["option_type"] == o["option_type"] and account(r) == account(o)
+                          and _d(r["closed_at"]) and abs((_d(r["closed_at"]) - opened).days) <= 1), None)
+            if match is None:
+                break
+            used.add(match)
+            n += 1
+            opened = _d(closes[match].get("opened_at"))
+        counts[o["id"]] = n
+    return counts
+
+
+def _actions(o: dict, S: float, c: dict, shares_held: float, earnings: dict, div: dict | None, rolls: int = 0) -> list[dict]:
     kind, K, short = o["option_type"], o["strike"], o.get("position") == "short"
     dte = oa._dte(o["expiry"])
     intrinsic = max(S - K, 0) if kind == "call" else max(K - S, 0)
@@ -99,6 +128,22 @@ def _actions(o: dict, S: float, c: dict, shares_held: float, earnings: dict, div
                             "Close it out in the portfolio so P&L stays accurate.")}]
     mid = c.get("mid")
     if short:
+        if dte == 0 and K and abs(S - K) / K * 100 <= PIN_PCT:
+            acts.append({"level": "act", "code": "pin_risk",
+                         "text": f"Expires today within {abs(S - K) / K * 100:.1f}% of the ${K:g} strike. Close before 4 PM ET: "
+                                 "after-hours moves until about 5:30 PM can still decide assignment, leaving surprise "
+                                 + ("shares" if kind == "put" else "a short stock position (or lost shares)") + " on Monday."})
+        if mid is not None and o["premium"] > 0 and (mid - o["premium"]) / o["premium"] >= STOP_MULTIPLE:
+            multiple = (mid - o["premium"]) / o["premium"]
+            acts.append({"level": "act", "code": "stop_loss",
+                         "text": f"Loss is {multiple:.1f}× the ${o['premium']:.2f} credit (mark ${mid:.2f}). A common rule closes "
+                                 f"short options at a {STOP_MULTIPLE:g}× credit loss so one bad trade can't erase many good ones. "
+                                 "Rolling only for a credit does not reduce this risk.", "repair": True})
+        if rolls >= ROLL_LIMIT - 1:
+            acts.append({"level": "warn" if rolls >= ROLL_LIMIT else "info", "code": "roll_count",
+                         "text": f"Rolled {rolls} time{'s' if rolls != 1 else ''} already. A common limit is 2–3 rolls: if the "
+                                 "stock keeps moving against you, the original idea is broken — compare closing or "
+                                 "taking assignment before rolling again."})
         if mid is not None and o["premium"] > 0:
             captured = (o["premium"] - mid) / o["premium"]
             if captured >= TAKE_PROFIT:
@@ -154,6 +199,11 @@ def _actions(o: dict, S: float, c: dict, shares_held: float, earnings: dict, div
 
 def position_actions(user_id: int) -> dict:
     options = get_user_options(user_id)
+    try:
+        rolls = _roll_counts(user_id, options)
+    except Exception as e:
+        log.info("Roll count failed for user %s: %s", user_id, e)
+        rolls = {}
     shares = defaultdict(float)
     for h in get_user_holdings(user_id):
         shares[h["ticker"]] += h["shares"]
@@ -173,7 +223,7 @@ def position_actions(user_id: int) -> dict:
             if not S or not math.isfinite(S):
                 raise ValueError("Underlying quote unavailable")
             c = _contract(t, o["option_type"], o["strike"], o["expiry"], S)
-            acts = _actions(o, S, c, coverage, earnings[t], divs[t])
+            acts = _actions(o, S, c, coverage, earnings[t], divs[t], rolls.get(o["id"], 0))
         except Exception as e:
             log.info("Position check failed for %s: %s", t, e)
             S = None
@@ -190,6 +240,8 @@ def position_actions(user_id: int) -> dict:
             "id": o["id"], "ticker": t, "type": o["option_type"], "position": o.get("position", "long"),
             "strike": o["strike"], "expiry": o["expiry"], "dte": oa._dte(o["expiry"]), "contracts": o["contracts"],
             "premium": o["premium"], "spot": round(S, 2) if S is not None else None, "mid": None if mid is None else round(mid, 2),
+            "bid": c.get("bid"), "ask": c.get("ask"), "rolls": rolls.get(o["id"], 0),
+            "loss_multiple": round((mid - o["premium"]) / o["premium"], 2) if short and mid is not None and o["premium"] else None,
             "delta": None if c.get("delta") is None else round(c["delta"], 2),
             "iv_pct": None if not c.get("iv") else round(c["iv"] * 100, 1),
             "profit_captured_pct": round((o["premium"] - mid) / o["premium"] * 100) if short and mid is not None and o["premium"] else None,
@@ -198,7 +250,8 @@ def position_actions(user_id: int) -> dict:
         })
     out.sort(key=lambda p: (min((_LEVEL[a["level"]] for a in p["actions"]), default=9), p["dte"]))
     return {"positions": out, "counts": {lvl: sum(1 for p in out for a in p["actions"] if a["level"] == lvl) for lvl in _LEVEL},
-            "rules": {"take_profit_pct": int(TAKE_PROFIT * 100), "tested_delta": TESTED_DELTA, "gamma_days": GAMMA_DAYS}}
+            "rules": {"take_profit_pct": int(TAKE_PROFIT * 100), "tested_delta": TESTED_DELTA, "gamma_days": GAMMA_DAYS,
+                      "stop_multiple": STOP_MULTIPLE, "pin_pct": PIN_PCT, "roll_limit": ROLL_LIMIT}}
 
 
 def earnings_exposure(user_id: int) -> dict:

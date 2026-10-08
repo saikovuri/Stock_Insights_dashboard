@@ -752,6 +752,7 @@ Under Suggested next steps, **My trading rules** stores optional personal limits
 | Max % of stock value in one stock (1-100) | A ticker's share of priced stock value exceeds it. This replaces the default 25% concentration check. |
 | Minimum free cash % (0-100) | An account's free cash (cash minus short-put collateral) divided by cash plus its priced stock value is below it. Accounts without an entered cash balance are skipped. |
 | Take profit at % captured (1-100) | A short option's captured premium (from Position alerts' midpoint) reaches it. |
+| Stop at a multiple of the credit (0.5-10) | A short option's loss, (midpoint − opening premium) ÷ opening premium, reaches it. 2 means the option costs 3× what it was sold for. |
 | Never sell a call below my average cost | A short call's strike is below the average cost of the recorded shares of that ticker in the same account. |
 | No short options through earnings | A short option has an earnings-before-expiry alert. |
 
@@ -775,6 +776,9 @@ Open option records are checked individually using the exact contract quote, can
 | --- | --- |
 | Expired | Past expiry, or same-day after the app's expiry-close cutoff; prompt reconciliation of expiry/exercise/assignment. |
 | Short-option profit capture | At least 50% of opening premium captured based on current midpoint. |
+| Short-option stop (Act) | Loss at least 2× the opening premium (midpoint at least 3× the premium). Offers Repair. A personal multiple can also be set in My trading rules. |
+| Expiry-day pin risk (Act) | A short option expiring today, before the 4 PM ET cutoff, with the stock within 1% of the strike. Pushed as a notification at 2 PM ET on trading days, not in the morning batch. After-hours moves can still decide assignment. |
+| Roll count | Rolls are inferred: a bought-back short option (closing premium above $0) of the same ticker, type and account closed within one day of when the open short (or its predecessor) was recorded. Two rolls shows Info, three or more Warn. Imports dated on the import day can miss or misattribute rolls. |
 | Short strike tested | In the money or absolute delta >=0.40. |
 | Near-expiry gamma | At most seven DTE unless the profit-capture action is already present; severity increases with delta >=0.25 or ITM. |
 | Uncovered short call | Insufficient unallocated shares for 100 shares per contract. Shares cannot cover multiple short calls simultaneously. |
@@ -786,6 +790,15 @@ Open option records are checked individually using the exact contract quote, can
 | Missing information | Missing quote or unknown next earnings produces explicit incomplete-risk warnings. |
 
 Ex-dividend estimates prefer an announced date, otherwise project the last interval from recent payment history. Insufficient history or a gap over twice the recent payment interval can suppress the estimate. Verify issuer announcements and broker exercise handling.
+
+When a short position shows a profit-capture, stop or pin-risk action, a **buy-to-close limit** hint shows the price steps described under Order hints below.
+
+### Order Hints on Option Ideas
+
+Income ideas (single options and spreads), Wheel candidates and closing alerts show three aids:
+- **Limit price steps:** start at the midpoint rounded to the tick, then give up one tick at a time for two more steps, never past the bid (selling) or ask (buying). The tick is $0.01 when the midpoint is under $3 and $0.05 above. Some tickers trade in pennies throughout, so a finer step may be possible. Spreads use the natural credit as their bid.
+- **If assigned: % of your account** for cash-secured puts and Wheel candidates (cash needed × suggested contracts, or one contract), and **Max loss: %** for spreads. The account is recorded stock value (live quote, else cost) plus entered cash across all accounts, cached for five minutes. Over 10% shows amber and over 25% red. Shown only when signed in with a positive recorded value.
+- **Post-earnings window:** a badge when the last report was 1–4 calendar days ago (or today before the open). The gap is known and option prices often stay elevated briefly; it is not a signal that the stock will hold.
 
 ### Expiration Ladder and Tax-Smart Assignment
 
@@ -1171,6 +1184,7 @@ Defaults are server-side and require a running scheduler process. "Market window
 | Standard stock alerts | Every 15 minutes during the app's weekday 9:30 a.m.-4 p.m. Eastern window. |
 | Custom alerts | About every two minutes during that window. |
 | Open-option position checks | Once per market-window day after 10:15 a.m. Eastern. |
+| Expiry-day pin risk | Once per market-window day after 2 p.m. Eastern (pin-risk alerts only). |
 | Wheel refresh | Every 15 minutes during the market window after 10 a.m. Eastern; also on request, as described under Wheel. |
 | Setup scan refresh | Weekdays after 4:30 p.m. Eastern. |
 | Paper-option settlement | Weekdays after 4:45 p.m. Eastern. |

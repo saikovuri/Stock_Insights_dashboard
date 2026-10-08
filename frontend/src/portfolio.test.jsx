@@ -14,6 +14,7 @@ import Watchlist from './components/Watchlist';
 import Structures from './components/Structures';
 import Accounting from './components/Accounting';
 import WheelIdeas, { wheelFreshness } from './components/WheelIdeas';
+import { AssignmentShare, isPostEarnings, limitLadder } from './components/TradeSizing';
 import MarketContext from './components/MarketContext';
 import PreTradeChecklist from './components/PreTradeChecklist';
 import Journal, { recordedTradeMetrics, recordedOptionStats, groupedOptionStats, edgeHighlights, howClosed } from './components/Journal';
@@ -452,10 +453,11 @@ test('trading rules save blanks as off, and the trim planner shows the sale step
   const limit = await screen.findByLabelText('Max % of stock value in one stock');
   expect(limit.value).toBe('30');
   fireEvent.change(screen.getByLabelText('Take profit on short options at % of premium captured'), { target: { value: '60' } });
+  fireEvent.change(screen.getByLabelText(/Close short options when the loss reaches/), { target: { value: '2' } });
   fireEvent.click(screen.getByLabelText('Never sell a call below my average cost'));
   fireEvent.click(screen.getByRole('button', { name: 'Save rules' }));
   await waitFor(() => expect(save).toHaveBeenCalledWith({ max_position_pct: 30, min_free_cash_pct: null, take_profit_pct: 60,
-    no_calls_below_cost: true, no_short_through_earnings: false }));
+    stop_loss_multiple: 2, no_calls_below_cost: true, no_short_through_earnings: false }));
   expect(saved).toHaveBeenCalled();
   cleanup();
   const plan = vi.spyOn(stockApi, 'fetchTrimPlan').mockResolvedValue({ ticker: 'AMD', price: 640, shares_held: 600, current_pct: 74,
@@ -733,6 +735,18 @@ test('context ignores an old response after switching feeds and retries a networ
   fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
   await screen.findByText('No qualifying records in the provider sample.');
   expect(fetch).toHaveBeenLastCalledWith('predictions');
+});
+
+test('limit ladder, post-earnings window and assignment share', () => {
+  expect(limitLadder(1.2, 1.4)).toEqual({ steps: [1.3, 1.29, 1.28], floor: 1.2, tick: 0.01 });
+  expect(limitLadder(14.4, 14.7, 'buy')).toEqual({ steps: [14.55, 14.6, 14.65], floor: 14.7, tick: 0.05 });
+  expect(limitLadder(0.05, 0.06).steps).toEqual([0.06, 0.05]);  // never below the bid
+  expect(limitLadder(0, 1)).toBeNull();
+  expect([1, 4, 5].map(d => isPostEarnings(d))).toEqual([true, true, false]);
+  expect(isPostEarnings(0, 'before open')).toBe(true);
+  expect(isPostEarnings(0, 'after close')).toBe(false);
+  render(<AssignmentShare amount={37500} account={{ value: 120000, cash_entered: true }} />);
+  expect(screen.getByText(/of your account/).textContent).toMatch(/If assigned: 31% of your account \(\$37,500 of \$120,000\) — one stock would dominate/);
 });
 
 test('wheel freshness shows quote age and refresh cadence', () => {

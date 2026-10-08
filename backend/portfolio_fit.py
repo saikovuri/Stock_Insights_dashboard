@@ -124,6 +124,25 @@ def _score(ticker: str, cash_needed: float | None, p: dict) -> dict:
             "correlation": corr, "sector": sector, "reasons": [{"tone": t, "text": x} for t, x in reasons]}
 
 
+def account_value(user_id: int) -> dict:
+    """Recorded stock value (live quote, else cost) plus entered cash, across every account."""
+    def _fetch():
+        stocks = 0.0
+        for h in database.get_user_holdings(user_id):
+            if h["shares"] <= 0:
+                continue
+            try:
+                price = get_quote(h["ticker"]).get("price")
+            except Exception:
+                price = None
+            stocks += h["shares"] * (price or h["buy_price"])
+        cash_rows = [a["cash"] for a in accounts.list_accounts(user_id)["accounts"] if a["cash"] is not None]
+        cash = sum(cash_rows)
+        return {"value": round(stocks + cash, 2), "stocks": round(stocks, 2), "cash": round(cash, 2),
+                "cash_entered": bool(cash_rows)}
+    return get_or_fetch(f"account-value:{user_id}", _fetch, ttl=300)
+
+
 def fit(user_id: int, items: list[dict]) -> dict:
     key = hashlib.sha256(json.dumps([user_id, items], sort_keys=True).encode()).hexdigest()[:24]
 

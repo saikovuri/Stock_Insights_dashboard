@@ -362,8 +362,8 @@ def _record_iv_snapshots() -> None:
             continue
 
 
-def _run_position_checks() -> None:
-    """Push the day's must-act items for open option positions (take profit, ex-div assignment, expired)."""
+def _run_position_checks(codes: set[str] | None = None) -> None:
+    """Push must-act items for open option positions; `codes` limits the run (the 2 PM pin-risk pass)."""
     import options_desk
     from database import get_option_user_ids
     day = datetime.now(ET).date().isoformat()
@@ -375,6 +375,10 @@ def _run_position_checks() -> None:
             continue
         for p in r["positions"]:
             for a in p["actions"]:
+                if codes is not None and a["code"] not in codes:
+                    continue
+                if codes is None and a["code"] == "pin_risk":
+                    continue  # sent at 2 PM, when the closing price is closer to known
                 if a["level"] == "info" or (a["level"] == "warn" and a["code"] not in ("tested", "early_put")):
                     continue
                 title = (f"🛠 {p['ticker']} {p['position']} ${p['strike']:g} {p['type']} {p['expiry']}: "
@@ -422,6 +426,7 @@ def _loop() -> None:
     last_custom = datetime.min.replace(tzinfo=ET)
     last_wheel = datetime.min.replace(tzinfo=ET)
     last_positions_day = None
+    last_pin_day = None
     last_settle_day = None
     last_nav_day = None
     while True:
@@ -434,6 +439,10 @@ def _loop() -> None:
                 import accounts
                 accounts.snapshot_all()
                 _ran("account_value_snapshot")
+            if _market_open(now) and (now.hour, now.minute) >= (14, 0) and last_pin_day != now.date():
+                last_pin_day = now.date()
+                _run_position_checks({"pin_risk"})
+                _ran("pin_risk_checks")
             if _market_open(now) and (now.hour, now.minute) >= (10, 15) and last_positions_day != now.date():
                 last_positions_day = now.date()
                 _run_position_checks()

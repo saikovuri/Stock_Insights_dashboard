@@ -3,6 +3,7 @@ import { fetchIncomeIdeas } from '../api/stockApi';
 import PricedAt from './PricedAt';
 import Tip from './Tip';
 import RollRepair from './RollRepair';
+import { AssignmentShare, LimitHint, PostEarningsBadge, useAccountValue } from './TradeSizing';
 
 const SAFETY = {
   safer: { text: '🛡 Passes checks', cls: 'safety-ok' },
@@ -121,7 +122,7 @@ function CandidateStatus({ assessment }) {
   );
 }
 
-function SpreadCard({ i, mode, expiry, assessment }) {
+function SpreadCard({ i, mode, expiry, assessment, account }) {
   const n = assessment.contracts;
   const legs = mode === 'ic'
     ? [['BUY', i.put_long, 'put'], ['SELL', i.put_short, 'put'], ['SELL', i.call_short, 'call'], ['BUY', i.call_long, 'call']]
@@ -151,6 +152,8 @@ function SpreadCard({ i, mode, expiry, assessment }) {
           : <div><span>Breakeven</span><strong>${i.breakeven} <small>(−{i.breakeven_pct}%)</small></strong></div>}
       </div>
       <Checks i={i} />
+      <AssignmentShare amount={i.max_loss * Math.max(n, 1)} account={account} label={n > 1 ? `Max loss on ${n}` : 'Max loss'} />
+      <LimitHint bid={i.natural_credit} ask={2 * i.credit - i.natural_credit} what="credit" />
       <p className="structure-notes">
         Midpoint ${i.credit} net credit (natural ${i.natural_credit} <Tip term="natural_credit" />) · ${i.width} wide · OI {i.open_interest?.toLocaleString() ?? 'Unavailable'} ·{' '}
         <span className={liq.cls}>{liq.text}</span>
@@ -168,6 +171,7 @@ export default function IncomeIdeas({ ticker }) {
   const [shares, setShares] = useState(100);
   const [cash, setCash] = useState('');
   const [risk, setRisk] = useState('');
+  const account = useAccountValue();
 
   useEffect(() => { setExpiry(null); setData(null); }, [ticker]);
 
@@ -243,6 +247,7 @@ export default function IncomeIdeas({ ticker }) {
             {data.expected_move && <> <Tip term="expected_move" /></>}
             <PricedAt asOf={data.as_of} />
           </span>
+          <PostEarningsBadge daysSince={data.days_since_earnings} timing={data.last_earnings_timing} />
         </div>
       )}
       {data && <p className="market-sub income-legend">Labels: 🛡 = every check on the card is ✓. <b>Caution</b> = exactly one ⚠ (often a strike inside the
@@ -285,7 +290,7 @@ export default function IncomeIdeas({ ticker }) {
           {ideas.map(i => {
             const assessment = assessIncomeIdea(i, settings);
             if (spread) {
-              return <SpreadCard key={i.label} i={i} mode={mode} expiry={data.expiry} assessment={assessment} />;
+              return <SpreadCard key={i.label} i={i} mode={mode} expiry={data.expiry} assessment={assessment} account={account} />;
             }
             const contracts = assessment.contracts;
             const liq = LIQ[i.liquidity] || { text: 'Liquidity unavailable', cls: 'rvol-warm' };
@@ -318,6 +323,9 @@ export default function IncomeIdeas({ ticker }) {
                   )}
                 </div>
                 <Checks i={i} />
+                {mode === 'csp' && <AssignmentShare amount={i.capital_required * Math.max(contracts, 1)} account={account}
+                  label={contracts > 1 ? `If all ${contracts} are assigned` : 'If assigned'} />}
+                <LimitHint bid={i.bid} ask={i.ask} />
                 <p className="structure-notes">
                   Midpoint ${i.mid} (bid {i.bid == null ? 'Unavailable' : `$${i.bid}`} / ask {i.ask == null ? 'Unavailable' : `$${i.ask}`}) · OI {i.open_interest?.toLocaleString() ?? 'Unavailable'} ·{' '}
                   <span className={liq.cls}>{liq.text}</span>

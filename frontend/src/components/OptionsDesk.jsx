@@ -5,11 +5,13 @@ import {
   fetchOptionActions, fetchPortfolioEarnings, fetchWheelLedger, fetchOptionsReview, fetchOptionsCoach,
   fetchPremiumIncome, saveIncomeGoal,
 } from '../api/stockApi';
+import { LimitHint } from './TradeSizing';
 
 const usd = v => v == null ? '—' : `${v < 0 ? '-' : ''}$${Math.abs(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 const cls = v => v == null ? '' : v >= 0 ? 'positive' : 'negative';
 const fmtDate = d => new Date(d + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 const ICON = { act: '✅', warn: '⚠️', info: 'ℹ️' };
+const CLOSE_CODES = new Set(['take_profit', 'stop_loss', 'pin_risk']);
 const tip = { contentStyle: { background: 'var(--surface)', border: '1px solid var(--border)', fontSize: '0.8rem' } };
 const axis = { tick: { fontSize: 11, fill: 'var(--text-muted)' } };
 
@@ -36,8 +38,9 @@ export function Today({ version, onRepair, onAssign }) {
     <>
       <p className="structures-intro">
         Review thresholds: {d.rules.take_profit_pct}% of premium captured, short-strike delta above {d.rules.tested_delta},
-        avoid the last {d.rules.gamma_days} days, and watch earnings and ex-dividend dates. Must-act items are also pushed to
-        your notifications each morning.
+        a loss of {d.rules.stop_multiple ?? 2}× the credit, avoid the last {d.rules.gamma_days} days, a short within
+        {' '}{d.rules.pin_pct ?? 1}% of its strike on expiry day, more than {(d.rules.roll_limit ?? 3) - 1} rolls, and earnings and
+        ex-dividend dates. Must-act items are also pushed to your notifications each morning (expiry-day pin risk at 2 PM ET).
       </p>
       {busy.length === 0 && <p className="empty-state">✅ Nothing needs attention today.</p>}
       {busy.map(p => (
@@ -59,6 +62,7 @@ export function Today({ version, onRepair, onAssign }) {
               </li>
             ))}
           </ul>
+          {p.position === 'short' && p.actions.some(a => CLOSE_CODES.has(a.code)) && <LimitHint bid={p.bid} ask={p.ask} side="buy" what="buy-back" />}
         </div>
       ))}
       {d.positions.length > busy.length && (
