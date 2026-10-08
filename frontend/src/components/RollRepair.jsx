@@ -11,6 +11,8 @@ const LIQ = { good: ['Liquid', 'positive'], ok: ['OK liquidity', ''], thin: ['Th
 
 const fmtDate = d => new Date(d + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 const usd = v => `${Math.round(v) < 0 ? '−' : ''}$${Math.abs(Math.round(v)).toLocaleString()}`;
+const net = v => (v == null ? 'unavailable' : `${v < 0 ? 'debit' : 'credit'} ${usd(Math.abs(v))}`);
+const TITLES = { out: 'Roll out', improve: 'Roll out & {away}', in: 'Roll in before earnings', in_improve: 'Roll in & {away} before earnings' };
 
 function RollCard({ r, strat, data }) {
   const s = STRATS[strat];
@@ -21,15 +23,15 @@ function RollCard({ r, strat, data }) {
   return (
     <div className={`roll-card ${r.best ? 'structure-best' : ''}`}>
       <div className="roll-title">
-        {r.type === 'out' ? 'Roll out' : `Roll out & ${s.away}`} → {fmtDate(r.expiry)} <small>(+{r.added_days}d)</small>
+        {(TITLES[r.type] || TITLES.improve).replace('{away}', s.away)} → {fmtDate(r.expiry)} <small>({r.added_days > 0 ? '+' : ''}{r.added_days}d)</small>
         {r.best && <span className="structure-best-badge">Passes roll filters</span>}
       </div>
       <div className="roll-legs">
         {legs}
       </div>
       <div className="roll-stats">
-        <span>Midpoint estimate: {usd(r.net_credit)}</span>
-        <span className={r.net_credit_natural >= 0 ? 'positive' : 'negative'}>Natural after estimated fees: {r.net_credit_natural == null ? 'unavailable' : usd(r.net_credit_natural)}</span>
+        <span>Midpoint estimate: net {net(r.net_credit)}</span>
+        <span className={r.net_credit_natural >= 0 ? 'positive' : 'negative'}>Natural after estimated fees: net {net(r.net_credit_natural)}</span>
         {r.strike_change > 0 && <span>strike {s.away} ${r.strike_change}</span>}
         <span>Δ {r.delta} <Tip term="delta" /></span>
         <span>~{r.prob_otm_pct}% expires OTM</span>
@@ -94,7 +96,8 @@ export default function RollRepair({ ticker, mode, expirations, initial, standal
       {!standalone && <summary>🔧 Position being tested? Roll / repair it</summary>}
       <p className="structures-intro">
         Enter a short option you already hold. We find rolls to a later expiry that pay a <b>net credit</b> — ideally
-        moving the strike away from the stock — plus the alternatives if no good roll exists.
+        moving the strike away from the stock — plus the alternatives if no good roll exists. If earnings fall before your
+        expiry, we also show <b>roll-ins</b> to an earlier expiry that settles before the report, even at a small net debit.
       </p>
       <div className="income-controls">
         <label>Position

@@ -176,6 +176,29 @@ class AccountingTests(unittest.TestCase):
              patch.object(scanner.requests, "get", side_effect=RuntimeError("offline")):
             self.assertEqual(scanner._index_universe("test", "https://example.test", "Ticker", "Company", "test", []), cached)
 
+    def test_short_put_through_earnings_offers_roll_ins_before_the_report(self):
+        import pandas as pd
+        import options_analytics as oa
+        from datetime import datetime, timedelta
+        today = datetime.now(oa._ET).date()
+        day = lambda n: (today + timedelta(days=n)).isoformat()
+        quotes = {day(8): {375: (9.8, 10.2), 370: (7.3, 7.7), 365: (5.3, 5.7), 360: (3.5, 3.9)},
+                  day(15): {375: (14.4, 14.7), 370: (11.6, 11.9)}}
+        chain = lambda ticker, e: (pd.DataFrame(), pd.DataFrame(
+            [{"strike": k, "bid": b, "ask": a, "openInterest": 500, "impliedVolatility": 0.5} for k, (b, a) in quotes[e].items()]))
+        with patch.object(oa, "get_or_fetch", side_effect=lambda key, fetch, ttl=0: fetch()), \
+             patch.object(oa, "_spot", return_value=375.0), patch.object(oa, "_expirations", return_value=list(quotes)), \
+             patch.object(oa, "_chain", side_effect=chain), patch.object(oa, "_earnings_date", return_value=day(13)):
+            result = oa.roll_ideas("TSLA", "csp", day(15), 375, credit=13.65)
+        roll_ins = {r["short_strike"]: r for r in result["rolls"] if r["type"].startswith("in")}
+        self.assertEqual(set(roll_ins), {375, 360})
+        self.assertEqual(roll_ins[375]["type"], "in")
+        self.assertEqual(roll_ins[375]["net_credit"], -455.0)  # $10.00 new - $14.55 to close
+        self.assertEqual(roll_ins[360]["type"], "in_improve")
+        self.assertTrue(all(r["expiry"] == day(8) and not r["spans_earnings"] and not r["best"] for r in roll_ins.values()))
+        self.assertIn("If assigned: buy at $375 − $9.10 total premium", roll_ins[375]["outcome"])
+        self.assertIn("Roll in before earnings", [a["title"] for a in result["alternatives"]])
+
     def test_oversold_reversal_candle_then_reclaim_of_21ema_and_50sma(self):
         import pandas as pd
         import scanner

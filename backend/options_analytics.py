@@ -1174,14 +1174,14 @@ _ROLL_RULES = [
 ]
 
 
-def _roll_candidate(r, wing, K, width, close_mid, credit, kind, e, cur_dte, earnings):
+def _roll_candidate(r, wing, K, width, close_mid, credit, kind, e, cur_dte, earnings, allow_debit=False):
     sign = 1 if kind == "call" else -1
     K2 = r["strike"]
     new_credit = r["mid"] - (wing["mid"] if wing else 0)
     if new_credit <= 0:
         return None
     net = new_credit - close_mid
-    if net < 0:
+    if net < 0 and not allow_debit:
         return None
     oi = min(r["oi"], wing["oi"]) if wing else r["oi"]
     worst = max(_spread_pct(r["bid"], r["ask"]) or 0,
@@ -1286,12 +1286,51 @@ def roll_ideas(ticker: str, strategy: str, expiry: str, short_strike: float,
                     c["type"] = "out" if c["strike_change"] == 0 else "improve"
                     rolls.append(c)
 
+        # Roll in: when the position holds through earnings, an earlier expiry that settles before the report
+        today = datetime.now(_ET).date().isoformat()
+        roll_ins = []
+        if earnings and today <= earnings <= expiry:
+            for e in [e for e in exps if e < earnings and e < expiry and _dte(e) >= 1][-2:]:
+                try:
+                    c2, p2 = _chain(ticker, e)
+                except Exception:
+                    continue
+                df2 = c2 if kind == "call" else p2
+                q2 = _quotes(df2)
+                same = furthest = None
+                for r in _otm_rows(df2, kind, S, _years(e), otm_only=False):
+                    gain = sign * (r["strike"] - K)
+                    if gain < 0 or gain > S * 0.2:
+                        continue
+                    wing = q2.get(r["strike"] - width) if width is not None else None
+                    if width is not None and not wing:
+                        continue
+                    c = _roll_candidate(r, wing, K, width, close_mid, credit, kind, e, cur_dte, earnings, allow_debit=True)
+                    if not c:
+                        continue
+                    # Never pay away more than the premium already collected (or half the close cost if unknown)
+                    floor = -(credit if credit is not None else close_mid / 2) * 100
+                    if c["net_credit"] < floor:
+                        continue
+                    c["net_credit_natural"] = round(c["opening_credit_natural"] - close_nat * 100 - (4 if wing else 2), 2)
+                    if gain == 0:
+                        same = c
+                    if not furthest or c["strike_change"] > furthest["strike_change"]:
+                        furthest = c
+                for c in (same, furthest):
+                    if c and not any(x["expiry"] == c["expiry"] and x["short_strike"] == c["short_strike"] for x in roll_ins):
+                        c["type"] = "in" if c["strike_change"] == 0 else "in_improve"
+                        roll_ins.append(c)
+
         safe = [r for r in rolls if earnings and not r["spans_earnings"] and r["liquidity"] != "thin" and r["added_days"] <= 45 and r["net_credit_natural"] >= 0]
         best = tested and max(safe, key=lambda r: (r["strike_change"], -r["added_days"], r["net_credit_natural"]),
                               default=None)
         for r in rolls:
             r["best"] = r is best
         rolls.sort(key=lambda r: (not r["best"], r["dte"], -r["strike_change"]))
+        for r in roll_ins:
+            r["best"] = False
+        rolls = rolls[:8] + roll_ins
 
         alt = []
         cost = status["close_cost"]
@@ -1320,12 +1359,18 @@ def roll_ideas(ticker: str, strategy: str, expiry: str, short_strike: float,
         verdict = (None if tested else
                    "Not in trouble yet — the short strike still has cushion. No need to roll; consider taking profit "
                    "at ~50% of the credit.")
-        if tested and not rolls:
+        if roll_ins:
+            alt.append({"title": "Roll in before earnings",
+                        "text": f"Earnings ({earnings}) fall before this expiry. Rolling in to an earlier expiry is the same as "
+                                "closing now and selling a new, shorter option: the premium already collected is banked either "
+                                "way, so judge the new option on its own. It usually costs a net debit and still carries "
+                                "assignment risk until it expires."})
+        if tested and not any(r["type"] in ("out", "improve") for r in rolls):
             verdict = "No roll pays a net credit within the next ~2 months. Consider closing or accepting assignment."
         return {
             "ticker": ticker, "spot": round(S, 2), "strategy": strategy, "expiry": expiry,
             "short_strike": K, "long_strike": long_strike, "width": width, "earnings_date": earnings,
-            "status": status, "verdict": verdict, "rolls": rolls[:8], "alternatives": alt, "rules": _ROLL_RULES,
+            "status": status, "verdict": verdict, "rolls": rolls, "alternatives": alt, "rules": _ROLL_RULES,
         }
 
     key = f"roll:{ticker}:{strategy}:{expiry}:{short_strike}:{long_strike}:{credit}"
