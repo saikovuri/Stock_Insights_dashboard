@@ -16,7 +16,7 @@ None of these items are in GitHub. Keep them somewhere safe, such as a password 
 | --- | --- | --- |
 | Every value in `backend/.env` (`JWT_SECRET`, `GROQ_API_KEY`, `GEMINI_API_KEY`, `FINNHUB_API_KEY`, `TWELVEDATA_API_KEY`, `SEC_USER_AGENT`, `CORS_ORIGINS`, ...) | `backend/.env` on this machine | Without these the app has no AI or real-time data. Keep the **same `JWT_SECRET`** if you want old account-transfer files to import. |
 | Your local data | `backend/stockinsights.db` (SQLite). The E*TRADE imports you tested locally live here, **not** in production. | Run `.venv\Scripts\python.exe backend\backup_sqlite.py` and copy the file from `backups\`. Or use **Portfolio → Export to another account** to get a JSON file. |
-| SSH private key for the Oracle VM | Wherever you created it (often `~/.ssh/`) | Needed to log in to the production server. GitHub holds a copy in a secret, but GitHub never shows secrets again. |
+| SSH private key for the Oracle VM | `~/.ssh/stockpilot_deploy` (plus `~/.ssh/stockpilot_known_hosts`) on this machine. Log in with `ssh -i ~/.ssh/stockpilot_deploy -o UserKnownHostsFile=~/.ssh/stockpilot_known_hosts ubuntu@157.151.152.97` | Needed to log in to the production server. Oracle does not keep private keys and GitHub never shows secrets again. If it is lost, see section 6 (Lost SSH key). |
 | The production `backend/.env` on the VM, including `DATABASE_URL` | `~/stock-insights/backend/.env` on the VM | Run `ssh ubuntu@157.151.152.97 "cat ~/stock-insights/backend/.env"` and store the output safely. |
 | `BACKUP_PASSPHRASE` | A GitHub secret, and wherever you first wrote it | Without it the weekly database backups cannot be decrypted. |
 | Logins for GitHub, Vercel, Supabase, Oracle Cloud, Groq, Google AI Studio, Finnhub, Twelve Data, Sentry (if used), ntfy topic | Your accounts | Every service is on a free tier, but you must be able to sign in to each one. |
@@ -288,6 +288,7 @@ The bundled app calls the URL in `VITE_API_URL`, or the fallback in `src/api/con
 | A PostgreSQL query works locally but fails on the server | Use `database.PH` for SQL placeholders (`?` in SQLite, `%s` in PostgreSQL); see `database._run`. |
 | Option quote "unavailable" for a position | The data provider has no quote. The stress test refuses to guess; close or edit the position, or wait for a quote. |
 | Quotes are slow or rate-limited | Finnhub's free tier allows about 60 calls/minute. Lower the number of watchlist and holding tickers, or set `FINNHUB_RATE_PER_MIN`. |
+| Lost SSH key | Oracle cannot re-download it. Create a new pair (`ssh-keygen -t ed25519 -f ~/.ssh/stockpilot_new`), then add the `.pub` line to `~/.ssh/authorized_keys` on the VM. Without any working key: Oracle Cloud console → the instance → **Console connection** (or **Run command**, if the Oracle Cloud Agent plugin is enabled) to append it, or rebuild the VM (section 5.3). Also update the `OCI_SSH_KEY` secret in GitHub (Settings → Secrets → Actions) if you replace the deploy key, so CI deploys keep working. |
 
 ---
 
