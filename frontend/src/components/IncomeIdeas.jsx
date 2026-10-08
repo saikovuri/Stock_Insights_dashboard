@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { fetchIncomeIdeas } from '../api/stockApi';
+import PricedAt from './PricedAt';
 import Tip from './Tip';
 import RollRepair from './RollRepair';
 
@@ -240,6 +241,7 @@ export default function IncomeIdeas({ ticker }) {
             Stock ${data.spot}
             {data.expected_move && ` · expected move ±$${data.expected_move.move} ($${data.expected_move.low}–$${data.expected_move.high})`}
             {data.expected_move && <> <Tip term="expected_move" /></>}
+            <PricedAt asOf={data.as_of} />
           </span>
         </div>
       )}

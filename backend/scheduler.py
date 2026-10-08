@@ -32,7 +32,8 @@ _started = False
 
 
 def _market_open(now: datetime) -> bool:
-    if now.weekday() >= 5:
+    from market_calendar import trading_day
+    if not trading_day(now):
         return False
     minutes = now.hour * 60 + now.minute
     return 9 * 60 + 30 <= minutes <= 16 * 60
@@ -410,6 +411,7 @@ def _ran(job: str) -> None:
 
 
 def _loop() -> None:
+    from market_calendar import trading_day
     last_scan = datetime.min.replace(tzinfo=ET)
     last_briefing_day = None
     last_cleanup_day = None
@@ -438,11 +440,11 @@ def _loop() -> None:
                 _ran("position_checks")
                 _run_rule_checks()
                 _ran("rule_checks")
-            if now.weekday() < 5 and (now.hour, now.minute) >= (16, 45) and last_settle_day != now.date():
+            if trading_day(now) and (now.hour, now.minute) >= (16, 45) and last_settle_day != now.date():
                 last_settle_day = now.date()
                 import track_record
                 track_record.settle()
-            if now.weekday() < 5 and (now.hour, now.minute) >= (16, 30) and last_scan_day != now.date():
+            if trading_day(now) and (now.hour, now.minute) >= (16, 30) and last_scan_day != now.date():
                 last_scan_day = now.date()
                 import scanner
                 scanner.run_scan()

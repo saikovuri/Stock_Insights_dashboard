@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { fetchStructures } from '../api/stockApi';
+import PricedAt from './PricedAt';
 import Tip from './Tip';
 
 const RISKS = {
@@ -137,6 +138,7 @@ export default function Structures({ ticker }) {
           Spot ${data.spot} · {data.timeframe}: expiry {fmtDate(data.expiry)}{data.monthly ? ' (monthly)' : ''} ({data.dte === 0 ? '0DTE — today' : `${data.dte}d`})
           {em && <> · expected move ±{em.pct}% (${em.low}–${em.high}) <Tip term="expected_move" /></>}
           {data.iv_level && <> · options {data.iv_level === 'high' ? 'expensive' : data.iv_level === 'low' ? 'cheap' : 'fairly priced'}</>}
+          <PricedAt asOf={data.as_of} />
           {data.expiry_note && <div className="structure-why">✓ {data.expiry_note}</div>}
           {!data.earnings_date && data.no_earnings_expected && <div className="structure-why">✓ ETF / fund: no company earnings. Macro events can still move it.</div>}
         </div>

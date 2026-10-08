@@ -361,5 +361,8 @@ Ordered by value for effort. Each item names where to start.
 10. **Monitoring:**
     - create free Sentry projects and set `SENTRY_DSN` (VM `.env`) and `VITE_SENTRY_DSN` (Vercel) so production errors reach you by email;
     - set up an ntfy topic in the app for phone alerts.
+11. **Every December: extend the market holiday list.** `backend/market_calendar.py` lists NYSE full-day closures for 2026–2027 only. Add the next year from nyse.com; otherwise scans and alerts run on holidays with frozen quotes.
+12. **Live option quotes (optional).** Option data comes from Yahoo and can lag. For your own positions, the free E*TRADE API gives real-time quotes (needs a daily OAuth approval; data is for your use only, not for other users). Start in `options_analytics._chain` / `_spot`. Shared scans (Wheel, Setups) would need a paid feed that allows redistribution.
+13. **Show a price time on Portfolio holdings and Options desk.** They use quotes cached up to 5 minutes without a visible time. Add an `as_of` to `/api/portfolio/summary` and the options summary, as done for income ideas (`PricedAt.jsx`).
 
 Before each production release, follow [deploy/RELEASE_CHECKLIST.md](deploy/RELEASE_CHECKLIST.md).

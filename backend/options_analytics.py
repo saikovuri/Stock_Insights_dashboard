@@ -5,7 +5,7 @@ market hours."""
 
 import logging
 import math
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -327,9 +327,14 @@ def _spot(ticker: str) -> float:
     return float(q["price"])
 
 
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
 def _market_open() -> bool:
+    from market_calendar import trading_day
     now = datetime.now(ZoneInfo("America/New_York"))
-    return now.weekday() < 5 and (9, 45) <= (now.hour, now.minute) <= (16, 0)
+    return trading_day(now) and (9, 45) <= (now.hour, now.minute) <= (16, 0)
 
 
 # ── Volatility overview ──────────────────────────────────────────────────
@@ -550,6 +555,7 @@ def income_ideas(ticker: str, expiry: str | None = None) -> dict:
                                                   "high": round(em_range[1], 2)},
             **ideas,
             "tips": tips,
+            "as_of": _now_iso(),
         }
         track_record.record_income(result)
         return result
@@ -1061,6 +1067,7 @@ def directional_ideas(ticker: str, direction: str, budget: float, risk: str) -> 
             **_earnings_extra(ticker),
             "ideas": ordered, "best_why": why, "no_trade_reason": no_trade_reason,
             "min_budget_needed": round(min(needed), 2) if not ordered and needed else None,
+            "as_of": _now_iso(),
         }
         if ordered:
             track_record.record_directional(result)
@@ -1151,6 +1158,7 @@ def assigned_calls(ticker: str, cost_basis: float, shares: int = 100, cadence: s
             "expirations": dates, "checked_expirations": len(checked),
             "skipped_expirations": sum(not result.get("ideas") and not result.get("unavailable") for result in checked),
             "unavailable_expirations": [result["date"] for result in checked if result.get("unavailable")],
+            "as_of": _now_iso(),
         }
 
     return get_or_fetch(f"assigned-cc-v4:{ticker}:{cost_basis:.2f}:{shares}:{cadence}", _fetch, ttl=180)

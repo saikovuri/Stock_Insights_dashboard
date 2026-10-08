@@ -993,6 +993,27 @@ class WheelExpiryTests(unittest.TestCase):
         self.assertFalse(wheel.refresh_due(friday_close, datetime(2026, 10, 11, 10, 0, tzinfo=et)))
         self.assertFalse(wheel.refresh_due(friday_close, datetime(2026, 10, 12, 8, 0, tzinfo=et)))
 
+    def test_holidays_close_the_market_and_planning_follows_sessions(self):
+        import scheduler
+        import wheel
+        from datetime import datetime
+        from market_calendar import trading_day
+        from zoneinfo import ZoneInfo
+        et = ZoneInfo("America/New_York")
+        thanksgiving_noon = datetime(2026, 11, 26, 12, 0, tzinfo=et)
+        self.assertFalse(trading_day(thanksgiving_noon))
+        self.assertFalse(scheduler._market_open(thanksgiving_noon))
+        self.assertTrue(scheduler._market_open(datetime(2026, 11, 25, 12, 0, tzinfo=et)))
+        wednesday_close = datetime(2026, 11, 25, 15, 55, tzinfo=et).isoformat()
+        self.assertFalse(wheel.refresh_due(wednesday_close, thanksgiving_noon))
+        # Weekend planning accepts Friday's closing scan; in session it needs one from the last 3 hours
+        friday_close = datetime(2026, 10, 9, 15, 55, tzinfo=et).isoformat()
+        self.assertFalse(wheel.plan_stale(friday_close, datetime(2026, 10, 11, 10, 0, tzinfo=et)))
+        self.assertTrue(wheel.plan_stale(friday_close, datetime(2026, 10, 12, 11, 0, tzinfo=et)))
+        self.assertFalse(wheel.plan_stale(datetime(2026, 10, 12, 10, 0, tzinfo=et).isoformat(),
+                                          datetime(2026, 10, 12, 12, 0, tzinfo=et)))
+        self.assertTrue(wheel.plan_stale(None))
+
 
 class EvaluationTests(unittest.TestCase):
     def test_holdout_is_chronological_and_cost_sensitive(self):

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { fetchAssignedCalls } from '../api/stockApi';
 import RollRepair from './RollRepair';
+import PricedAt from './PricedAt';
 import Tip from './Tip';
 
 const LIQ = { good: ['Liquid', 'positive'], ok: ['OK liquidity', ''], thin: ['Thin', 'negative'] };
@@ -76,6 +77,7 @@ function CoveredCalls({ preset }) {
               {data.ticker} ${data.spot} vs your cost ${data.cost_basis} ({data.unrealized_pct > 0 ? '+' : ''}{data.unrealized_pct}%)
               · {data.contracts} contract{data.contracts === 1 ? '' : 's'}
               {expiry && <> · expiry {fmtDate(expiry)}{(selected?.monthly ?? data.monthly) ? ' (monthly)' : ''} ({days}d)</>}
+              <PricedAt asOf={data.as_of} />
             </strong>
             <div>{data.note}</div>
             {earningsOverlap && <div>⚠️ Earnings {fmtDate(data.earnings_date)} before expiry — a gap up can call the shares away.</div>}

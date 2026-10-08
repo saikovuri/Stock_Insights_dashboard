@@ -228,7 +228,7 @@ The planner is stricter than the discovery scan. It requires sign-in and uses re
 2. Calculate the allocation base as entered cash plus recorded stock purchase cost. This is not live net liquidation value or broker buying power.
 3. Include recorded stock cost and option collateral in existing ticker and sector exposure.
 4. Default to a 25% per-name cap and two names per sector, with user controls. Apply a fixed 40% sector exposure cap.
-5. Reject a candidate snapshot older than three hours. Block new allocations if existing calls are uncovered or an existing position's sector is unknown.
+5. Reject a stale candidate snapshot: during the session, one older than three hours; outside it, one that did not see the last close (so weekend and pre-market planning can use the previous session's closing scan; contracts are re-quoted before any pick). Block new allocations if existing calls are uncovered or an existing position's sector is unknown.
 6. Require a known earnings date and no earnings on or before expiry. Recheck current earnings data; the display checkbox cannot relax this requirement.
 7. Refresh the stock price and exact put quote. Require a usable quote, absolute delta at most 0.22, and bid/ask spread divided by midpoint at most 25%.
 8. Compare candidate daily returns against other exposed tickers over six months. Require at least 40 overlapping observations; reject missing/non-finite correlations or correlation at least 0.8. Accepted new picks join the exposure set for subsequent comparisons.
@@ -238,7 +238,7 @@ The planner is stricter than the discovery scan. It requires sign-in and uses re
 
 The result can legitimately be an empty plan. It does not buy stocks, sell puts, submit broker orders, or validate actual broker margin. Its monthly and annualized income values are simple projections, not forecasts. Recorded positions must be complete for the reserve and concentration checks to be meaningful.
 
-While the market is open, Wheel scans older than 15 minutes trigger a background refresh when requested, and an open Wheel tab re-checks every five minutes. After the close, a refresh runs only if no scan has seen that session's closing premiums. The header shows the snapshot time, its age, and whether it is refreshing, on the in-session cadence, or showing last-session premiums. Cached results stay visible during rebuilding. Option quotes come from Yahoo Finance and can themselves be delayed, so they are not real-time. Discovery freshness and planner eligibility (the three-hour limit above) are separate checks.
+While the market is open, Wheel scans older than 15 minutes trigger a background refresh when requested, and an open Wheel tab re-checks every five minutes. After the close, a refresh runs only if no scan has seen that session's closing premiums. The header shows the snapshot time, its age, and whether it is refreshing, on the in-session cadence, or showing last-session premiums. Cached results stay visible during rebuilding. Option quotes come from Yahoo Finance and can themselves be delayed, so they are not real-time. Discovery freshness and planner eligibility (rule 5 above) are separate checks. Income ideas, trade structures, and covered-call suggestions show a "priced" time: when the ideas were computed from option chains cached for up to five minutes.
 
 ### Fits My Portfolio
 
@@ -1161,7 +1161,7 @@ The bell displays saved notifications/unread state, polls approximately every tw
 
 ### Background Schedule
 
-Defaults are server-side and require a running scheduler process:
+Defaults are server-side and require a running scheduler process. "Market window" means a NYSE trading day (weekends and the full-day holidays listed in `backend/market_calendar.py`, currently 2026–2027, are excluded; 1 p.m. early closes are not modeled):
 
 | Work | Current schedule |
 | --- | --- |

@@ -170,11 +170,12 @@ def _safe_run(short_dated: bool = False):
 
 
 def _last_close(now: datetime) -> datetime:
-    """Most recent weekday 4 PM ET at or before now (exchange holidays are not modeled)."""
+    """Most recent trading-day 4 PM ET at or before now."""
+    from market_calendar import trading_day
     close = now.replace(hour=16, minute=0, second=0, microsecond=0)
     if close > now:
         close -= timedelta(days=1)
-    while close.weekday() >= 5:
+    while not trading_day(close):
         close -= timedelta(days=1)
     return close
 
@@ -189,6 +190,17 @@ def refresh_due(updated_at: str | None, now: datetime | None = None) -> bool:
     if _market_open(now):
         return (now - updated).total_seconds() > REFRESH_SECONDS
     return updated < _last_close(now) - timedelta(minutes=15)
+
+
+def plan_stale(updated_at: str | None, now: datetime | None = None) -> bool:
+    """Planning needs a scan from this session (within 3 hours) or, outside it, one that saw the last close."""
+    from scheduler import ET, _market_open
+    now = (now or datetime.now(timezone.utc)).astimezone(ET)
+    if not updated_at:
+        return True
+    if _market_open(now):
+        return (now - _parse_ts(updated_at)).total_seconds() > STALE_SECONDS
+    return refresh_due(updated_at, now)
 
 
 def get_wheel(start_if_stale: bool = True, short_dated: bool = False) -> dict:
@@ -234,7 +246,7 @@ def plan(capital: float, max_pct: float = 25, max_per_sector: int = 2, user_id: 
     left, picks, skipped = max(capital - reserved, 0), [], []
     rows = snapshot.get("rows", [])
     updated = snapshot.get("updated_at")
-    if not updated or (datetime.now(timezone.utc) - _parse_ts(updated)).total_seconds() > STALE_SECONDS:
+    if plan_stale(updated):
         rows = []
         blocked.append("Candidate data is stale. Refresh the wheel scan before planning.")
     if requirements["uncovered_calls"]:
