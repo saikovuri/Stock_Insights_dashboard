@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { fetchRelativeStrength } from '../api/stockApi';
 
-const SHORT = { breakout: 'Breakout', pullback: 'Pullback', squeeze: 'Squeeze', oversold: 'Oversold', golden_cross: 'Golden cross' };
+const SHORT = { breakout: 'Breakout', pullback: 'Pullback', squeeze: 'Squeeze', oversold: 'Oversold', golden_cross: 'Golden cross',
+  reversal: 'Reversal candle', reclaim: 'Reclaim 21/50' };
 
 export default function RelativeStrength({ ticker }) {
   const [data, setData] = useState(null);

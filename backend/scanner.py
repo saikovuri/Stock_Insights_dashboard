@@ -30,6 +30,8 @@ SETUPS = {
     "squeeze": "Volatility squeeze (tightest Bollinger Bands in 6 months)",
     "oversold": "Oversold (RSI < 35) while above the 200-day",
     "golden_cross": "Fresh golden cross (50-day over 200-day)",
+    "reversal": "Bullish reversal candle (hammer or engulfing) after RSI < 35",
+    "reclaim": "Oversold reversal now closing above the 21-day EMA and 50-day SMA",
 }
 
 _FALLBACK = [("AAPL", "Apple", "Information Technology"), ("MSFT", "Microsoft", "Information Technology"),
@@ -95,6 +97,16 @@ def _ret(close: pd.Series, bars: int) -> float | None:
     return float(close.iloc[-1] / close.iloc[-bars - 1] - 1) if len(close) > bars else None
 
 
+def _reversal_candles(df: pd.DataFrame) -> pd.Series:
+    """Hammer (long lower wick, close near the high) or bullish engulfing of a red prior bar."""
+    o, h, low, c = df["Open"], df["High"], df["Low"], df["Close"]
+    body, rng = (c - o).abs(), (h - low).replace(0, np.nan)
+    lower, upper = np.minimum(o, c) - low, h - np.maximum(o, c)
+    hammer = (lower >= 2 * body) & (upper <= np.maximum(body, 0.1 * rng)) & ((c - low) / rng >= 0.6)
+    engulfing = (c > o) & (c.shift(1) < o.shift(1)) & (o <= c.shift(1)) & (c >= o.shift(1))
+    return (hammer | engulfing).fillna(False)
+
+
 def _signals(df: pd.DataFrame) -> pd.DataFrame:
     """Boolean column per setup for every bar (df must already have indicators)."""
     close, high = df["Close"], df["High"]
@@ -105,12 +117,19 @@ def _signals(df: pd.DataFrame) -> pd.DataFrame:
     width = (df["bb_upper"] - df["bb_lower"]) / df["bb_mid"]
     above = df["sma_50"] > df["sma_200"]
     cross = above & (df["sma_50"].shift(1) <= df["sma_200"].shift(1))
+    recent_max = lambda s, n: s.astype(int).rolling(n, min_periods=1).max().astype(bool)
+    reversal = _reversal_candles(df) & recent_max(df["rsi"] < 35, 5)
+    over_mas = (close > df["ema_21"]) & (close > df["sma_50"])
+    # Entry: within 15 bars of an oversold reversal, a close back above both averages (fresh in the last 3 bars)
+    reclaim = over_mas & recent_max(reversal, 15) & recent_max(~over_mas.shift(1, fill_value=True), 3)
     return pd.DataFrame({
         "breakout": (close >= prior_high * 0.995) & (rvol >= 1.5) & (close > close.shift(1)),
         "pullback": uptrend & ext.between(-0.02, 0.015) & df["rsi"].between(40, 60),
         "squeeze": (width <= width.rolling(126, min_periods=100).quantile(0.1)) & (close > df["sma_50"]),
         "oversold": (df["rsi"] < 35) & (close > df["sma_200"]),
         "golden_cross": cross.astype(int).rolling(10, min_periods=1).max().astype(bool),
+        "reversal": reversal,
+        "reclaim": reclaim,
     }, index=df.index).fillna(False)
 
 

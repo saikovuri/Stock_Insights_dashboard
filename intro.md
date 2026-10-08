@@ -137,6 +137,8 @@ Setups are an end-of-day scan of completed daily candles. They refresh after eac
 | Squeeze | Bollinger width at or below its rolling 126-bar tenth percentile (at least 100 observations), with close above the 50-day SMA. The label's "tightest" language represents a lower-decile test, not literally a single absolute minimum. |
 | Oversold | RSI below 35 while close is above the 200-day SMA. This is different from the usual RSI-30 warning elsewhere. |
 | Golden cross | The 50-day SMA crosses from at/below to above the 200-day SMA; the flag remains active if this occurred in the last ten bars. |
+| Reversal candle | A bullish reversal candle on a bar where RSI was below 35 on that bar or any of the previous four, in any trend. Hammer: lower wick at least twice the body, upper wick no larger than the body (or 10% of the range), close in the top 40% of the range. Bullish engulfing: a green bar whose body covers the prior red bar's body. A watch signal, not an entry. |
+| Reclaim 21/50 | Close above both the 21-day EMA and the 50-day SMA, within 15 bars of a Reversal candle signal, where at least one of the previous three closes was not above both. It stays listed for up to three bars after the reclaim. Below the 200-day SMA this is a counter-trend bounce; check the Trend column. |
 
 ### Setup Historical Outcomes
 

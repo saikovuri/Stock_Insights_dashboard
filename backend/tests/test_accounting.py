@@ -176,6 +176,24 @@ class AccountingTests(unittest.TestCase):
              patch.object(scanner.requests, "get", side_effect=RuntimeError("offline")):
             self.assertEqual(scanner._index_universe("test", "https://example.test", "Ticker", "Company", "test", []), cached)
 
+    def test_oversold_reversal_candle_then_reclaim_of_21ema_and_50sma(self):
+        import pandas as pd
+        import scanner
+        n = 30
+        df = pd.DataFrame({"Open": [91.0] * n, "High": [91.5] * n, "Low": [89.5] * n, "Close": [90.0] * n,
+                           "Volume": [1e6] * n, "rsi": [50.0] * n, "ema_21": [95.0] * n, "sma_50": [96.0] * n,
+                           "sma_200": [100.0] * n, "bb_upper": [100.0] * n, "bb_lower": [80.0] * n, "bb_mid": [90.0] * n})
+        df.loc[18:19, "rsi"] = 30.0
+        df.loc[20, ["Open", "High", "Low", "Close", "rsi"]] = [90.0, 90.5, 85.0, 90.2, 33.0]  # hammer
+        df.loc[24, ["Open", "High", "Close"]] = [91.0, 97.5, 97.0]  # first close above both averages
+        df.loc[25:, ["Open", "High", "Close"]] = [96.5, 98.0, 97.5]
+        signals = scanner._signals(df)
+        self.assertEqual(list(signals.index[signals["reversal"]]), [20])
+        self.assertEqual(list(signals.index[signals["reclaim"]]), [24, 25, 26])  # stays listed for 3 days
+        self.assertFalse(signals["oversold"].any())  # below the 200-day, so the existing setup stays quiet
+        engulf = pd.DataFrame({"Open": [10.0, 9.0], "High": [10.2, 10.6], "Low": [8.8, 8.9], "Close": [9.2, 10.4]})
+        self.assertEqual(list(scanner._reversal_candles(engulf)), [False, True])
+
     def test_accounting_queries_use_database_placeholders(self):
         import accounting
         for placeholder in ("?", "%s"):

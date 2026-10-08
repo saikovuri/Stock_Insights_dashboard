@@ -5,8 +5,10 @@ import { usePortfolioFit, FitBadge } from './PortfolioFit';
 
 const FIT_ROWS = 25;
 
-const TAG_CLS = { breakout: 'signal-bullish', pullback: 'signal-bullish', golden_cross: 'signal-bullish', squeeze: '', oversold: 'signal-bearish' };
-const SHORT = { breakout: 'Breakout', pullback: 'Pullback', squeeze: 'Squeeze', oversold: 'Oversold', golden_cross: 'Golden X' };
+const TAG_CLS = { breakout: 'signal-bullish', pullback: 'signal-bullish', golden_cross: 'signal-bullish', squeeze: '', oversold: 'signal-bearish',
+  reversal: '', reclaim: 'signal-bullish' };
+const SHORT = { breakout: 'Breakout', pullback: 'Pullback', squeeze: 'Squeeze', oversold: 'Oversold', golden_cross: 'Golden X',
+  reversal: 'Reversal candle', reclaim: 'Reclaim 21/50' };
 
 const EXPLAIN = {
   breakout: {
@@ -33,6 +35,16 @@ const EXPLAIN = {
     what: 'The 50-day average crossed above the 200-day in the last 10 days.',
     why: 'Marks the medium-term trend turning up. Slow and widely watched.',
     how: 'Use it as a trend filter for longer holds rather than a precise entry — price has often already moved.',
+  },
+  reversal: {
+    what: 'A hammer (long lower wick, close near the high) or a bullish engulfing candle formed within 5 days of RSI dropping below 35. Any trend.',
+    why: 'Shows buyers stepping in after heavy selling. It is a "watch" signal: many reversal candles fail and the slide resumes.',
+    how: 'Add it to your watchlist and wait for confirmation (see Reclaim 21/50). A stop just below the candle\'s low defines the risk if you act early.',
+  },
+  reclaim: {
+    what: 'Within 15 days of an oversold reversal candle, price closed back above both the 21-day EMA and the 50-day SMA (in the last 3 days).',
+    why: 'Waiting for price to clear both averages confirms the bounce has follow-through, at the cost of a later, higher entry.',
+    how: 'Enter near the reclaim close; a stop below the 21-day EMA or the reversal low. Check the trend column: below the 200-day it is a counter-trend bounce.',
   },
 };
 
