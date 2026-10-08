@@ -351,6 +351,10 @@ Spread wing width starts with the largest value among $0.50, $1, $2.50, $5, $10,
 
 Backend checks cover non-thin liquidity, strikes outside the expected move when available, spread credit at least 10% of width, earnings overlap, and expiry within six days. Zero failed checks produces `safer`, one `caution`, and two or more `risky`. Missing expected-move data means that check is not performed; a label is not comprehensive clearance.
 
+The expected move (\u00b1 price \u00d7 at-the-money IV \u00d7 \u221a(time to expiry), roughly a one-standard-deviation range) is shown for every mode, so you can see why a strike is "inside the expected move". High-volatility stocks have wide ranges, so Balanced and Aggressive strikes often sit inside them and show Caution even when nothing else is wrong. A one-line legend explains the labels, and hovering a badge lists the failed checks.
+
+The frontend can only lower a label to Caution for problems with the trade itself: execution warnings (wide spread, low or unknown open interest, thin liquidity), an invalid quote, or unknown or overlapping earnings. Cash, shares or risk budget that hasn't been entered or is too small blocks sizing, but does not change the label.
+
 The frontend now keeps returned ideas visible even when they cannot be sized:
 
 - Wide single-leg spreads above 20%, OI below 100, unknown OI, and thin/unknown liquidity produce execution cautions rather than hiding the idea.

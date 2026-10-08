@@ -1073,6 +1073,21 @@ test('income low open interest warning does not falsely claim a wide spread', as
   expect(screen.queryByText(/Passes checks/)).toBeNull();
 });
 
+test('income safety badge ignores cash not yet entered and explains a caution', async () => {
+  const safe = { ...pyplPut, bid: .35, ask: .37, liquidity: 'good', checks: [{ ok: true, text: 'Liquid (OI 6,708)' }] };
+  const tested = { ...safe, label: 'Balanced', strike: 52, safety: 'caution',
+    checks: [{ ok: true, text: 'Liquid' }, { ok: false, text: 'Inside the expected move — a normal move can test it' }] };
+  vi.spyOn(stockApi, 'fetchIncomeIdeas').mockResolvedValue({ spot: 52.8, expiry: '2026-10-16', dte: 12, earnings_date: '2026-10-27',
+    expected_move: { move: 3.1, low: 49.7, high: 55.9 }, expirations: [{ date: '2026-10-16', dte: 12 }], cash_secured_puts: [safe, tested] });
+  render(<IncomeIdeas ticker="PYPL" />);
+  await screen.findByText(/Stock \$52.8/);
+  fireEvent.click(screen.getByRole('button', { name: 'Cash-Secured Puts' }));
+  expect(screen.getByText(/expected move ±\$3.1/)).toBeTruthy();
+  expect(screen.getByText(/Passes checks/)).toBeTruthy();
+  expect(screen.getAllByText(/Cash needed: \$5,000 per contract/).length).toBe(2);
+  expect(screen.getByText('Caution', { selector: '.safety-badge' }).getAttribute('title')).toBe('Failed: Inside the expected move — a normal move can test it');
+});
+
 test.each([
   ['insufficient cash', { cash: '4500' }, /Cash needed: \$5,000/],
   ['missing bid', { bid: null }, /Valid two-sided quote unavailable/],

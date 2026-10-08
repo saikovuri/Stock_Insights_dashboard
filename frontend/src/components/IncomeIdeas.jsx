@@ -20,7 +20,8 @@ function Checks({ i }) {
 
 function SafetyBadge({ i }) {
   const s = SAFETY[i.safety];
-  return s ? <span className={`safety-badge ${s.cls}`}>{s.text}</span> : null;
+  const failed = (i.checks || []).filter(c => !c.ok).map(c => c.text);
+  return s ? <span className={`safety-badge ${s.cls}`} title={failed.length ? `Failed: ${failed.join('; ')}` : 'All checks pass'}>{s.text}</span> : null;
 }
 
 const LIQ = {
@@ -71,9 +72,11 @@ function assessIncomeIdea(idea, { mode, cash, risk, shares, earnings, expiry, no
     : Number.isFinite(idea.bid) && Number.isFinite(idea.ask) && idea.bid > 0 && idea.ask >= idea.bid;
   const blocked = [];
   const warnings = [];
+  let riskBlocks = 0;
   if (!quoteValid) blocked.push('Valid two-sided quote unavailable; sizing disabled.');
   if (!earnings && !noEarnings) blocked.push('Earnings date unavailable; sizing disabled.');
   else if (earnings && (!expiry || earnings <= expiry)) blocked.push('Earnings occur on or before expiry; sizing disabled.');
+  riskBlocks = blocked.length;
 
   const available = Number(mode === 'cc' ? shares : mode === 'csp' ? cash : risk);
   const required = mode === 'cc' ? 100 : mode === 'csp' ? idea.capital_required : idea.max_loss;
@@ -97,7 +100,8 @@ function assessIncomeIdea(idea, { mode, cash, risk, shares, earnings, expiry, no
     blocked, warnings, quoteValid,
     contracts: blocked.length ? 0 : Math.floor(available / required),
     budgetMessage: affordable ? `${resource} sufficient${warnings.length ? '; execution caution' : ''}.` : null,
-    safety: idea.safety === 'risky' ? 'risky' : blocked.length || warnings.length ? 'caution' : idea.safety,
+    // Not having entered enough cash/shares/budget limits sizing, but says nothing about the trade's risk.
+    safety: idea.safety === 'risky' ? 'risky' : riskBlocks || warnings.length ? 'caution' : idea.safety,
   };
 }
 
@@ -234,11 +238,14 @@ export default function IncomeIdeas({ ticker }) {
           )}
           <span className="structures-meta">
             Stock ${data.spot}
-            {spread && data.expected_move && ` · expected move ±$${data.expected_move.move} ($${data.expected_move.low}–$${data.expected_move.high})`}
-            {spread && data.expected_move && <> <Tip term="expected_move" /></>}
+            {data.expected_move && ` · expected move ±$${data.expected_move.move} ($${data.expected_move.low}–$${data.expected_move.high})`}
+            {data.expected_move && <> <Tip term="expected_move" /></>}
           </span>
         </div>
       )}
+      {data && <p className="market-sub income-legend">Labels: 🛡 = every check on the card is ✓. <b>Caution</b> = exactly one ⚠ (often a strike inside the
+        expected move, where an ordinary move for this stock could reach it). <b>Risky</b> = two or more. Thin quotes, low open interest or a missing
+        earnings date also show Caution. Hover a badge to see what failed.</p>}
 
       {data && data.dte <= 6 && (
         <div className="income-warning">
