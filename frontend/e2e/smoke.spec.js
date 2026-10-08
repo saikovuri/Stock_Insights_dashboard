@@ -713,6 +713,29 @@ test('watchlist list tabs, list picker and new-list form fit the viewport', asyn
   await page.locator('.watchlist-tabs-bar').screenshot({ path: testInfo.outputPath('watchlist-tabs.png') });
 });
 
+test('header controls and main tabs fit the viewport with a consistent layout', async ({ page }, testInfo) => {
+  await page.goto('/#ideas');
+  const signOut = page.getByRole('button', { name: 'Sign Out' });
+  await expect(signOut).toBeInViewport({ ratio: 1 });
+  await expect(page.getByRole('combobox', { name: 'Trading style' })).toBeInViewport({ ratio: 1 });
+  await expect(page.getByRole('button', { name: 'Jump to (Ctrl+K)' })).toBeInViewport({ ratio: 1 });
+  const tabs = page.locator('.main-tab');
+  await expect(tabs).toHaveCount(5);
+  const boxes = await tabs.evaluateAll(elements => elements.map(element => {
+    const label = element.querySelector('.main-tab-label');
+    return { right: element.getBoundingClientRect().right, height: element.offsetHeight,
+      clipped: label.scrollWidth > label.clientWidth + 1 };
+  }));
+  const width = page.viewportSize().width;
+  expect(boxes.every(box => box.right <= width + 1 && !box.clipped)).toBe(true);
+  expect(new Set(boxes.map(box => box.height)).size).toBe(1);
+  const cells = await page.getByRole('navigation', { name: 'Ideas views' }).getByRole('button')
+    .evaluateAll(elements => elements.map(element => element.getBoundingClientRect().right));
+  expect(Math.max(...cells)).toBeLessThanOrEqual(width + 1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+  await page.locator('.app-header').screenshot({ path: testInfo.outputPath('header.png') });
+});
+
 test('sub-tab strips hide the scrollbar and reveal overflowing tabs', async ({ page }, testInfo) => {
   const mobile = testInfo.project.name === 'mobile';
   if (!mobile) await page.setViewportSize({ width: 1024, height: 800 });

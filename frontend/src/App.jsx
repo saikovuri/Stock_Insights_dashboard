@@ -202,11 +202,11 @@ function AppShell() {
   };
 
   const tabs = [
-    { id: 'dashboard', label: '📊 Dashboard' },
-    { id: 'ideas', label: '💡 Ideas' },
-    { id: 'watchlist', label: '👀 Watchlist' },
-    { id: 'portfolio', label: '💼 Portfolio' },
-    { id: 'journal', label: '📓 Journal' },
+    { id: 'dashboard', icon: '📊', label: 'Dashboard' },
+    { id: 'ideas', icon: '💡', label: 'Ideas' },
+    { id: 'watchlist', icon: '👀', label: 'Watchlist' },
+    { id: 'portfolio', icon: '💼', label: 'Portfolio' },
+    { id: 'journal', icon: '📓', label: 'Journal' },
   ];
 
   // Cards hidden for the selected trading style (revealed with "show all")
@@ -223,11 +223,16 @@ function AppShell() {
         <div className="header-top">
           <h1 onClick={() => { setActiveTab('dashboard'); window.location.hash = 'dashboard'; }} style={{ cursor: 'pointer' }}><span className="header-emoji">📈</span><span className="header-title-text">StockPilot</span></h1>
           <div className="user-menu">
-            <select className="candle-select profile-select" value={profile} onChange={e => changeProfile(e.target.value)}
-              title="Your trading style tailors charts, layout and AI analysis">
-              {Object.entries(PROFILES).map(([k, p]) => <option key={k} value={k}>{p.icon} {p.label}</option>)}
-            </select>
-            <button className="btn-theme" onClick={() => setPaletteOpen(true)} title="Jump to a ticker, tab or tool (Ctrl+K)" aria-label="Jump to (Ctrl+K)">⌘K</button>
+            <span className="profile-picker">
+              <span className="profile-picker-icon" aria-hidden="true">{PROFILES[profile]?.icon}</span>
+              <select className="candle-select profile-select" value={profile} onChange={e => changeProfile(e.target.value)}
+                title="Your trading style tailors charts, layout and AI analysis" aria-label="Trading style">
+                {Object.entries(PROFILES).map(([k, p]) => <option key={k} value={k}>{p.icon} {p.label}</option>)}
+              </select>
+            </span>
+            <button className="btn-theme btn-palette" onClick={() => setPaletteOpen(true)} title="Jump to a ticker, tab or tool (Ctrl+K)" aria-label="Jump to (Ctrl+K)">
+              <span className="palette-key">⌘K</span><span className="palette-icon" aria-hidden="true">🔍</span>
+            </button>
             <button className="btn-theme" onClick={toggleTheme} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>
               {theme === 'dark' ? '☀️' : '🌙'}
             </button>
@@ -250,7 +255,8 @@ function AppShell() {
               className={`main-tab ${activeTab === tab.id ? 'active' : ''}`}
               onClick={() => handleTabClick(tab.id)}
             >
-              {tab.label}
+              <span className="main-tab-icon" aria-hidden="true">{tab.icon}</span>
+              <span className="main-tab-label">{tab.label}</span>
             </button>
           ))}
         </nav>

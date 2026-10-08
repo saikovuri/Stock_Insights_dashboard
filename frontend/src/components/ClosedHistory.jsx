@@ -1,4 +1,4 @@
-const usd = (value) => `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const usd = (value) => `${value < 0 ? '-' : ''}$${Math.abs(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 function DeleteCell({ type, id, confirmDelete, setConfirmDelete, onDelete }) {
   return (
@@ -67,7 +67,7 @@ export function ClosedOptions({ data, confirmDelete, setConfirmDelete, onDelete 
     <>
       <RealizedMetrics count={data.trades.length} total={data.total_realized_pnl} label="Gross Realized P/L">
         <div className="metric"><span className="metric-label">Recorded Fees</span><span className="metric-value">{data.total_fees == null ? 'Unavailable' : `$${data.total_fees.toFixed(2)}`}</span></div>
-        <div className="metric"><span className="metric-label">Net Realized P/L</span><span className="metric-value">{data.total_net_pnl == null ? 'Unavailable' : `$${data.total_net_pnl.toFixed(2)}`}</span></div>
+        <div className="metric"><span className="metric-label">Net Realized P/L</span><span className="metric-value">{data.total_net_pnl == null ? 'Unavailable' : usd(data.total_net_pnl)}</span></div>
       </RealizedMetrics>
       <div className="table-scroll"><table className="portfolio-table">
         <thead>
@@ -89,7 +89,7 @@ export function ClosedOptions({ data, confirmDelete, setConfirmDelete, onDelete 
               <td>${t.close_premium.toFixed(2)}</td>
               <td className={t.pnl >= 0 ? 'positive' : 'negative'}>${t.pnl.toFixed(2)}</td>
               <td>{t.fees == null ? 'Unavailable' : `$${t.fees.toFixed(2)}`}</td>
-              <td>{t.net_pnl == null ? 'Unavailable' : `$${t.net_pnl.toFixed(2)}`}</td>
+              <td>{t.net_pnl == null ? 'Unavailable' : usd(t.net_pnl)}</td>
               <td className={t.pnl_pct >= 0 ? 'positive' : 'negative'}>{t.pnl_pct.toFixed(2)}%</td>
               <td>{String(t.closed_at).slice(0, 10)}</td>
               <DeleteCell type="closed-option" id={t.id} {...remove} />

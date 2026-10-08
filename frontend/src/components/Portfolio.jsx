@@ -539,7 +539,7 @@ export default function Portfolio() {
                   <div className={`metric ${portfolio.total_pnl == null ? '' : portfolio.total_pnl >= 0 ? 'metric-positive' : 'metric-negative'}`}>
                     <span className="metric-label">Total P/L</span>
                     <span className={`metric-value ${portfolio.total_pnl == null ? '' : portfolio.total_pnl >= 0 ? 'positive' : 'negative'}`}>
-                      {portfolio.total_pnl == null ? 'Unavailable' : `$${portfolio.total_pnl.toLocaleString()} (${portfolio.total_pnl_pct.toFixed(2)}%)`}
+                      {portfolio.total_pnl == null ? 'Unavailable' : `${usd(portfolio.total_pnl)} (${portfolio.total_pnl_pct.toFixed(2)}%)`}
                     </span>
                   </div>
                 </div>
@@ -612,7 +612,7 @@ export default function Portfolio() {
                                   <td>{h.shares}</td>
                                   <td>${h.buy_price.toFixed(2)}</td>
                                   <td>{h.current_price == null ? 'Unavailable' : `$${h.current_price.toFixed(2)}`}</td>
-                                  <td className={h.pnl == null ? '' : h.pnl >= 0 ? 'positive' : 'negative'}>{h.pnl == null ? 'Unavailable' : `$${h.pnl.toFixed(2)}`}</td>
+                                  <td className={h.pnl == null ? '' : h.pnl >= 0 ? 'positive' : 'negative'}>{h.pnl == null ? 'Unavailable' : usd(h.pnl)}</td>
                                   <td className={h.pnl_pct == null ? '' : h.pnl_pct >= 0 ? 'positive' : 'negative'}>{h.pnl_pct == null ? 'Unavailable' : `${h.pnl_pct.toFixed(2)}%`}</td>
                                   <td>{new Date(h.date_added || h.date).toLocaleDateString()}</td>
                                   <td className="action-cell">
@@ -738,7 +738,7 @@ export default function Portfolio() {
                 <div className={`metric ${optionsSummary.total_pnl == null ? '' : optionsSummary.total_pnl >= 0 ? 'metric-positive' : 'metric-negative'}`}>
                   <span className="metric-label">Total P/L</span>
                   <span className={`metric-value ${optionsSummary.total_pnl == null ? '' : optionsSummary.total_pnl >= 0 ? 'positive' : 'negative'}`}>
-                    {optionsSummary.total_pnl == null ? 'Incomplete quotes' : `$${optionsSummary.total_pnl.toLocaleString()} (${optionsSummary.total_pnl_pct.toFixed(2)}%)`}
+                    {optionsSummary.total_pnl == null ? 'Incomplete quotes' : `${usd(optionsSummary.total_pnl)} (${optionsSummary.total_pnl_pct.toFixed(2)}%)`}
                   </span>
                 </div>
               </div>

@@ -164,7 +164,8 @@ Run a single test:
 | --- | --- |
 | Backend, by name | `$env:PYTHONPATH='backend'; .\.venv\Scripts\python.exe -m unittest discover -s backend/tests -k next_steps` |
 | Frontend unit test | `cd frontend; npx vitest run src -t "next steps"` |
-| Browser (e2e) test | `cd frontend; npx playwright test -g "watchlist"` (builds are tested on port 4174) |
+| Browser (e2e) test | `cd frontend; npx playwright test -g "watchlist"` (tests the built `dist/`, served on port 4174; run `npm run build` first or results are stale) |
+| Phone layout audit | With local servers running: `cd frontend; node scripts/mobile-audit.mjs http://localhost:5173 $env:TEMP\mobile-audit`. Registers a throwaway local user with sample positions, screenshots every main view at Pixel 7 size and lists elements wider than the screen. Local only. |
 
 What the tests do:
 - Backend tests use a throwaway SQLite database, never your real one.

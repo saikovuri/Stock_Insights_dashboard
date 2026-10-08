@@ -5074,3 +5074,79 @@ button.signal-chip { cursor: pointer; }
 @media (max-width: 768px) {
   input, select, textarea { font-size: 16px !important; }
 }
+
+/* ── Phone layout: header, tabs, alerts and cards (one consistent pass) ── */
+.main-tab { display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem; }
+.sub-tabs .sub-tab.nowrap, .sub-tab .nowrap { white-space: nowrap; }
+.profile-picker { position: relative; display: inline-flex; align-items: center; }
+.profile-picker-icon, .palette-icon { display: none; }
+
+@media (max-width: 600px) {
+  /* Header: brand left, equal 34px icon buttons right; nothing spills off-screen */
+  .header-top { flex-wrap: nowrap; gap: 0.5rem; }
+  .app-header h1 { min-width: 0; }
+  .user-menu { gap: 0.3rem; flex-shrink: 0; min-width: 0; }
+  .user-menu .btn-theme {
+    width: 34px; height: 34px; padding: 0; font-size: 1rem;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  /* Trading style shows as its icon; the native picker (full names) opens on tap */
+  .profile-picker {
+    width: 34px; height: 34px; justify-content: center; flex-shrink: 0;
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px;
+  }
+  [data-theme="light"] .profile-picker { background: rgba(0,0,0,0.05); border-color: rgba(0,0,0,0.12); }
+  .profile-picker-icon { display: inline; font-size: 1rem; line-height: 1; pointer-events: none; }
+  .profile-picker .profile-select {
+    position: absolute; inset: 0; width: 100%; max-width: none; height: 100%;
+    margin: 0; padding: 0; opacity: 0; cursor: pointer;
+  }
+  .palette-key { display: none; }
+  .palette-icon { display: inline; }
+  .btn-logout { height: 34px; padding: 0 0.55rem; font-size: 0.72rem; white-space: nowrap; }
+
+  /* Main tabs: every tab is icon over a one-line label */
+  .main-tabs { flex-wrap: nowrap; }
+  .main-tab {
+    flex: 1 1 0; min-width: 0; flex-direction: column; gap: 0.15rem;
+    padding: 0.45rem 0.15rem; font-size: 0.68rem; line-height: 1.15;
+  }
+  .main-tab-icon { font-size: 1.05rem; line-height: 1; }
+  .main-tab-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* Sub-tab grids: even columns, equal-height cells, emoji stays with its first word */
+  .sub-tabs:not(.options-hub-tabs) { grid-template-columns: repeat(var(--tab-cols, 3), minmax(0, 1fr)); }
+  .sub-tabs:not(.options-hub-tabs) .sub-tab {
+    display: flex; align-items: center; justify-content: center; text-align: center;
+    text-wrap: balance; min-height: 2.4rem; font-size: 0.74rem;
+  }
+
+  /* Stock alerts: badge on top, message full width below */
+  .alert-banner {
+    display: grid; grid-template-columns: auto 1fr; align-items: center;
+    gap: 0.3rem 0.5rem; padding: 0.55rem 0.75rem; font-size: 0.82rem;
+  }
+  .alert-type { justify-self: start; }
+  .alert-message { grid-column: 1 / -1; }
+
+  /* Segmented toggles wrap instead of clipping options off the edge */
+  .chart-toggle { flex-wrap: wrap; max-width: 100%; }
+  .chart-toggle button { white-space: nowrap; }
+
+  /* Key metrics: compact tiles, price spans the row */
+  .metric { padding: 0.5rem 0.65rem; gap: 0.15rem; }
+  .metric-price { grid-column: 1 / -1; }
+  .metric-value { word-break: normal; overflow-wrap: anywhere; }
+
+  /* Suggested next steps: icon stays beside the title */
+  .next-step .desk-head { flex-wrap: nowrap; align-items: flex-start; gap: 0.4rem; }
+  .next-step .desk-head > span { flex-shrink: 0; }
+
+  .account-transfer .accounting-toolbar { display: grid; grid-template-columns: 1fr 1fr; align-items: stretch; gap: 0.4rem; }
+  .account-transfer .accounting-toolbar button { width: 100%; white-space: normal; line-height: 1.25; }
+  .account-table th, .account-table td { white-space: nowrap; }
+  .corporate-actions > summary { font-size: 0.9rem; }
+}
+@media (max-width: 380px) {
+  .header-title-text { display: none; }
+}
