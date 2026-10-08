@@ -976,6 +976,23 @@ class WheelExpiryTests(unittest.TestCase):
             self.assertEqual(wheel.get_wheel(False)["status"], "ready")
             get.assert_called_with(wheel.WHEEL_KEY)
 
+    def test_wheel_refreshes_every_15_minutes_in_session_and_once_after_close(self):
+        import wheel
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        et = ZoneInfo("America/New_York")
+        thursday = lambda h, m: datetime(2026, 10, 8, h, m, tzinfo=et)
+        self.assertTrue(wheel.refresh_due(None, thursday(12, 0)))
+        self.assertFalse(wheel.refresh_due(thursday(12, 0).isoformat(), thursday(12, 14)))
+        self.assertTrue(wheel.refresh_due(thursday(12, 0).isoformat(), thursday(12, 16)))
+        # After the close: a scan from 3:50 PM already saw closing premiums; one from noon did not
+        self.assertFalse(wheel.refresh_due(thursday(15, 50).isoformat(), thursday(22, 0)))
+        self.assertTrue(wheel.refresh_due(thursday(12, 0).isoformat(), thursday(22, 0)))
+        # Weekend and pre-market look back to Friday's / the prior close
+        friday_close = datetime(2026, 10, 9, 15, 55, tzinfo=et).isoformat()
+        self.assertFalse(wheel.refresh_due(friday_close, datetime(2026, 10, 11, 10, 0, tzinfo=et)))
+        self.assertFalse(wheel.refresh_due(friday_close, datetime(2026, 10, 12, 8, 0, tzinfo=et)))
+
 
 class EvaluationTests(unittest.TestCase):
     def test_holdout_is_chronological_and_cost_sensitive(self):

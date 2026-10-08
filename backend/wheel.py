@@ -8,7 +8,7 @@ import threading
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import options_analytics as oa
 import track_record
@@ -23,7 +23,8 @@ WHEEL_KEY = "wheel:candidates:sp500-nasdaq100"
 TARGET_DELTA = 0.15  # roughly one expected move below the price
 MAX_CANDIDATES = 60
 MIN_ANNUALIZED = 7.0
-STALE_SECONDS = 3 * 3600
+STALE_SECONDS = 3 * 3600  # the allocation plan refuses candidates older than this
+REFRESH_SECONDS = 15 * 60  # premiums move quickly while the market is open
 _lock = threading.Lock()
 _running = set()
 
@@ -168,14 +169,38 @@ def _safe_run(short_dated: bool = False):
         log.warning("Wheel scan failed: %s", e)
 
 
+def _last_close(now: datetime) -> datetime:
+    """Most recent weekday 4 PM ET at or before now (exchange holidays are not modeled)."""
+    close = now.replace(hour=16, minute=0, second=0, microsecond=0)
+    if close > now:
+        close -= timedelta(days=1)
+    while close.weekday() >= 5:
+        close -= timedelta(days=1)
+    return close
+
+
+def refresh_due(updated_at: str | None, now: datetime | None = None) -> bool:
+    """In the session, rescan every 15 minutes; after the close, only if no scan saw the closing quotes."""
+    from scheduler import ET, _market_open
+    now = (now or datetime.now(timezone.utc)).astimezone(ET)
+    if not updated_at:
+        return True
+    updated = _parse_ts(updated_at)
+    if _market_open(now):
+        return (now - updated).total_seconds() > REFRESH_SECONDS
+    return updated < _last_close(now) - timedelta(minutes=15)
+
+
 def get_wheel(start_if_stale: bool = True, short_dated: bool = False) -> dict:
+    from scheduler import ET, _market_open
     cached = kv_get(WHEEL_KEY + (":short" if short_dated else ""))
-    stale = not cached or (datetime.now(timezone.utc) - _parse_ts(cached["data"]["updated_at"])).total_seconds() > STALE_SECONDS
+    stale = refresh_due(cached["data"].get("updated_at") if cached else None)
     if stale and start_if_stale and short_dated not in _running:
         threading.Thread(target=_safe_run, args=(short_dated,), daemon=True).start()
     if not cached:
         return {"status": "building", "rows": []}
-    return {**cached["data"], "status": "running" if short_dated in _running else "ready"}
+    return {**cached["data"], "status": "running" if short_dated in _running else "ready",
+            "market_open": _market_open(datetime.now(ET)), "refresh_minutes": REFRESH_SECONDS // 60}
 
 
 # ── Ask about any ticker: deterministic wheel checks + an AI verdict ────────

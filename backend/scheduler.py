@@ -448,10 +448,11 @@ def _loop() -> None:
                 scanner.run_scan()
                 _ran("setup_scan")
             # Wheel candidates need live option quotes, so refresh during the session only
-            if _market_open(now) and now.hour >= 10 and now - last_wheel >= timedelta(hours=3):
+            if _market_open(now) and now.hour >= 10 and now - last_wheel >= timedelta(minutes=15):
                 last_wheel = now
                 import wheel
                 wheel._safe_run()
+                _ran("wheel_scan")
             if _market_open(now) and now - last_custom >= timedelta(minutes=2):
                 last_custom = now
                 n = check_custom_alerts()

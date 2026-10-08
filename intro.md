@@ -123,6 +123,8 @@ The standard universe combines current S&P 500 and Nasdaq-100 constituents, dedu
 - **Downtrend:** close below the 200-day SMA and 50-day SMA below the 200-day SMA.
 - **Mixed:** neither of those combinations.
 - **Relative volume:** latest volume divided by the preceding 50-day average, not the intraday time-adjusted relative volume in In play.
+
+Setups are an end-of-day scan of completed daily candles. They refresh after each weekday close, so during the session the list reflects the previous close; the header labels it that way. For intraday movers, use In play.
 - **Distance from high:** close divided by the maximum high in the latest 252 bars, minus one.
 - **Indicative stop/target:** price minus 1.5 ATR / price plus 3 ATR. These are reference levels, not guaranteed fills or automatic orders.
 
@@ -236,7 +238,7 @@ The planner is stricter than the discovery scan. It requires sign-in and uses re
 
 The result can legitimately be an empty plan. It does not buy stocks, sell puts, submit broker orders, or validate actual broker margin. Its monthly and annualized income values are simple projections, not forecasts. Recorded positions must be complete for the reserve and concentration checks to be meaningful.
 
-Scans older than three hours trigger a background refresh when requested; cached results can remain visible during rebuilding. Discovery freshness and planner eligibility are separate checks.
+While the market is open, Wheel scans older than 15 minutes trigger a background refresh when requested, and an open Wheel tab re-checks every five minutes. After the close, a refresh runs only if no scan has seen that session's closing premiums. The header shows the snapshot time, its age, and whether it is refreshing, on the in-session cadence, or showing last-session premiums. Cached results stay visible during rebuilding. Option quotes come from Yahoo Finance and can themselves be delayed, so they are not real-time. Discovery freshness and planner eligibility (the three-hour limit above) are separate checks.
 
 ### Fits My Portfolio
 
@@ -1166,7 +1168,7 @@ Defaults are server-side and require a running scheduler process:
 | Standard stock alerts | Every 15 minutes during the app's weekday 9:30 a.m.-4 p.m. Eastern window. |
 | Custom alerts | About every two minutes during that window. |
 | Open-option position checks | Once per market-window day after 10:15 a.m. Eastern. |
-| Wheel refresh | Approximately every three hours during the market window after 10 a.m. Eastern. |
+| Wheel refresh | Every 15 minutes during the market window after 10 a.m. Eastern; also on request, as described under Wheel. |
 | Setup scan refresh | Weekdays after 4:30 p.m. Eastern. |
 | Paper-option settlement | Weekdays after 4:45 p.m. Eastern. |
 | IV snapshot recording | Market-window days from 3:30 p.m. Eastern. |

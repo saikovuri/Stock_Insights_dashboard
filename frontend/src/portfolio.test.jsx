@@ -13,7 +13,7 @@ import Portfolio from './components/Portfolio';
 import Watchlist from './components/Watchlist';
 import Structures from './components/Structures';
 import Accounting from './components/Accounting';
-import WheelIdeas from './components/WheelIdeas';
+import WheelIdeas, { wheelFreshness } from './components/WheelIdeas';
 import MarketContext from './components/MarketContext';
 import PreTradeChecklist from './components/PreTradeChecklist';
 import Journal, { recordedTradeMetrics, recordedOptionStats, groupedOptionStats, edgeHighlights, howClosed } from './components/Journal';
@@ -733,6 +733,15 @@ test('context ignores an old response after switching feeds and retries a networ
   fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
   await screen.findByText('No qualifying records in the provider sample.');
   expect(fetch).toHaveBeenLastCalledWith('predictions');
+});
+
+test('wheel freshness shows quote age and refresh cadence', () => {
+  const now = Date.parse('2026-10-08T16:38:00Z');
+  const base = { updated_at: '2026-10-08T16:00:00Z', status: 'ready', refresh_minutes: 15 };
+  expect(wheelFreshness({ ...base, market_open: true }, now)).toMatch(/\(38 min ago\) · refreshes every 15 min while the market is open$/);
+  expect(wheelFreshness({ ...base, market_open: false }, now)).toMatch(/market closed: last-session premiums$/);
+  expect(wheelFreshness({ ...base, status: 'running' }, now)).toMatch(/refreshing…$/);
+  expect(wheelFreshness(base, Date.parse('2026-10-09T16:00:00Z'))).not.toMatch(/ago/);
 });
 
 test('wheel checkbox switches scans, ignores late results, and resets the capital plan', async () => {

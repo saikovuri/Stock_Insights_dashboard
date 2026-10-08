@@ -129,6 +129,15 @@ function WheelPlan({ onSelect, shortDated }) {
   );
 }
 
+export function wheelFreshness(data, now = Date.now()) {
+  const when = new Date(data.updated_at).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+  const minutes = Math.max(0, Math.round((now - Date.parse(data.updated_at)) / 60_000));
+  const age = minutes < 1 ? 'just now' : minutes < 120 ? `${minutes} min ago` : null;
+  const cadence = data.status === 'running' ? 'refreshing…'
+    : data.market_open ? `refreshes every ${data.refresh_minutes || 15} min while the market is open` : 'market closed: last-session premiums';
+  return `Premiums as of ${when}${age ? ` (${age})` : ''} · ${cadence}`;
+}
+
 export default function WheelIdeas({ onSelect }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
@@ -148,6 +157,7 @@ export default function WheelIdeas({ onSelect }) {
       if (!active) return;
       setData(d);
       if (d.status === 'building' || d.status === 'running') timer = setTimeout(load, 15_000);
+      else if (d.market_open) timer = setTimeout(load, 5 * 60_000);
     }).catch(e => { if (active) setError(e.message); });
     load();
     return () => { active = false; clearTimeout(timer); };
@@ -165,7 +175,7 @@ export default function WheelIdeas({ onSelect }) {
     <div className="card">
       <div className="ivrank-header">
         <h3 style={{ margin: 0 }}>🎡 Wheel candidates</h3>
-        {data?.updated_at && <span className="market-sub">Updated {new Date(data.updated_at).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })}</span>}
+        {data?.updated_at && <span className="market-sub">{wheelFreshness(data)}</span>}
       </div>
       <p className="structures-intro">
         The wheel: sell a cash-secured put on a stock you'd happily own. If it expires, keep the premium and repeat; if

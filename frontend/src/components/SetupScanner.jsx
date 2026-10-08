@@ -118,7 +118,8 @@ export default function SetupScanner({ onSelect }) {
       <div className="card">
         <div className="ivrank-header">
           <h3 style={{ margin: 0 }}>🎯 Setup Scanner · S&P 500 + Nasdaq-100</h3>
-          <span className="market-sub">Updated {new Date(data.updated_at).toLocaleString()}{data.status === 'running' ? ' · refreshing…' : ''}</span>
+          <span className="market-sub">End-of-day scan · daily candles as of {new Date(data.updated_at).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+            {data.status === 'running' ? ' · refreshing…' : ' · rescans after each close (~4:30 PM ET)'}</span>
         </div>
         <p className="structures-intro">
           Rescanned every weekday after the close. <b>RS rating</b> (1–99) ranks 12-month performance across scanned S&P 500 and Nasdaq-100 stocks,

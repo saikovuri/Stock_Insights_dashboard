@@ -8,7 +8,7 @@ const ago = iso => {
 };
 const uptime = s => s < 3600 ? `${Math.round(s / 60)} min` : s < 172800 ? `${Math.round(s / 3600)} h` : `${Math.round(s / 86400)} days`;
 const JOBS = { alert_scan: 'Alert scan', position_checks: 'Option position checks', rule_checks: 'Trading rule checks', morning_briefing: 'Morning briefing',
-  setup_scan: 'Setup scanner', account_value_snapshot: 'Account value snapshot' };
+  setup_scan: 'Setup scanner', wheel_scan: 'Wheel candidates', account_value_snapshot: 'Account value snapshot' };
 const mark = ok => ok === true ? <span className="positive" aria-label="OK">●</span>
   : ok === false ? <span className="negative" aria-label="Problem">●</span> : <span className="market-sub" aria-label="Optional, off">○</span>;
 
