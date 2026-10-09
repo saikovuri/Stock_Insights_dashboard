@@ -1625,9 +1625,9 @@ def stock_options_flow(request: Request, ticker: str):
 
 @app.get("/api/ideas/unusual-options")
 @limiter.limit("10/minute")
-def ideas_unusual_options(request: Request):
+def ideas_unusual_options(request: Request, horizon: Literal["near", "monthly", "leaps"] = "near"):
     try:
-        return options_flow.unusual_scan()
+        return options_flow.unusual_scan(horizon)
     except Exception as e:
         raise _upstream_error(e)
 

@@ -488,7 +488,8 @@ export const fetchJournalCoach = () => getJson(`${BASE}/journal/coach`, 'Failed 
 
 // ── Options flow, macro, smart money ─────────────────────────────
 export const fetchOptionsFlow = (t) => getJson(`${BASE}/stock/${t}/flow`, 'Failed to load options flow');
-export const fetchUnusualOptions = () => getJson(`${BASE}/ideas/unusual-options`, 'Failed to load unusual options');
+export const fetchUnusualOptions = (horizon = 'near') =>
+  getJson(`${BASE}/ideas/unusual-options?horizon=${encodeURIComponent(horizon)}`, 'Failed to load unusual options');
 export const fetchWheelIdeas = (shortDated = false) => getJson(`${BASE}/ideas/wheel?short_dated=${shortDated}`, 'Failed to load wheel candidates');
 export const fetchEconomicCalendar = (days = 7) => getJson(`${BASE}/market/calendar?days=${days}`, 'Failed to load calendar');
 export const fetchShortInterest = (t) => getJson(`${BASE}/stock/${t}/short-interest`, 'No short interest data');

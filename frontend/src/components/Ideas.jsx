@@ -31,10 +31,35 @@ function useLoad(fn, poll) {
   return [data, error];
 }
 
-function UnusualOptions({ onSelect }) {
-  const [data, error] = useLoad(fetchUnusualOptions);
-  if (error) return <div className="card"><p className="error-text">{error}</p></div>;
-  if (!data) return <div className="card"><p className="loading-text">Scanning option chains across {40}+ liquid stocks…</p></div>;
+const HORIZONS = [
+  ['near', 'Next 60 days', '2–60 days out (weeklies and monthlies)'],
+  ['monthly', 'Monthlies', 'standard monthly expirations (third Friday) up to 180 days out'],
+  ['leaps', 'LEAPS', 'expirations a year or more out'],
+];
+
+export function UnusualOptions({ onSelect }) {
+  const [horizon, setHorizon] = useState('near');
+  const [result, setResult] = useState({ horizon: null, data: null, error: null });
+  useEffect(() => {
+    let live = true;
+    fetchUnusualOptions(horizon)
+      .then(data => live && setResult({ horizon, data, error: null }))
+      .catch(e => live && setResult({ horizon, data: null, error: e.message }));
+    return () => { live = false; };
+  }, [horizon]);
+  const current = result.horizon === horizon ? result : { data: null, error: null };
+  const { data, error } = current;
+  const label = HORIZONS.find(([key]) => key === horizon)[2];
+  const picker = (
+    <div className="watchlist-tabs" role="group" aria-label="Expiration range">
+      {HORIZONS.map(([key, name]) => (
+        <button key={key} type="button" className={`watchlist-tab${horizon === key ? ' active' : ''}`}
+          aria-pressed={horizon === key} onClick={() => setHorizon(key)}>{name}</button>
+      ))}
+    </div>
+  );
+  if (error) return <div className="card">{picker}<p className="error-text">{error}</p></div>;
+  if (!data) return <div className="card">{picker}<p className="loading-text">Scanning option chains across {40}+ liquid stocks…</p></div>;
   const total = data.bought_call_premium + data.bought_put_premium;
   const callShare = total ? Math.round(data.bought_call_premium / total * 100) : null;
   return (
@@ -44,9 +69,11 @@ function UnusualOptions({ onSelect }) {
           <h3 style={{ margin: 0 }}>🌊 Unusual options activity</h3>
           <span className="market-sub">{data.scanned} stocks · {new Date(data.as_of).toLocaleTimeString()}</span>
         </div>
+        {picker}
         <p className="structures-intro">
-          Contracts trading more than their open interest with at least $25K premium, 2–60 days out — often new positions
+          Contracts trading more than their open interest with at least $25K premium, {label} — often new positions
           or spread activity. Volume does not establish institutional intent; notional uses volume times a quote proxy, not observed execution proceeds.
+          {horizon === 'leaps' && ' Long-dated contracts trade less, so expect fewer hits than near-term.'}
         </p>
         {callShare != null && (
           <div className="doctor-stats">

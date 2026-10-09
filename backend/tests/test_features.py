@@ -730,6 +730,40 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(database.consume_refresh_token("legacy-plain")["user_id"], uid)
         self.assertIsNone(database.consume_refresh_token("legacy-plain"))
 
+    def test_unusual_options_scan_splits_near_monthly_and_leaps(self):
+        import pandas as pd
+        import options_flow
+        today = date.today()
+
+        def third_friday_after(days):
+            d = today + timedelta(days=days)
+            d = d.replace(day=15)
+            while d.weekday() != 4:
+                d += timedelta(days=1)
+            return d if (d - today).days >= days else third_friday_after(days + 20)
+
+        monthly = third_friday_after(75)
+        near = today + timedelta(days=(4 - today.weekday()) % 7 + 7)
+        if options_flow._is_monthly(near.isoformat()):
+            near += timedelta(days=7)
+        weekly_far = monthly + timedelta(days=7)
+        leaps = third_friday_after(400)
+        row = {"strike": 100.0, "bid": 2.0, "ask": 2.2, "lastPrice": 2.2, "volume": 500, "openInterest": 100,
+               "impliedVolatility": 0.5}
+        chains = {d.isoformat(): (pd.DataFrame([row]), pd.DataFrame()) for d in (near, monthly, weekly_far, leaps)}
+        with patch.object(options_flow, "cboe_chains", return_value=chains), \
+             patch.object(options_flow, "get_quote", return_value={"price": 100.0}), \
+             patch.object(options_flow, "get_all_user_tickers", return_value={}), \
+             patch.object(options_flow, "SCAN_TICKERS", ["AMD"]), \
+             patch.object(options_flow, "get_or_fetch", side_effect=lambda key, fn, ttl: fn()):
+            expiries = {h: [t["expiry"] for t in options_flow.unusual_scan(h)["trades"]] for h in options_flow.HORIZONS}
+            with self.assertRaises(ValueError):
+                options_flow.unusual_scan("weekly")
+        self.assertEqual(expiries["near"], [near.isoformat()])
+        self.assertEqual(expiries["monthly"], [monthly.isoformat()], "weeklies are left out of Monthlies")
+        self.assertEqual(expiries["leaps"], [leaps.isoformat()])
+        self.assertEqual(self.client.get("/api/ideas/unusual-options?horizon=weekly").status_code, 422)
+
 
 if __name__ == "__main__":
     unittest.main()

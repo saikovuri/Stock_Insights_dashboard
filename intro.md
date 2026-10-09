@@ -469,7 +469,15 @@ Source: [backend/intraday.py](backend/intraday.py), [frontend/src/components/InP
 
 ## Options Flow and Unusual Options
 
-**Dashboard > Analysis > Options > Volatility & positioning** examines one ticker. **Ideas > Unusual options** applies the unusual-activity filter across a fixed list of 40 liquid names plus account-held/watched names, capped at 80 unique symbols. CBOE delayed chains are primary here, with Yahoo fallback; only expirations within 0-60 DTE are included.
+**Dashboard > Analysis > Options > Volatility & positioning** examines one ticker. **Ideas > Unusual options** applies the unusual-activity filter across a fixed list of 40 liquid names plus account-held/watched names, capped at 80 unique symbols. CBOE delayed chains are primary here, with Yahoo fallback. The single-stock view includes expirations within 0-60 DTE. The market scan has an expiration switch:
+
+| Choice | Expirations |
+| --- | --- |
+| **Next 60 days** (default) | Every expiration 0-60 DTE, weeklies included. |
+| **Monthlies** | Standard monthly expirations (a Friday falling on the 15th-21st) up to 180 DTE; weeklies are left out. A monthly moved to Thursday by a holiday is not recognized. |
+| **LEAPS** | Expirations 365 or more days out. Long-dated contracts trade less, so expect fewer hits. |
+
+The same qualification rules apply to every choice. One chain download per ticker feeds all three lists, and the put/call lists below the table follow the selected range.
 
 ### Unusual-Activity Qualification
 

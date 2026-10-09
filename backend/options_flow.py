@@ -23,17 +23,33 @@ SCAN_TICKERS = ["SPY", "QQQ", "IWM", "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "M
                 "ARM", "TSM"]
 
 
-def _chains(ticker: str, cache: bool = True) -> dict:
+HORIZONS = ("near", "monthly", "leaps")
+MONTHLY_MAX_DTE = 180
+LEAPS_MIN_DTE = 365
+
+
+def _in_horizon(expiry: str, horizon: str) -> bool:
+    dte = _dte(expiry)
+    if horizon == "monthly":
+        return _is_monthly(expiry) and 0 <= dte <= MONTHLY_MAX_DTE
+    if horizon == "leaps":
+        return dte >= LEAPS_MIN_DTE
+    return 0 <= dte <= MAX_DTE
+
+
+def _chains(ticker: str, cache: bool = True, horizons: tuple[str, ...] = ("near",)) -> dict:
+    def keep(e):
+        return any(_in_horizon(e, h) for h in horizons)
     chains = cboe_chains(ticker, cache=cache)
     if not chains:
         chains = {}
         for e in _expirations(ticker):
-            if 0 <= _dte(e) <= MAX_DTE:
+            if keep(e):
                 try:
                     chains[e] = _chain(ticker, e)
                 except Exception:
                     continue
-    return {e: c for e, c in chains.items() if 0 <= _dte(e) <= MAX_DTE}
+    return {e: c for e, c in chains.items() if keep(e)}
 
 
 def _frame(chains: dict) -> pd.DataFrame:
@@ -182,34 +198,52 @@ def options_flow(ticker: str) -> dict:
     return get_or_fetch(f"flow:{ticker}", _fetch, ttl=600)
 
 
-def _scan_one(t: str) -> tuple[list[dict], dict | None]:
+def _scan_one(t: str) -> dict[str, tuple[list[dict], dict | None]]:
+    """Unusual contracts and put/call volume for one ticker, per horizon, from a single chain download."""
+    empty = {h: ([], None) for h in HORIZONS}
     try:
         S = float(get_quote(t).get("price") or 0)
-        chains = _chains(t, cache=False)
+        chains = _chains(t, cache=False, horizons=HORIZONS)
         if not S or not chains:
-            return [], None
-        f = _frame(chains)
-        cv, pv = f.loc[f["kind"] == "call", "volume"].sum(), f.loc[f["kind"] == "put", "volume"].sum()
-        return _unusual(f, S, t, limit=5), {"ticker": t, "pc_volume": round(pv / cv, 2) if cv else None,
-                                            "volume": int(cv + pv)}
+            return empty
+        out = {}
+        for h in HORIZONS:
+            f = _frame({e: c for e, c in chains.items() if _in_horizon(e, h)})
+            if f.empty:
+                out[h] = ([], None)
+                continue
+            cv, pv = f.loc[f["kind"] == "call", "volume"].sum(), f.loc[f["kind"] == "put", "volume"].sum()
+            out[h] = (_unusual(f, S, t, limit=5), {"ticker": t, "pc_volume": round(pv / cv, 2) if cv else None,
+                                                   "volume": int(cv + pv)})
+        return out
     except Exception as e:
         log.info("Flow scan failed for %s: %s", t, e)
-        return [], None
+        return empty
 
 
-def unusual_scan() -> dict:
-    """Largest unusual contracts across liquid names plus everything users hold or watch."""
+def unusual_scan(horizon: str = "near") -> dict:
+    """Largest unusual contracts across liquid names plus everything users hold or watch.
+    horizon: near (2-60 days), monthly (standard monthly expirations to 180 days) or leaps (a year or more)."""
+    if horizon not in HORIZONS:
+        raise ValueError(f"horizon must be one of {', '.join(HORIZONS)}")
+
     def _fetch():
         user = sorted({t for ts in get_all_user_tickers().values() for t in ts})
         tickers = list(dict.fromkeys(SCAN_TICKERS + user))[:80]
         with ThreadPoolExecutor(max_workers=4) as pool:
             results = list(pool.map(_scan_one, tickers))
-        trades = sorted((x for r, _ in results for x in r), key=lambda x: x["premium"], reverse=True)[:40]
-        ratios = sorted((s for _, s in results if s and s["pc_volume"] is not None), key=lambda s: s["pc_volume"])
-        call_prem = sum(x["premium"] for x in trades if x["kind"] == "call" and x["side"] == "bought")
-        put_prem = sum(x["premium"] for x in trades if x["kind"] == "put" and x["side"] == "bought")
-        return {"trades": trades, "most_bullish": ratios[:5], "most_bearish": ratios[::-1][:5],
-                "bought_call_premium": call_prem, "bought_put_premium": put_prem,
-                "scanned": len(tickers), "as_of": datetime.now().isoformat(timespec="minutes"),
-                "date": date.today().isoformat()}
-    return get_or_fetch("flow:scan", _fetch, ttl=900)
+        by_horizon = {}
+        for h in HORIZONS:
+            trades = sorted((x for r in results for x in r[h][0]), key=lambda x: x["premium"], reverse=True)[:40]
+            ratios = sorted((r[h][1] for r in results if r[h][1] and r[h][1]["pc_volume"] is not None),
+                            key=lambda s: s["pc_volume"])
+            by_horizon[h] = {
+                "trades": trades, "most_bullish": ratios[:5], "most_bearish": ratios[::-1][:5],
+                "bought_call_premium": sum(x["premium"] for x in trades if x["kind"] == "call" and x["side"] == "bought"),
+                "bought_put_premium": sum(x["premium"] for x in trades if x["kind"] == "put" and x["side"] == "bought"),
+            }
+        return {"by_horizon": by_horizon, "scanned": len(tickers),
+                "as_of": datetime.now().isoformat(timespec="minutes"), "date": date.today().isoformat()}
+    scan = get_or_fetch("flow:scan:v2", _fetch, ttl=900)
+    return {**scan["by_horizon"][horizon], "horizon": horizon, "scanned": scan["scanned"],
+            "as_of": scan["as_of"], "date": scan["date"]}

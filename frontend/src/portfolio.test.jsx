@@ -32,6 +32,7 @@ import CommandPalette, { matchCommands } from './components/CommandPalette';
 import { lastLookChanges } from './components/SinceLastLook';
 import Alerts from './components/Alerts';
 import PortfolioDoctor from './components/PortfolioDoctor';
+import { UnusualOptions } from './components/Ideas';
 
 beforeEach(() => {
   localStorage.clear(); sessionStorage.clear();
@@ -1436,6 +1437,25 @@ test('next steps follow the account, link repairs and dismiss non-urgent items f
   fireEvent.click(screen.getByRole('button', { name: 'Show 1 dismissed suggestion' }));
   fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
   expect(JSON.parse(localStorage.getItem('next_steps_dismissed'))).toEqual({});
+});
+
+test('unusual options switch between near-term, monthly and LEAPS expirations', async () => {
+  const trade = expiry => ({ ticker: 'AMD', kind: 'call', strike: 300, expiry, dte: 9, volume: 900, open_interest: 100,
+    vol_oi: 9, premium: 90000, iv_pct: 50, otm_pct: 5, side: 'bought' });
+  const load = vi.spyOn(stockApi, 'fetchUnusualOptions').mockImplementation(async horizon => ({
+    trades: [trade(horizon === 'leaps' ? '2028-01-21' : horizon === 'monthly' ? '2027-01-15' : '2026-10-16')],
+    most_bullish: [], most_bearish: [], bought_call_premium: 90000, bought_put_premium: 0, scanned: 40,
+    as_of: '2026-10-09T10:00', horizon }));
+  render(<UnusualOptions onSelect={vi.fn()} />);
+  expect(await screen.findByText(/2026-10-16/)).toBeTruthy();
+  expect(load).toHaveBeenCalledWith('near');
+  fireEvent.click(screen.getByRole('button', { name: 'LEAPS' }));
+  expect(await screen.findByText(/2028-01-21/)).toBeTruthy();
+  expect(screen.getByText(/a year or more out/)).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'LEAPS' }).getAttribute('aria-pressed')).toBe('true');
+  fireEvent.click(screen.getByRole('button', { name: 'Monthlies' }));
+  expect(await screen.findByText(/2027-01-15/)).toBeTruthy();
+  expect(load).toHaveBeenCalledWith('monthly');
 });
 
 test('stress test can leave out positions without a quote, with a warning', async () => {
