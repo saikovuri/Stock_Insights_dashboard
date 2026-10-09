@@ -560,24 +560,24 @@ function AccountWatchlist({ onSelect, onSignIn, session }) {
                       <td className="drag-handle" title="Drag to reorder">⠿</td>
                       <td><button className="link-btn" onClick={() => onSelect?.(s.ticker)} title="Open on dashboard"><strong>{s.ticker}</strong></button></td>
                       <td className="screener-name">{s.name}{items[s.ticker]?.note && <div className="market-sub watchlist-note">{items[s.ticker].note}</div>}</td>
-                      <td>${s.price?.toFixed(2) ?? '—'}</td>
-                      <td className={s.change_pct >= 0 ? 'positive' : 'negative'}>
+                      <td data-label="Price">${s.price?.toFixed(2) ?? '—'}</td>
+                      <td data-label="Chg" className={s.change_pct >= 0 ? 'positive' : 'negative'}>
                         {s.change_pct >= 0 ? '+' : ''}{s.change_pct?.toFixed(2) ?? '—'}%
                       </td>
                       <td>${s.high_52w?.toFixed(2) ?? '—'}</td>
                       <td>${s.low_52w?.toFixed(2) ?? '—'}</td>
-                      <td>{s.pe_ratio?.toFixed(1) ?? '—'}</td>
+                      <td data-label="P/E">{s.pe_ratio?.toFixed(1) ?? '—'}</td>
                       <td>{s.eps?.toFixed(2) ?? '—'}</td>
-                      <td>{s.market_cap_fmt || '—'}</td>
-                      <td style={rsiColor(s.rsi)}>
+                      <td data-label="Mkt cap">{s.market_cap_fmt || '—'}</td>
+                      <td data-label="RSI" style={rsiColor(s.rsi)}>
                         {s.rsi != null ? s.rsi.toFixed(0) : '—'}
                         {s.rsi != null && s.rsi >= 70 && <span className="rsi-badge overbought">OB</span>}
                         {s.rsi != null && s.rsi <= 30 && <span className="rsi-badge oversold">OS</span>}
                       </td>
                       <td>{formatVol(s.volume)}</td>
-                      <td>{s.dividend_yield != null ? `${s.dividend_yield.toFixed(2)}%` : '—'}</td>
+                      <td data-label="Div">{s.dividend_yield != null ? `${s.dividend_yield.toFixed(2)}%` : '—'}</td>
                       <td className="screener-sector">{s.sector || '—'}</td>
-                      {!isGuest && <td>{earningsCell(s.ticker)}</td>}
+                      {!isGuest && <td data-label="Earnings">{earningsCell(s.ticker)}</td>}
                       <td className="action-cell">
                         {!isGuest && <button className="btn-icon" onClick={() => openLists(s.ticker)}
                           title="Lists" aria-label={`Lists for ${s.ticker}`} aria-expanded={listPanel === s.ticker}>🏷️</button>}

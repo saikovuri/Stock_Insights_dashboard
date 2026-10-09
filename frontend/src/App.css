@@ -4329,6 +4329,8 @@ tr.alert-triggered {
 .next-step-idea { border-left: 3px solid var(--accent); }
 .next-step .wheel-manager { margin-top: 0.5rem; }
 .next-step-points { font-size: 0.8rem; margin: 0 0 0.3rem; }
+.next-step-dismiss { margin-left: auto; font-size: 0.72rem; white-space: nowrap; }
+.next-step-repairs { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.4rem; }
 .import-kind { flex-wrap: wrap; }
 .pnl-calendar-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; }
 .edge-report { margin-bottom: 0.8rem; }
@@ -5196,6 +5198,27 @@ button.signal-chip { cursor: pointer; }
   .peer-table td[data-label]::before {
     content: attr(data-label); display: block; font-size: 0.6rem; color: var(--text-muted); font-weight: 500;
   }
+
+  /* Watchlist: one card per stock (secondary columns stay hidden; the Sort menu still sorts by any of them) */
+  .watchlist-table { display: block; overflow: visible; font-size: 0.78rem; }
+  .watchlist-table thead { display: none; }
+  .watchlist-table tbody { display: flex; flex-direction: column; gap: 0.4rem; }
+  .watchlist-table tr:not(.alert-panel-row) {
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.25rem 0.5rem; align-items: start;
+    border: 1px solid var(--border); border-radius: 8px; padding: 0.45rem 0.6rem; background: var(--bg-subtle);
+  }
+  .watchlist-table.watchlist-table tr:not(.alert-panel-row) > td {
+    position: static; box-shadow: none; background: none; border: none; padding: 0; white-space: normal; text-align: left; min-width: 0;
+  }
+  .watchlist-table tr:not(.alert-panel-row) > :nth-child(2) { grid-column: span 2; position: static; box-shadow: none; background: none; font-size: 0.9rem; }
+  .watchlist-table tr:not(.alert-panel-row) > td[data-label="Earnings"] { grid-column: span 2; }
+  .watchlist-table.watchlist-table tr:not(.alert-panel-row) > td.action-cell { grid-column: 3 / -1; display: flex; justify-content: flex-end; align-self: end; gap: 0.25rem; }
+  .watchlist-table td[data-label]::before {
+    content: attr(data-label); display: block; font-size: 0.6rem; color: var(--text-muted); font-weight: 500;
+  }
+  .watchlist-table .alert-panel-row { display: block; }
+  .watchlist-table .alert-panel-row > td { display: block; }
+  .watchlist-table .alert-panel-row > td > * { position: static; width: auto; }
 
   /* Trade entry forms: three fields per row instead of one per screen line */
   .portfolio-form.labeled-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.4rem 0.5rem; }

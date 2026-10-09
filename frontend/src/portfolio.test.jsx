@@ -1415,3 +1415,38 @@ test('next steps list suggestions and open covered calls inline', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Show covered calls' }));
   await waitFor(() => expect(calls).toHaveBeenCalledWith('AMD', 100, 200, 'all'));
 });
+
+test('next steps follow the account, link repairs and dismiss non-urgent items for 7 days', async () => {
+  vi.spyOn(auth, 'useAuth').mockReturnValue({ user: { id: 1 } });
+  const load = vi.spyOn(stockApi, 'fetchNextSteps').mockResolvedValue({ note: 'Showing account A only.', items: [
+    { level: 'warn', code: 'options_warn', title: '1 option position(s) need a look', points: ['AMD $580 call: In the money.'],
+      detail: 'Details below.', link: { kind: 'alerts' }, repairs: [{ id: 9, label: 'AMD $580 call 2099-06-17' }] },
+    { level: 'idea', code: 'idle_cash', account: 'A', title: 'A: $20,000 idle cash', detail: 'Consider puts.' }] });
+  const onRepair = vi.fn();
+  const { default: NextSteps } = await import('./components/NextSteps');
+  render(<NextSteps version="1" account="A" onRepair={onRepair} onShowAlerts={vi.fn()} />);
+  expect(await screen.findByText('A: $20,000 idle cash')).toBeTruthy();
+  expect(load).toHaveBeenCalledWith('A');
+  fireEvent.click(screen.getByRole('button', { name: /Repair AMD \$580 call/ }));
+  expect(onRepair).toHaveBeenCalledWith(9);
+  fireEvent.click(screen.getAllByRole('button', { name: 'Dismiss 7 days' })[1]);
+  expect(screen.queryByText('A: $20,000 idle cash')).toBeNull();
+  const saved = JSON.parse(localStorage.getItem('next_steps_dismissed'));
+  expect(saved['idle_cash|A|'] - Date.now()).toBeGreaterThan(6.9 * 86400_000);
+  fireEvent.click(screen.getByRole('button', { name: 'Show 1 dismissed suggestion' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
+  expect(JSON.parse(localStorage.getItem('next_steps_dismissed'))).toEqual({});
+});
+
+test('stress test can leave out positions without a quote, with a warning', async () => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+  const { WhatIf } = await import('./components/OptionsDesk');
+  const quoted = { ticker: 'AMD', type: 'call', position: 'short', strike: 580, contracts: 1, premium: 10, market_price: 12,
+    current_price: 600, iv: 50, dte: 200, time_to_expiry_years: 0.55, quoted: true };
+  const missing = { ...quoted, ticker: 'SNDK', strike: 50, quoted: false, market_price: null };
+  render(<WhatIf options={[quoted, missing]} holdings={[]} />);
+  expect(screen.getByRole('alert').textContent).toMatch(/1 position has no usable quote.*SNDK short \$50 call/);
+  fireEvent.click(screen.getByRole('button', { name: 'Run without it' }));
+  expect(screen.getByRole('status').textContent).toMatch(/Left out \(no quote\): SNDK short \$50 call/);
+  expect(screen.queryByRole('alert')).toBeNull();
+});

@@ -417,7 +417,7 @@ export default function Portfolio() {
           </nav>
           <h3 id="next-steps">Suggested next steps</h3>
           <PortfolioDoctor key={version} />
-          <NextSteps version={`${version}:${rulesRevision}`}
+          <NextSteps version={`${version}:${rulesRevision}`} account={account} onRepair={repair}
             onShowAlerts={() => document.getElementById('position-alerts')?.scrollIntoView({ behavior: 'smooth' })}
             onShowTax={() => { setInsightsTab('tax'); setSection('performance'); }}
             onTrim={ticker => { setTrimTicker(ticker); setTimeout(() => document.getElementById('trim-planner')?.scrollIntoView({ behavior: 'smooth' }), 0); }} />

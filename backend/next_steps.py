@@ -38,14 +38,50 @@ def _option_items(actions: dict) -> list[dict]:
         if hits:
             points = [f"{p['ticker']} ${p['strike']:g} {p['type']}: {a['text']}" for p, a in hits[:3]]
             more = f"{len(hits) - 3} more in Option alerts below." if len(hits) > 3 else "Details in Option alerts below."
+            # Positions whose alerts offer a roll/repair get a direct button
+            repairs = [{"id": p["id"], "label": f"{p['ticker']} ${p['strike']:g} {p['type']} {p['expiry']}"}
+                       for p, _ in hits if p.get("position") == "short" and any(x.get("repair") for x in p["actions"])][:5]
             items.append({"level": level, "code": f"options_{level}", "title": f"{len(hits)} option position(s) {verb}",
-                          "points": points, "detail": more, "link": {"kind": "alerts"}})
+                          "points": points, "detail": more, "link": {"kind": "alerts"}, "repairs": repairs})
     return items
 
 
-def _cash_items(user_id: int) -> list[dict]:
+def _earnings_items(holdings: list[dict]) -> list[dict]:
+    """Stocks you hold that report within the next 7 days (options already have their own earnings alerts)."""
+    import options_analytics
+    shares = defaultdict(float)
+    for h in holdings:
+        shares[h["ticker"]] += h["shares"]
+    today, hits = date.today(), []
+    for ticker in sorted(shares):
+        try:
+            info = options_analytics.earnings_info(ticker)
+        except Exception as e:
+            log.info("Earnings lookup failed for %s: %s", ticker, e)
+            continue
+        nxt = info.get("next")
+        if not nxt:
+            continue
+        days = (date.fromisoformat(nxt) - today).days
+        if 0 <= days <= 7:
+            when = "today" if days == 0 else "tomorrow" if days == 1 else f"in {days} days"
+            timing = f", {info['next_timing']}" if info.get("next_timing") else ""
+            confirmed = "" if info.get("next_confirmed") else " (est.)"
+            hits.append((days, f"{ticker}: {nxt}{confirmed} ({when}{timing}), {shares[ticker]:g} shares"))
+    if not hits:
+        return []
+    hits.sort()
+    return [{"level": "warn", "code": "stock_earnings", "title": f"{len(hits)} stock(s) you hold report earnings within 7 days",
+             "points": [text for _, text in hits[:5]],
+             "detail": "Prices can gap on the report. Decide beforehand whether to hold, trim, or hedge (a protective put or collar); "
+                       "the Earnings exposure section below shows typical past moves."}]
+
+
+def _cash_items(user_id: int, account: str | None = None) -> list[dict]:
     items = []
     for a in accounts.list_accounts(user_id)["accounts"]:
+        if account is not None and a["name"] != account:
+            continue
         name, free, reserved = a["name"], a["free_cash"], a["put_collateral"]
         if free is None:
             if reserved > 0:
@@ -130,17 +166,24 @@ def _tax_items(holdings: list[dict], prices: dict) -> list[dict]:
     return items
 
 
-def build(user_id: int, option_actions: dict) -> dict:
+def build(user_id: int, option_actions: dict, account: str | None = None) -> dict:
+    """`account` limits every check to one brokerage account label; None covers all accounts."""
     import trading_rules
-    holdings = [h for h in database.get_user_holdings(user_id) if h["shares"] > 0]
-    options = database.get_user_options(user_id)
+    holdings = [h for h in database.get_user_holdings(user_id) if h["shares"] > 0 and database.in_account(h, account)]
+    options = [o for o in database.get_user_options(user_id) if database.in_account(o, account)]
+    if account is not None:
+        option_actions = {**option_actions, "positions": [p for p in option_actions.get("positions", [])
+                                                          if (p.get("account") or database.DEFAULT_ACCOUNT) == account]}
+    account_rows = [a for a in accounts.list_accounts(user_id)["accounts"] if account is None or a["name"] == account]
     prices = _prices(sorted({h["ticker"] for h in holdings}))
     rules = trading_rules.get_rules(user_id)
-    items = (_option_items(option_actions) + _cash_items(user_id)
+    items = (_option_items(option_actions) + _cash_items(user_id, account)
              + _concentration_items(holdings, prices, rules.get("max_position_pct"))
-             + trading_rules.violations(rules, holdings, options, prices, option_actions,
-                                        accounts.list_accounts(user_id)["accounts"])
-             + _covered_call_items(holdings, options) + _tax_items(holdings, prices))
+             + trading_rules.violations(rules, holdings, options, prices, option_actions, account_rows)
+             + _earnings_items(holdings) + _covered_call_items(holdings, options) + _tax_items(holdings, prices))
     items.sort(key=lambda i: LEVELS[i["level"]])
+    note = "Rule-based checks on the positions and cash recorded here. Not investment advice."
+    if account is not None:
+        note = f"Showing account {account} only. " + note
     return {"items": items, "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "note": "Rule-based checks on the positions and cash recorded here. Not investment advice."}
+            "account": account, "note": note}

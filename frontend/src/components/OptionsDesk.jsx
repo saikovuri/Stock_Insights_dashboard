@@ -137,8 +137,10 @@ function bs(S, K, T, sigma, kind) {
   return kind === 'call' ? S * ncdf(d1) - K * Math.exp(-0.04 * T) * ncdf(d2)
     : K * Math.exp(-0.04 * T) * ncdf(-d2) - S * ncdf(-d1);
 }
+const unquotedOption = option => option.quoted === false || option.market_price == null || !(option.current_price > 0);
+
 export function pnlAt(options, holdings, move, ivChg, days, withStocks) {
-  const incomplete = options.some(option => option.quoted === false || option.market_price == null || !(option.current_price > 0))
+  const incomplete = options.some(unquotedOption)
     || (withStocks && holdings.some(holding => !(holding.current_price > 0)));
   if (incomplete) return { total: null, rows: [], incomplete: true };
   let total = 0;
@@ -166,12 +168,19 @@ export function pnlAt(options, holdings, move, ivChg, days, withStocks) {
   return { total, rows };
 }
 
-export function WhatIf({ options, holdings }) {
-  const maxDte = Math.max(0, ...options.map(o => Math.ceil((o.time_to_expiry_years ?? o.dte / 365) * 365)));
+export function WhatIf({ options: allOptions, holdings: allHoldings }) {
   const [move, setMove] = useState(0);
   const [ivChg, setIvChg] = useState(0);
   const [days, setDays] = useState(0);
   const [withStocks, setWithStocks] = useState(true);
+  const [skipMissing, setSkipMissing] = useState(false);
+  const missing = useMemo(() => [
+    ...allOptions.filter(unquotedOption).map(o => `${o.ticker} ${o.position || 'long'} $${o.strike} ${o.type}`),
+    ...(withStocks ? allHoldings.filter(h => !(h.current_price > 0)).map(h => `${h.ticker} ${h.shares} shares`) : []),
+  ], [allOptions, allHoldings, withStocks]);
+  const options = useMemo(() => (skipMissing ? allOptions.filter(o => !unquotedOption(o)) : allOptions), [allOptions, skipMissing]);
+  const holdings = useMemo(() => (skipMissing ? allHoldings.filter(h => h.current_price > 0) : allHoldings), [allHoldings, skipMissing]);
+  const maxDte = Math.max(0, ...options.map(o => Math.ceil((o.time_to_expiry_years ?? o.dte / 365) * 365)));
   const now = useMemo(() => pnlAt(options, holdings, 0, 0, 0, withStocks).total, [options, holdings, withStocks]);
   const res = useMemo(() => pnlAt(options, holdings, move, ivChg, days, withStocks), [options, holdings, move, ivChg, days, withStocks]);
   const curve = useMemo(() => Array.from({ length: 41 }, (_, i) => {
@@ -179,10 +188,24 @@ export function WhatIf({ options, holdings }) {
     return { move: m, scenario: pnlAt(options, holdings, m, ivChg, days, withStocks).total,
       expiry: pnlAt(options, holdings, m, 0, maxDte, withStocks).total };
   }), [options, holdings, ivChg, days, withStocks, maxDte]);
-  if (!options.length && !holdings.length) return <p className="empty-state">Add positions to run scenarios.</p>;
-  if (res.incomplete) return <p className="error-text">Scenario unavailable: one or more positions has no usable quote. No positions have been omitted.</p>;
+  if (!allOptions.length && !allHoldings.length) return <p className="empty-state">Add positions to run scenarios.</p>;
+  if (res.incomplete) {
+    return (
+      <div className="income-warning" role="alert">
+        <strong>Scenario unavailable: {missing.length} position{missing.length === 1 ? ' has' : 's have'} no usable quote.</strong>
+        <div>{missing.join(', ')}</div>
+        <button className="btn-secondary btn-sm" onClick={() => setSkipMissing(true)}>Run without {missing.length === 1 ? 'it' : 'them'}</button>
+      </div>
+    );
+  }
   return (
     <>
+      {skipMissing && missing.length > 0 && (
+        <p className="income-warning" role="status">
+          ⚠ Left out (no quote): {missing.join(', ')}. Totals below understate your real exposure.{' '}
+          <button className="link-btn" onClick={() => setSkipMissing(false)}>Include them again</button>
+        </p>
+      )}
       <div className="whatif-controls">
         <label>Stocks move <strong>{move > 0 ? '+' : ''}{move}%</strong>
           <input type="range" min={-30} max={30} value={move} onChange={e => setMove(+e.target.value)} /></label>
@@ -216,7 +239,7 @@ export function WhatIf({ options, holdings }) {
       </table>
       <p className="ivrank-note">
         Every stock gets the same % move. Options are repriced with Black-Scholes from their current implied volatility
-        (30% when IV is unavailable); missing market quotes block the calculation. Expired scenario options are worth intrinsic value.
+        (30% when IV is unavailable); positions without a market quote block the calculation unless you choose to leave them out. Expired scenario options are worth intrinsic value.
       </p>
     </>
   );

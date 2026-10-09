@@ -285,7 +285,7 @@ The bundled app calls the URL in `VITE_API_URL`, or the fallback in `src/api/con
 | `/api/health` returns 503 | The database can't be reached. Check `DATABASE_URL` and whether Supabase is paused. |
 | A backend test fails only between 8 pm and midnight Eastern | The test builds dates with `date.today()`. Use New York time (see the existing tests). |
 | A PostgreSQL query works locally but fails on the server | Use `database.PH` for SQL placeholders (`?` in SQLite, `%s` in PostgreSQL); see `database._run`. |
-| Option quote "unavailable" for a position | The data provider has no quote. The stress test refuses to guess; close or edit the position, or wait for a quote. |
+| Option quote "unavailable" for a position | The data provider has no quote. The stress test won't guess a price; use **Run without it** (the result is then marked as leaving it out), close or edit the position, or wait for a quote. |
 | Quotes are slow or rate-limited | Finnhub's free tier allows about 60 calls/minute. Lower the number of watchlist and holding tickers, or set `FINNHUB_RATE_PER_MIN`. |
 | Lost SSH key | Oracle cannot re-download it. Create a new pair (`ssh-keygen -t ed25519 -f ~/.ssh/stockpilot_new`), then add the `.pub` line to `~/.ssh/authorized_keys` on the VM. Without any working key: Oracle Cloud console → the instance → **Console connection** (or **Run command**, if the Oracle Cloud Agent plugin is enabled) to append it, or rebuild the VM (section 5.3). Also update the `OCI_SSH_KEY` secret in GitHub (Settings → Secrets → Actions) if you replace the deploy key, so CI deploys keep working. |
 
@@ -346,23 +346,16 @@ Ordered by value for effort. Each item names where to start.
    - Fixtures now cover title rows above the header, byte-order marks, Windows line endings, Schwab/E*TRADE/Fidelity cash and total rows, and Robinhood/Webull activity layouts. Real exports can still differ.
    - If a real file fails, the preview shows "Detected columns". Add the missing header spelling to `_COLS` or `_ACTIVITY_COLS` in `portfolio_insights.py`, then add that file's header to the test.
 5. **Manage the AMD $580 short calls that are now in the money.**
-   - Portfolio Risk → Option alerts → 🔧 **Repair** already prices rolls for short calls (strategy `cc` in `options_analytics.roll_ideas`).
-   - A possible improvement: have **Suggested next steps** link straight to Repair for tested short calls, in `next_steps._option_items`, using the alert's `repair` flag.
-6. **Next steps improvements** (`next_steps.py`):
-   - honour the selected account (`?account=` like `/api/portfolio/summary`);
-   - add "earnings within 7 days" for stock holdings, not only options (reuse `options_analytics.earnings_info`);
-   - add a "dismiss for 7 days" button (store dismissed codes in a small table or in `localStorage`).
-7. **Stress test with a missing quote** (SNDK case). Offer "exclude positions without quotes" with a clear warning instead of blocking the whole scenario (`WhatIf` in `OptionsDesk.jsx`).
-8. **Restrict sign-up on the public server** (built; needs one setting).
+   - Suggested next steps → **🔧 Repair** (or Option alerts → Repair) prices rolls for short calls (strategy `cc` in `options_analytics.roll_ideas`).
+6. **Restrict sign-up on the public server** (built; needs one setting).
    - `/api/auth/register` is open while `REGISTRATION_CODE` is unset. Each user sees only their own data, but strangers would use your free API quotas.
    - On the VM: `echo 'REGISTRATION_CODE=<a code you choose>' >> ~/stock-insights/backend/.env`, then `sudo systemctl restart stock-insights`. The sign-up form then asks for the code; give it only to people you invite.
-9. **Housekeeping:** once a month, run `npm outdated` / `pip list --outdated`, upgrade one package at a time, run `scripts/check.ps1`, then push.
-10. **Monitoring:**
+7. **Housekeeping:** once a month, run `npm outdated` / `pip list --outdated`, upgrade one package at a time, run `scripts/check.ps1`, then push.
+8. **Monitoring:**
     - create free Sentry projects and set `SENTRY_DSN` (VM `.env`) and `VITE_SENTRY_DSN` (Vercel) so production errors reach you by email;
     - set up an ntfy topic in the app for phone alerts.
-11. **Every December: extend the market calendar.** `backend/market_calendar.py` lists NYSE full-day closures (`HOLIDAYS`) and 1 p.m. early closes (`EARLY_CLOSES`) for 2026–2027 only. Add the next year from nyse.com; otherwise scans and alerts run on holidays with frozen quotes.
-12. **Live option quotes (optional, needs you).** Option data comes from Yahoo and can lag. For your own positions, the free E*TRADE API gives real-time quotes, but it needs your consumer key/secret from developer.etrade.com and a daily OAuth approval, and its data is for your use only. Start in `options_analytics._chain` / `_spot` behind an env var, and test in E*TRADE's sandbox first. Shared scans (Wheel, Setups) would need a paid feed that allows redistribution.
-13. **Watchlist table on phones.** Open options and peer comparisons are cards on phones; the watchlist stays a sortable table with the ticker pinned and secondary columns hidden. A card layout would need its sort menu reworked (`Watchlist.jsx`).
+9. **Every December: extend the market calendar.** `backend/market_calendar.py` lists NYSE full-day closures (`HOLIDAYS`) and 1 p.m. early closes (`EARLY_CLOSES`) for 2026–2027 only. Add the next year from nyse.com; otherwise scans and alerts run on holidays with frozen quotes.
+10. **Live option quotes (optional, needs you).** Option data comes from Yahoo and can lag. For your own positions, the free E*TRADE API gives real-time quotes, but it needs your consumer key/secret from developer.etrade.com and a daily OAuth approval, and its data is for your use only. Start in `options_analytics._chain` / `_spot` behind an env var, and test in E*TRADE's sandbox first. Shared scans (Wheel, Setups) would need a paid feed that allows redistribution.
 
 Before each production release, follow [deploy/RELEASE_CHECKLIST.md](deploy/RELEASE_CHECKLIST.md).
 

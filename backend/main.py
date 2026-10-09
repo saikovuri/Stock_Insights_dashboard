@@ -1307,11 +1307,11 @@ def portfolio_expiry_ladder(request: Request, user: dict = Depends(get_current_u
 
 @app.get("/api/portfolio/next-steps")
 @limiter.limit("20/minute")
-def portfolio_next_steps(request: Request, user: dict = Depends(get_current_user)):
+def portfolio_next_steps(request: Request, user: dict = Depends(get_current_user), account: Optional[str] = None):
     uid = int(user["user_id"])
     try:
         actions = get_or_fetch(f"opt-actions:{uid}:{_options_version(uid)}", lambda: options_desk.position_actions(uid), ttl=120)
-        return next_steps.build(uid, actions)
+        return next_steps.build(uid, actions, (account or "").strip() or None)
     except Exception as e:
         raise _upstream_error(e)
 

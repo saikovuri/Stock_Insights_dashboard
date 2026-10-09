@@ -358,7 +358,8 @@ class FeatureTests(unittest.TestCase):
             {"id": 2, "ticker": "KO", "position": "short", "type": "put", "strike": 60, "expiry": "2099-01-15",
              "profit_captured_pct": 20, "actions": []}]}
         quote = lambda t: {"price": {"AMD": 150, "KO": 60}[t]}  # noqa: E731
-        with patch.object(next_steps, "get_quote", side_effect=quote), patch("portfolio_insights.get_quote", side_effect=quote):
+        with patch.object(next_steps, "get_quote", side_effect=quote), patch("portfolio_insights.get_quote", side_effect=quote), \
+             patch("options_analytics.earnings_info", return_value={"next": None}):
             items = next_steps.build(uid, actions)["items"]
         codes = {i["code"] for i in items}
         self.assertTrue({"rule_max_position", "rule_free_cash", "rule_take_profit", "rule_call_below_cost", "rule_earnings"} <= codes)
@@ -485,7 +486,8 @@ class FeatureTests(unittest.TestCase):
         actions = {"positions": [{"ticker": "KO", "strike": 50, "type": "put", "actions": [
             {"level": "act", "text": "Take profit."}, {"level": "info", "text": "Later."}]}]}
         quote = lambda t: {"price": {"AMD": 150, "KO": 60}[t]}
-        with patch.object(next_steps, "get_quote", side_effect=quote), patch("portfolio_insights.get_quote", side_effect=quote):
+        with patch.object(next_steps, "get_quote", side_effect=quote), patch("portfolio_insights.get_quote", side_effect=quote), \
+             patch("options_analytics.earnings_info", return_value={"next": None}):
             result = next_steps.build(uid, actions)
         codes = [(i["level"], i["code"], i.get("account") or i.get("ticker")) for i in result["items"]]
         self.assertEqual(codes[0], ("act", "options_act", None))
@@ -496,9 +498,40 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual((call["ticker"], call["link"]["shares"]), ("AMD", 200), "one of three blocks is already covered")
         self.assertNotIn("KO", [i.get("ticker") for i in result["items"] if i["code"] == "covered_call"])
         with self.as_user(uid), patch.object(next_steps, "get_quote", side_effect=quote), \
-             patch("portfolio_insights.get_quote", side_effect=quote), \
+             patch("portfolio_insights.get_quote", side_effect=quote), patch("options_analytics.earnings_info", return_value={"next": None}), \
              patch.object(self.main.options_desk, "position_actions", return_value={"positions": []}):
             self.assertEqual(self.client.get("/api/portfolio/next-steps").status_code, 200)
+            self.assertEqual(self.client.get("/api/portfolio/next-steps?account=B").json()["account"], "B")
+
+    def test_next_steps_by_account_with_stock_earnings_and_repair_links(self):
+        import accounts as accounts_module
+        import next_steps
+        uid = new_user()
+        database.add_user_holding(uid, "AMD", 300, 100, "2026-01-02 00:00:00", account="A")
+        database.add_user_holding(uid, "KO", 10, 60, "2026-01-02 00:00:00", account="B")
+        accounts_module.set_cash(uid, "B", 4000)
+        database.add_user_option(uid, "KO", "put", 50, "2099-01-15", 1, 2, "short", account="B")
+        soon = (date.today() + timedelta(days=3)).isoformat()
+        actions = {"positions": [
+            {"id": 9, "ticker": "AMD", "account": "A", "position": "short", "type": "call", "strike": 580, "expiry": "2099-06-17",
+             "actions": [{"level": "warn", "code": "tested", "text": "In the money.", "repair": True}]},
+            {"id": 10, "ticker": "KO", "account": "B", "position": "short", "type": "put", "strike": 50, "expiry": "2099-01-15",
+             "actions": [{"level": "warn", "code": "gamma", "text": "Close to expiry."}]}]}
+        quote = lambda t: {"price": {"AMD": 150, "KO": 60}[t]}  # noqa: E731
+        earnings = lambda t: {"next": soon if t == "AMD" else None, "next_confirmed": True, "next_timing": "after close"}  # noqa: E731
+        with patch.object(next_steps, "get_quote", side_effect=quote), patch("portfolio_insights.get_quote", side_effect=quote), \
+             patch("options_analytics.earnings_info", side_effect=earnings):
+            everything = next_steps.build(uid, actions)
+            only_b = next_steps.build(uid, actions, "B")
+        warn = next(i for i in everything["items"] if i["code"] == "options_warn")
+        self.assertEqual(warn["repairs"], [{"id": 9, "label": "AMD $580 call 2099-06-17"}], "only alerts that offer a repair")
+        stock = next(i for i in everything["items"] if i["code"] == "stock_earnings")
+        self.assertIn(f"AMD: {soon} (in 3 days, after close), 300 shares", stock["points"])
+        b_codes = {i["code"] for i in only_b["items"]}
+        self.assertNotIn("stock_earnings", b_codes, "AMD is held in account A")
+        self.assertNotIn("concentration", b_codes)
+        self.assertEqual(next(i for i in only_b["items"] if i["code"] == "options_warn")["points"], ["KO $50 put: Close to expiry."])
+        self.assertTrue(only_b["note"].startswith("Showing account B only."))
 
     def test_split_detection_and_application_is_atomic_and_once(self):
         import corporate_actions

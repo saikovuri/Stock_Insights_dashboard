@@ -238,6 +238,7 @@ def position_actions(user_id: int) -> dict:
         short = o.get("position") == "short"
         out.append({
             "id": o["id"], "ticker": t, "type": o["option_type"], "position": o.get("position", "long"),
+            "account": o.get("account") or "Default",
             "strike": o["strike"], "expiry": o["expiry"], "dte": oa._dte(o["expiry"]), "contracts": o["contracts"],
             "premium": o["premium"], "spot": round(S, 2) if S is not None else None, "mid": None if mid is None else round(mid, 2),
             "bid": c.get("bid"), "ask": c.get("ask"), "rolls": rolls.get(o["id"], 0),

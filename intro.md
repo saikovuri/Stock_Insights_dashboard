@@ -577,7 +577,7 @@ Source: [backend/track_record.py](backend/track_record.py).
 
 ## Watchlist
 
-The Watchlist workspace has one sortable quote table, not additional top-level subtabs. Add/remove symbols, drag to reorder, choose manual or column sorting, refresh, click a ticker for Dashboard research, or open the row's alert controls.
+The Watchlist workspace has one sortable quote table, not additional top-level subtabs. Add/remove symbols, drag to reorder, choose manual or column sorting, refresh, click a ticker for Dashboard research, or open the row's alert controls. On phones each stock is a card (price, change, P/E, market cap, RSI, dividend and earnings, with the row's buttons); the 52-week range, EPS, volume and sector are hidden there but still available in the Sort menu.
 
 Columns include price/change, 52-week high/low, P/E, EPS, market cap, RSI, volume, dividend yield and sector. Provider 52-week ranges can lag the current session, so the range is widened to include today's price and session high/low. RSI >=70 is labeled overbought and <=30 oversold. These are visual labels, not automatic trade instructions. Data gaps stay visible as missing fields.
 
@@ -704,11 +704,12 @@ Source: [frontend/src/components/Portfolio.jsx](frontend/src/components/Portfoli
 
 ### Suggested Next Steps
 
-The top of Portfolio Risk gathers open issues and opportunities across all accounts into one list, ordered Act, Warn, Idea, then Info. These are rule-based checks on recorded positions and cash, not investment advice. They do not place trades.
+The top of Portfolio Risk gathers open issues and opportunities into one list, ordered Act, Warn, Idea, then Info. It follows the account selected in the Portfolio account bar (all accounts when none is selected) and says which account it is showing. These are rule-based checks on recorded positions and cash, not investment advice. They do not place trades.
 
 | Item | Rule | Shortcut |
 | --- | --- | --- |
-| Options needing action / a look | Count of positions whose top Option Alert is Act or Warn, with the first three listed. | Scrolls to Option alerts. |
+| Options needing action / a look | Count of positions whose top Option Alert is Act or Warn, with the first three listed. | Scrolls to Option alerts. Short positions whose alert suggests a repair (for example tested short calls) also get a **🔧 Repair** button that opens Repair for that position. |
+| Stock earnings within 7 days | One item listing (up to five) held stocks whose next earnings date (Finnhub/Yahoo, as in Option alerts) is today or within 7 days, marked "(est.)" when unconfirmed. Stocks with no known date are not listed, so absence is not proof there is no report. | — |
 | Over-committed account | Entered cash is below short-put collateral (`strike × 100 × contracts`). Margin accounts may accept this. | — |
 | Short puts without cash | An account has short puts but no cash balance entered. | — |
 | Concentration | A ticker is more than 25% of stock market value (two or more priced tickers). Suggests trimming, covered calls or a protective put/collar. | — |
@@ -718,6 +719,8 @@ The top of Portfolio Risk gathers open issues and opportunities across all accou
 | Turning long-term | Profitable short-term lots that turn long-term within 60 days. | Opens Income & Performance → Tax. |
 
 Covered-call capacity counts recorded shares per account and does not see shares pledged elsewhere at the broker. Lots dated on the import day make the long-term check wrong until corrected.
+
+Warn, Idea and Info items have **Dismiss 7 days**, which hides that item (by type, account and ticker) for 7 days in this browser only (`localStorage`). Act items cannot be dismissed. **Show N dismissed suggestion(s)** lists hidden items with **Restore**.
 
 ### My Trading Rules
 
@@ -829,7 +832,7 @@ What-if changes assumptions for held stocks/options and estimates resulting P&L;
 - IV slider: -60% through +100%, applied as a relative change to each option's IV, not percentage points. Missing IV assumes 30%; scenario IV is floored at 1%.
 - Days-passed slider runs to the last recorded option expiry; Include shares toggles stock P&L.
 - Black-Scholes uses 4% interest and current quote anchoring; the current model/mark difference fades as time runs down. At expiry, scenario value becomes intrinsic. The unchanged scenario reproduces the current market mark.
-- Any required missing option/stock quote blocks the scenario instead of silently dropping that position. Results compare total scenario P&L with current P&L, not only the incremental future gain.
+- Any required missing option/stock quote blocks the scenario instead of silently dropping that position. For options without a usable quote, the warning lists them and offers **Run without it/them**; the result then shows a "⚠ Left out (no quote)" banner naming those positions, with **Include them again**. The totals then exclude their risk. Results compare total scenario P&L with current P&L, not only the incremental future gain.
 
 The correlation heatmap uses three-month daily log returns, aligned on matching start/end date pairs, with at least five common observations and nonzero variance required. It is distinct from Doctor's one-year data and the Wheel planner's six-month check. Correlation is not a permanent relationship or proof of diversification. Sector allocation is based on recorded stock exposure. Missing marks prevent complete stock-value charts; no chart can infer unrecorded accounts or positions.
 
