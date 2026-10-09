@@ -182,6 +182,7 @@ export default function WheelIdeas({ onSelect }) {
         <h3 style={{ margin: 0 }}>🎡 Wheel candidates</h3>
         {data?.updated_at && <span className="market-sub">{wheelFreshness(data)}</span>}
       </div>
+      <p className="use-when"><b>Use this when</b> you don't have a stock yet and want a shortlist for cash-secured puts. For one stock you already chose, open it and use Options → Sell premium.</p>
       <p className="structures-intro">
         The wheel: sell a cash-secured put on a stock you'd happily own. If it expires, keep the premium and repeat; if
         you're assigned, sell covered calls above your cost until the shares are called away. We screen the S&P 500 and Nasdaq-100 for

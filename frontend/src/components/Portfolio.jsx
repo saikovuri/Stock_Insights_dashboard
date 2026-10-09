@@ -206,15 +206,20 @@ export default function Portfolio() {
     } catch (e) { setMsg(e.message); }
   };
 
+  // On phones the entry form sits below the list, so bring it into view when a row action fills it
+  const showForm = id => setTimeout(() => document.getElementById(id)?.scrollIntoView?.({ behavior: 'smooth', block: 'center' }), 0);
+
   const startSellLot = (lot) => {
     setSellLotId(lot.id);
     setEditIdx(null);
     setForm({ ticker: lot.ticker, shares: lot.shares, price: lot.current_price ?? lot.buy_price });
+    showForm('stock-ticker');
   };
 
   const startEditStock = (h) => {
     setEditIdx(h.id);
     setForm({ ticker: h.ticker, shares: h.shares, price: h.buy_price, acquired: String(h.date_added || '').slice(0, 10) });
+    showForm('stock-ticker');
   };
 
   const handleSaveEdit = async () => {
@@ -295,6 +300,7 @@ export default function Portfolio() {
       expiry: o.expiry, premium: o.premium, contracts: o.contracts,
       action: o.position === 'short' ? 'sto' : 'bto',
     });
+    showForm('opt-ticker');
   };
 
   const handleSaveOptEdit = async () => {
@@ -382,6 +388,11 @@ export default function Portfolio() {
     const option = options.find(item => item.id === id);
     if (option) { setSection('holdings'); setTab('options'); setView('current'); setRepairOpt(option); }
   };
+  const jumpTo = id => {
+    const element = document.getElementById(id);
+    if (element?.tagName === 'DETAILS') element.open = true;
+    element?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+  };
 
   return (
     <div className="portfolio-workspace">
@@ -396,7 +407,15 @@ export default function Portfolio() {
       {portfolio?.as_of && <p className="as-of">Quotes as of {new Date(portfolio.as_of).toLocaleTimeString()}{optionsSummary?.as_of ? ` · option marks ${new Date(optionsSummary.as_of).toLocaleTimeString()}` : ''}</p>}
       {section === 'risk' && <section className="portfolio-section">
         {isGuest ? <p>Sign in to review portfolio risk.</p> : <>
-          <h3>Suggested next steps</h3>
+          <nav className="jump-menu" aria-label="Portfolio Risk sections">
+            <span className="market-sub">Jump to:</span>
+            {[['next-steps', 'Next steps'], ['trading-rules', 'Rules'], ['trim-planner', 'Trim'], ['position-alerts', 'Option alerts'],
+              ['earnings-exposure', 'Earnings'], ['expiry-ladder', 'Expiry ladder'], ['stress-scenarios', 'Stress test'],
+              ['correlations', 'Correlation'], ['sectors', 'Sectors']].map(([id, label]) => (
+              <button key={id} type="button" className="jump-chip" onClick={() => jumpTo(id)}>{label}</button>
+            ))}
+          </nav>
+          <h3 id="next-steps">Suggested next steps</h3>
           <PortfolioDoctor key={version} />
           <NextSteps version={`${version}:${rulesRevision}`}
             onShowAlerts={() => document.getElementById('position-alerts')?.scrollIntoView({ behavior: 'smooth' })}
@@ -406,11 +425,13 @@ export default function Portfolio() {
           <h3 id="trim-planner">Trim planner</h3>
           <TrimPlanner tickers={[...new Set(holdings.map(item => item.ticker))].sort()} initialTicker={trimTicker} />
           <h3 id="position-alerts">Option alerts</h3><Today version={version} onRepair={repair} onAssign={id => { const option = options.find(item => item.id === id); if (option) handleAssign(option); }} />
-          <h3>Earnings exposure</h3><Earnings version={version} />
+          <h3 id="earnings-exposure">Earnings exposure</h3><Earnings version={version} />
           <h3 id="expiry-ladder">Expiration ladder</h3><ExpiryLadder version={version} />
-          <h3>Stress scenarios</h3><WhatIf options={options} holdings={holdings} />
-          {holdings.length >= 2 && <CorrelationHeatmap tickers={[...new Set(holdings.map(item => item.ticker))]} />}
-          {holdings.length > 0 && !portfolio?.incomplete && <SectorAllocation holdings={holdings} />}
+          <h3 id="stress-scenarios">Stress scenarios</h3><WhatIf options={options} holdings={holdings} />
+          <div id="correlations">{holdings.length >= 2 ? <CorrelationHeatmap tickers={[...new Set(holdings.map(item => item.ticker))]} />
+            : <p className="market-sub">Correlation needs at least two stocks.</p>}</div>
+          <div id="sectors">{holdings.length > 0 && !portfolio?.incomplete ? <SectorAllocation holdings={holdings} />
+            : <p className="market-sub">Sector allocation needs priced holdings.</p>}</div>
         </>}
       </section>}
       {section === 'performance' && <section className="portfolio-section">
@@ -468,7 +489,7 @@ export default function Portfolio() {
 
       {/* ── Stocks Tab ────────────────────────────────────────── */}
       {tab === 'stocks' && view === 'current' && (
-        <>
+        <div className="holdings-stack">
           <div className="portfolio-form labeled-form">
             {sellLotId !== null && (
               <div className="sell-lot-banner">Selling from lot: <strong>{form.ticker}</strong> — {form.shares} shares @ ${form.price}</div>
@@ -639,7 +660,7 @@ export default function Portfolio() {
           })() : (
             portfolio && <p className="empty-state">No stock holdings yet.</p>
           )}
-        </>
+        </div>
       )}
 
       {/* ── Sold Stocks ───────────────────────────────────────── */}
@@ -654,7 +675,7 @@ export default function Portfolio() {
             Options tracking requires an account. Sign in to add and track calls &amp; puts with live P/L.
           </div>
         ) : (
-        <>
+        <div className="holdings-stack">
           <div className="portfolio-form labeled-form">
             <div className="form-field">
               <label htmlFor="opt-action">Action</label>
@@ -740,7 +761,7 @@ export default function Portfolio() {
                   </span>
                 </div>
               </div>
-              <table className="portfolio-table">
+              <table className="portfolio-table options-table">
                 <thead>
                   <tr>
                     <th title="Underlying stock symbol">Ticker</th>
@@ -771,36 +792,36 @@ export default function Portfolio() {
                     return (
                     <tr key={o.id || i} className={editOptIdx === o.id ? 'row-editing' : ''}>
                       <td><strong>{o.ticker}</strong>{!account && o.account && o.account !== 'Default' && <span className="account-badge">{o.account}</span>}</td>
-                      <td className={o.type === 'call' ? 'positive' : 'negative'}>
+                      <td className={o.type === 'call' ? 'positive' : 'negative'} data-label="Type">
                         {o.type.toUpperCase()}
                       </td>
-                      <td>
+                      <td data-label="Side">
                         <span className={`side-badge side-${side}`}>
                           {side.toUpperCase()}
                         </span>
                       </td>
-                      <td>${o.strike.toFixed(2)}</td>
-                      <td>{o.current_price == null ? 'Unavailable' : `$${o.current_price.toFixed(2)}`}</td>
-                      <td className={moneyClass}>
+                      <td data-label="Strike">${o.strike.toFixed(2)}</td>
+                      <td data-label="Stock">{o.current_price == null ? 'Unavailable' : `$${o.current_price.toFixed(2)}`}</td>
+                      <td className={moneyClass} data-label="Status">
                         <span className="moneyness-badge" title={
                           moneyness === 'ITM' ? (side === 'short' ? 'In the Money — assignment and loss risk for this short option' : 'In the Money — has intrinsic value')
                           : moneyness === 'OTM' ? (side === 'short' ? 'Out of the Money — on track to expire worthless if it stays here' : 'Out of the Money — no intrinsic value (only time value)')
                           : 'At the Money — strike ≈ current price'
                         }>{moneyness}</span>
                       </td>
-                      <td className="nowrap">
+                      <td className="nowrap" data-label="Expiry">
                         {o.expiry}
                         <span className="dte-badge" title="Days to expiry">{o.dte}d</span>
                       </td>
-                      <td>{o.contracts}</td>
-                      <td>${o.premium.toFixed(2)}</td>
-                      <td title={o.quoted === false
+                      <td data-label="Qty">{o.contracts}</td>
+                      <td data-label="Paid">${o.premium.toFixed(2)}</td>
+                      <td data-label="Mark" title={o.quoted === false
                         ? 'No usable two-sided quote for this exact contract; excluded from valuation'
                         : `Bid: $${(o.bid || 0).toFixed(2)} / Ask: $${(o.ask || 0).toFixed(2)}`}>
                         {o.market_price == null ? 'Unavailable' : `$${o.market_price.toFixed(2)}`}
                       </td>
-                      <td title="Implied Volatility">{o.iv ? `${o.iv}%` : '—'}</td>
-                      <td className={o.pnl == null ? '' : o.pnl >= 0 ? 'positive' : 'negative'}>
+                      <td title="Implied Volatility" data-label="IV">{o.iv ? `${o.iv}%` : '—'}</td>
+                      <td className={o.pnl == null ? '' : o.pnl >= 0 ? 'positive' : 'negative'} data-label="P/L">
                         {o.pnl == null ? 'Unavailable' : `${usd(o.pnl)} (${o.pnl_pct?.toFixed(1) ?? '0'}%)`}
                       </td>
                       <td className="action-cell">
@@ -856,7 +877,7 @@ export default function Portfolio() {
           ) : (
             optionsSummary && <p className="empty-state">No options positions yet.</p>
           )}
-        </>
+        </div>
         )
       )}
 

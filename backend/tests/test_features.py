@@ -220,6 +220,21 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual((done["imported"], done["cash"]["cash"]), (1, 1200))
         self.assertEqual([(h["ticker"], h["account"]) for h in database.get_user_holdings(uid)], [("AAPL", "Fido")])
 
+    def test_broker_files_with_preambles_bom_and_cash_rows(self):
+        import portfolio_insights as insights
+        schwab = ("\"Positions for account Individual ...123 as of 09:57 PM ET, 2026/10/08\"\r\n\r\n"
+                  "\"Symbol\",\"Description\",\"Qty (Quantity)\",\"Price\",\"Mkt Val (Market Value)\",\"Cost Basis\",\"Security Type\"\r\n"
+                  "\"AAPL\",\"APPLE INC\",\"10\",\"200.00\",\"$2,000.00\",\"$1,500.00\",\"Equity\"\r\n"
+                  "\"AAPL 01/17/2030 250.00 C\",\"CALL APPLE INC $250 EXP 01/17/30\",\"-1\",\"5.00\",\"-$500.00\",\"$400.00\",\"Option\"\r\n"
+                  "\"Cash & Cash Investments\",\"--\",\"--\",\"--\",\"$1,234.56\",\"--\",\"Cash and Money Market\"\r\n"
+                  "\"Account Total\",\"--\",\"--\",\"--\",\"$2,734.56\",\"$1,900.00\",\"--\"\r\n")
+        s = insights.parse_broker_csv(schwab)
+        self.assertEqual([(r["kind"], r["ticker"]) for r in s["rows"]], [("stock", "AAPL"), ("option", "AAPL")])
+        self.assertEqual((s["rows"][0]["price"], s["rows"][1]["premium"], s["money_market_total"]), (150, 4, 1234.56))
+        robinhood = ("\ufeff\"Activity Date\",\"Process Date\",\"Settle Date\",\"Instrument\",\"Description\",\"Trans Code\",\"Quantity\",\"Price\",\"Amount\"\r\n"
+                     "\"1/05/2026\",\"1/05/2026\",\"1/06/2026\",\"AAPL\",\"Apple\",\"Buy\",\"100\",\"$180.00\",\"($18,000.00)\"\r\n\r\n")
+        self.assertEqual([(r["ticker"], r["shares"]) for r in insights.parse_activity_csv(robinhood)["rows"]], [("AAPL", 100)])
+
     def test_editing_a_lot_can_correct_its_purchase_date(self):
         uid = new_user()
         lot = database.add_user_holding(uid, "AMD", 100, 59.38, account="Etrade")
@@ -286,6 +301,16 @@ class FeatureTests(unittest.TestCase):
         with self.as_user(uid):
             again = self.client.post("/api/portfolio/import", json={"csv": csv_text, "account": "Etrade", "mode": "sync"}).json()
         self.assertEqual(again["reconcile"]["changes"], 0, "re-syncing the same file is a no-op")
+        # Same quantity at a different cost is reported but not applied, so the original lot (and date) survives
+        basis_csv = "Symbol,Quantity,Price Paid\nAMD,100,61.00\nMSFT,60,310\nNVDA,10,180\n"
+        with self.as_user(uid):
+            preview = self.client.post("/api/portfolio/import", json={"csv": basis_csv, "account": "Etrade", "mode": "sync"}).json()
+            amd_row = next(s for s in preview["reconcile"]["stocks"] if s["ticker"] == "AMD")
+            self.assertEqual((amd_row["status"], amd_row["recorded_cost"], amd_row["file_cost"]), ("basis", 59.38, 61.0))
+            self.assertEqual((preview["reconcile"]["changes"], preview["reconcile"]["basis_differences"]), (0, 1))
+            done = self.client.post("/api/portfolio/import", json={"csv": basis_csv, "account": "Etrade", "mode": "sync", "commit": True}).json()
+        self.assertEqual(done["sync"]["basis_differences"], 1)
+        self.assertEqual(next(h for h in database.get_user_holdings(uid) if h["ticker"] == "AMD")["id"], amd["id"])
 
     def test_expiry_ladder_cash_needs_and_tax_smart_lot_delivery(self):
         import expiry_ladder

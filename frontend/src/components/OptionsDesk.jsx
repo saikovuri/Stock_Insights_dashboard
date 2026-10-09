@@ -36,6 +36,7 @@ export function Today({ version, onRepair, onAssign }) {
   const busy = d.positions.filter(p => p.actions.length);
   return (
     <>
+      {d.as_of && <p className="as-of">Marks as of {new Date(d.as_of).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} · option quotes are cached a few minutes and can be delayed by the provider</p>}
       <p className="structures-intro">
         Review thresholds: {d.rules.take_profit_pct}% of premium captured, short-strike delta above {d.rules.tested_delta},
         a loss of {d.rules.stop_multiple ?? 2}× the credit, avoid the last {d.rules.gamma_days} days, a short within

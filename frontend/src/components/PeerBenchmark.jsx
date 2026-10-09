@@ -79,15 +79,15 @@ export default function PeerBenchmark({ ticker }) {
               return (
                 <tr key={p.ticker} className={isBase ? 'peer-row-base' : ''}>
                   <td><strong>{p.ticker}</strong>{isBase && <span className="peer-you-badge">you</span>}</td>
-                  <td>${p.price?.toFixed(2) ?? 'N/A'}</td>
-                  <td className={p.change_pct >= 0 ? 'positive' : 'negative'}>
+                  <td data-label="Price">${p.price?.toFixed(2) ?? 'N/A'}</td>
+                  <td data-label="Chg%" className={p.change_pct >= 0 ? 'positive' : 'negative'}>
                     {p.change_pct != null ? `${p.change_pct >= 0 ? '+' : ''}${p.change_pct.toFixed(2)}%` : 'N/A'}
                   </td>
-                  <td><Bar value={p.pe_ratio} max={maxPE} isBase={isBase} /></td>
-                  <td>{fmt(p.market_cap)}</td>
-                  <td>{p.eps != null ? `$${p.eps.toFixed(2)}` : 'N/A'}</td>
-                  <td><Bar value={p.beta} max={maxBeta} isBase={isBase} /></td>
-                  <td>{p.dividend_yield != null ? `${p.dividend_yield.toFixed(2)}%` : 'N/A'}</td>
+                  <td data-label="P/E"><Bar value={p.pe_ratio} max={maxPE} isBase={isBase} /></td>
+                  <td data-label="Mkt cap">{fmt(p.market_cap)}</td>
+                  <td data-label="EPS">{p.eps != null ? `$${p.eps.toFixed(2)}` : 'N/A'}</td>
+                  <td data-label="Beta"><Bar value={p.beta} max={maxBeta} isBase={isBase} /></td>
+                  <td data-label="Div%">{p.dividend_yield != null ? `${p.dividend_yield.toFixed(2)}%` : 'N/A'}</td>
                 </tr>
               );
             })}

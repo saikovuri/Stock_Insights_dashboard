@@ -51,7 +51,7 @@ An absent candidate does not necessarily mean a bad investment. It can mean miss
 | Portfolio | Recorded holdings and options, account risks, income/performance, and the account ledger. |
 | Journal | Separate recorded trading history from manually written trade plans and reviews. |
 
-The Dashboard has Overview, Analysis, Fundamentals, and News subtabs. Overview starts with the quote and key metrics, then **Signals** (recent chart events such as "Lost 200-day" or "Oversold") and "since last look". When a row of subtabs is wider than the screen, it scrolls sideways without a scrollbar: fades and ‹ › arrows mark hidden tabs, and the selected tab scrolls into view. On phones the subtabs wrap into an even grid instead (up to three per row, four as a 2×2 block), with equal-height cells and each emoji kept beside its first word. On phones the five main tabs show an icon above a one-line label; the header shows the trading style as its icon (tap opens the full list), a 🔍 jump-to button in place of ⌘K, and compact theme, notification and Sign Out controls that stay within the screen. Stock alerts put the badge above the message, and segmented filters wrap rather than hide options. The trading-style selector changes defaults, ordering, and visibility; it is not an account risk limit. Sign-in enables account-specific features. Theme controls affect appearance only. Older `#setups`, `#screener`, and `#tools` links route to Ideas, Watchlist, and Journal respectively.
+The Dashboard has Overview, Analysis, Fundamentals, and News subtabs. Overview starts with the quote and key metrics, then **Signals** (recent chart events such as "Lost 200-day" or "Oversold") and "since last look". On phones, Holdings and open options list your positions before the add/sell form (row actions such as Edit or Sell scroll to the form), and open options and peer comparisons show one card per row instead of a sideways-scrolling table. Income ideas, Wheel candidates and Manage a wheel position each start with a one-line **Use this when** note. When a row of subtabs is wider than the screen, it scrolls sideways without a scrollbar: fades and ‹ › arrows mark hidden tabs, and the selected tab scrolls into view. On phones the subtabs wrap into an even grid instead (up to three per row, four as a 2×2 block), with equal-height cells and each emoji kept beside its first word. On phones the five main tabs show an icon above a one-line label; the header shows the trading style as its icon (tap opens the full list), a 🔍 jump-to button in place of ⌘K, and compact theme, notification and Sign Out controls that stay within the screen. Stock alerts put the badge above the message, and segmented filters wrap rather than hide options. The trading-style selector changes defaults, ordering, and visibility; it is not an account risk limit. Sign-in enables account-specific features. Theme controls affect appearance only. Older `#setups`, `#screener`, and `#tools` links route to Ideas, Watchlist, and Journal respectively.
 
 **Jump to (Ctrl+K / ⌘K)** opens a command palette from anywhere; the ⌘K button in the header does the same.
 - Type words to filter destinations: every tab, each Ideas view, each Portfolio section, and the main tools (import broker CSV, expiration ladder, trim planner, trading rules, buy zones, edge report, P&L calendar). It also offers System status (signed in) and the theme toggle.
@@ -146,7 +146,7 @@ The scanner looks at new signals in the last 252 bars. A signal is counted only 
 
 By default this is a **current-constituent exploratory sample**, subject to survivorship bias. A documented point-in-time membership dataset can be selected with `RESEARCH_UNIVERSE_SOURCE`. Membership must have been known by the signal-date US market close. Missing historical membership or required prices suppress that historical summary. Neither mode turns descriptive forward returns into portfolio P&L or proves an edge.
 
-The default "all setups" filter requires at least one active setup; "any" includes all analyzed stocks, including those with no signal. Additional controls filter sector and minimum RS (initially zero). Default order is descending RS, with column sorting available. Sector leadership is an aggregation of the scan, not another independent quality screen.
+The default "all setups" filter requires at least one active setup; "any" includes all analyzed stocks, including those with no signal. Additional controls filter sector, minimum RS (initially zero) and **Uptrend only** (above the 200-day SMA with the 50-day above the 200-day). In a one-year check (Oct 2026, current constituents) Reversal candle and Reclaim 21/50 signals in that uptrend did better than those below the 200-day; the explainers point to the filter. Default order is descending RS, with column sorting available. Sector leadership is an aggregation of the scan, not another independent quality screen.
 
 The scan refreshes in the background when older than 36 hours; cached results can remain visible while it builds. Read the displayed update time and coverage status.
 
@@ -638,13 +638,13 @@ Signed-in users can expand **Import from broker CSV** under **Data tools** at th
 | Webull | Filled orders export. Stocks and options come as separate files. | Transaction history |
 | Any broker with realized gain/loss | Closed lots CSV | Closed trade history |
 
-These layouts were implemented from the brokers' published column names and checked against test fixtures, not against every real export variant. Check the preview, including the detected columns, before importing.
+These layouts were implemented from the brokers' published column names and checked against test fixtures, including title rows above the header, a leading byte-order mark, Windows line endings and trailing disclaimer/total rows, but not against every real export variant. Check the preview, including the detected columns, before importing.
 
 **Open positions** searches the first 30 rows for Symbol and Quantity columns, accepting common aliases for per-share or total cost and acquisition date. Header matching ignores case and trailing unit markers such as `$`, `%` or `($)`, so E*TRADE's `Price Paid $` is read as the cost per share.
 
 - Stock/ETF rows become new lots. Positive quantity and positive cost are required; total cost can be divided by quantity when per-share cost is absent. Short stock positions are skipped. Dots normalize to hyphens. Processing stops at 500 accepted rows.
 - Option symbols are recognized in OCC (`AAPL  250117C00150000`), Fidelity (`-AAPL250117C150`), Schwab (`AAPL 01/17/2025 150.00 C`) and E*TRADE (`AAPL Jan 17 '25 $150 Call`) styles. Negative quantity records a short; whole contracts are required. Premium per share is |total cost| / (contracts × 100), or the per-share average when no total is given. Brokers that report per-contract averages without a total will be misread by 100×, so check the preview. Already-expired options are skipped.
-- Cash summary rows are skipped. Money-market fund symbols (three letters followed by `XX`, such as `VUSXX` or `SPAXX`) and Fidelity core positions marked `**` (such as `SPAXX**` or `FCASH**`) are not imported as shares. Their market value (or quantity × cost, or quantity at $1) is added to the selected account's cash balance, and the preview shows the total. Re-importing adds the amount again. Missing, future or unrecognized acquisition dates fall back to the import date; E*TRADE's positions export has no purchase dates, so its lots are dated on the import day. Correct this before relying on holding-period/benchmark analytics.
+- Cash summary rows are skipped. Money-market fund symbols (three letters followed by `XX`, such as `VUSXX` or `SPAXX`) and Fidelity core positions marked `**` (such as `SPAXX**` or `FCASH**`) are not imported as shares. Their market value (or quantity × cost, or quantity at $1) is added to the selected account's cash balance, and the preview shows the total. Schwab's "Cash & Cash Investments" row is treated the same way when it has a positive market value; E*TRADE's plain CASH row is still skipped. Re-importing adds the amount again. Missing, future or unrecognized acquisition dates fall back to the import date; E*TRADE's positions export has no purchase dates, so its lots are dated on the import day. Correct this before relying on holding-period/benchmark analytics.
 - When the file has an Account Number/Account Name column with more than one account (Fidelity, Vanguard), the preview offers a picker: import all of them into the selected app account, or one broker account at a time into different app accounts.
 - Positions import is an **append**, not broker synchronization or duplicate detection; reimporting the same positions duplicates lots. Use **Sync account to this file** instead for repeat imports (below).
 
@@ -653,7 +653,7 @@ These layouts were implemented from the brokers' published column names and chec
 - Applying leaves matching tickers and contracts untouched, so corrected lot dates survive. It deletes and re-imports the lots of changed tickers or contracts, and deletes positions missing from the file **without recording a sale**: record real sales first to keep their realized P&L.
 - Money-market totals **set** the account's cash instead of adding to it.
 - Other app accounts are never touched. Every change is captured by the audit trail.
-- Re-syncing the same file reports "Already in sync". Sync compares quantities, not cost basis, so a cost-only difference is left as recorded.
+- Re-syncing the same file reports "Already in sync". Sync also compares cost: when the quantity matches but the total cost differs by more than $1 and 0.5%, the preview shows **Cost differs: kept** with both average costs. Those lots are not replaced (so their purchase dates survive); edit them if the file is right.
 
 **Transaction history** rebuilds open positions from an activity or filled-orders export. It needs Date, Action/Side/Trans Code and Quantity columns, plus a symbol or description. Price comes from the fill price (`Avg Price` is preferred over Webull's order `Price`) or from amount ÷ quantity.
 
@@ -745,6 +745,8 @@ The trim planner sizes sales that bring one recorded stock down to a target shar
 It is arithmetic, not a price forecast: later steps happen only if the stock reaches those prices. Not tax advice.
 
 ### Option Alerts
+
+Portfolio Risk opens with a **Jump to** row (Next steps, Rules, Trim, Option alerts, Earnings, Expiry ladder, Stress test, Correlation, Sectors) that scrolls to each section. Option alerts shows when its marks were priced ("Marks as of").
 
 Portfolio Risk's **Option alerts** (formerly Position alerts) checks each open option record.
 Open option records are checked individually using the exact contract quote, canonical earnings data and recorded share coverage. Severity order is Act, Warn, Info, then remaining DTE.
@@ -1156,7 +1158,7 @@ The bell displays saved notifications/unread state, polls approximately every tw
 
 ### Background Schedule
 
-Defaults are server-side and require a running scheduler process. "Market window" means a NYSE trading day (weekends and the full-day holidays listed in `backend/market_calendar.py`, currently 2026–2027, are excluded; 1 p.m. early closes are not modeled):
+Defaults are server-side and require a running scheduler process. "Market window" means a NYSE trading day (weekends and the full-day holidays listed in `backend/market_calendar.py`, currently 2026–2027, are excluded) up to that day's close: 4 p.m., or 1 p.m. on the early-close days in the same file. Late-session jobs (pin risk, IV snapshot, account value snapshot) run the same time before that day's close:
 
 | Work | Current schedule |
 | --- | --- |

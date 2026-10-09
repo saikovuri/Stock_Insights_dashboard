@@ -1,5 +1,5 @@
 // Mobile UI audit: screenshots every main view on a phone viewport and reports elements wider than the screen.
-// Usage (from frontend/, local dev only; registers a throwaway user): node scripts/mobile-audit.mjs [baseUrl] [outDir]
+// Usage (from frontend/, local dev only; registers a throwaway user): node scripts/mobile-audit.mjs [baseUrl] [outDir] [desktop]
 import { chromium, devices } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 
@@ -24,7 +24,7 @@ await api('/portfolio/import', { csv, commit: true, kind: 'positions', account: 
 for (const t of ['NVDA', 'MSFT', 'TSLA']) await api('/watchlist', { ticker: t }, token);
 
 const browser = await chromium.launch();
-const context = await browser.newContext({ ...devices['Pixel 7'] });
+const context = await browser.newContext(process.argv[4] === 'desktop' ? { viewport: { width: 1440, height: 900 } } : { ...devices['Pixel 7'] });
 await context.addInitScript(([t, r]) => {
   localStorage.setItem('token', t);
   if (r) localStorage.setItem('refresh_token', r);

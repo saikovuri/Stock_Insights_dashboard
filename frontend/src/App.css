@@ -4272,6 +4272,11 @@ tr.alert-triggered {
    ══════════════════════════════════════════════════════════════════ */
 .structures-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.4rem; }
 .structures-intro { color: var(--text-secondary); font-size: 0.86rem; margin: 0 0 0.85rem; }
+.jump-menu { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; margin: 0 0 0.75rem; }
+.jump-chip { font-size: 0.75rem; padding: 0.2rem 0.6rem; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); cursor: pointer; }
+.jump-chip:hover { border-color: var(--accent); color: var(--accent); }
+.portfolio-section [id] { scroll-margin-top: 0.75rem; }
+.use-when { font-size: 0.8rem; margin: 0.4rem 0 0.6rem; padding: 0.35rem 0.6rem; border-left: 3px solid var(--accent); background: var(--accent-soft, rgba(99,102,241,0.08)); border-radius: 4px; }
 
 .structures-controls {
   display: grid; grid-template-columns: 1fr 1fr auto; gap: 0.75rem;
@@ -5157,6 +5162,40 @@ button.signal-chip { cursor: pointer; }
   .market-tile-price { font-size: 0.9rem; }
   .market-tile-name { font-size: 0.62rem; }
   .market-regime-text { font-size: 0.85rem; }
+
+  /* Holdings and options: positions first, entry form below */
+  .holdings-stack { display: flex; flex-direction: column; }
+  .holdings-stack > .portfolio-form { order: 2; margin-top: 1rem; }
+
+  /* Open options table: one card per position */
+  .portfolio-table.options-table { display: block; overflow: visible; font-size: 0.78rem; }
+  .options-table thead { display: none; }
+  .options-table tbody { display: flex; flex-direction: column; gap: 0.45rem; }
+  .options-table tr {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.3rem 0.5rem;
+    border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem 0.6rem; background: var(--bg-subtle);
+  }
+  .options-table td { border: none; padding: 0; white-space: normal; text-align: left; }
+  .options-table td:first-child { grid-column: 1 / -1; font-size: 0.88rem; }
+  .options-table td.action-cell { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 0.25rem; justify-content: flex-end; }
+  .options-table td[data-label]::before {
+    content: attr(data-label); display: block; font-size: 0.62rem; color: var(--text-muted); font-weight: 500;
+  }
+
+  /* Peer comparison: one card per company */
+  .peer-table-wrap { overflow: visible; }
+  .peer-table { display: block; min-width: 0; width: 100%; }
+  .peer-table thead { display: none; }
+  .peer-table tbody { display: flex; flex-direction: column; gap: 0.4rem; }
+  .peer-table tr {
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.25rem 0.5rem;
+    border: 1px solid var(--border); border-radius: 8px; padding: 0.45rem 0.6rem;
+  }
+  .peer-table-wrap .peer-table tr > td { position: static; box-shadow: none; background: none; border: none; padding: 0; font-size: 0.76rem; min-width: 0; }
+  .peer-table tr > td:first-child { grid-column: 1 / -1; font-size: 0.85rem; }
+  .peer-table td[data-label]::before {
+    content: attr(data-label); display: block; font-size: 0.6rem; color: var(--text-muted); font-weight: 500;
+  }
 
   /* Trade entry forms: three fields per row instead of one per screen line */
   .portfolio-form.labeled-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.4rem 0.5rem; }

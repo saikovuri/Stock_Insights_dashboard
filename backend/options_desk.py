@@ -4,7 +4,7 @@ early assignment before ex-dividend), earnings exposure, wheel ledger and an AI 
 import logging
 import math
 from collections import defaultdict
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import yfinance as yf
 
@@ -250,6 +250,7 @@ def position_actions(user_id: int) -> dict:
         })
     out.sort(key=lambda p: (min((_LEVEL[a["level"]] for a in p["actions"]), default=9), p["dte"]))
     return {"positions": out, "counts": {lvl: sum(1 for p in out for a in p["actions"] if a["level"] == lvl) for lvl in _LEVEL},
+            "as_of": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "rules": {"take_profit_pct": int(TAKE_PROFIT * 100), "tested_delta": TESTED_DELTA, "gamma_days": GAMMA_DAYS,
                       "stop_multiple": STOP_MULTIPLE, "pin_pct": PIN_PCT, "roll_limit": ROLL_LIMIT}}
 

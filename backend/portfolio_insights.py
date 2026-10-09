@@ -352,8 +352,9 @@ def parse_broker_csv(text: str, source_account: str | None = None) -> dict:
         if source_account and source != source_account:
             continue
         sym = raw.rstrip("*").replace(" ", "")
-        # Fidelity marks its core cash position with ** (SPAXX**, FDRXX**, FCASH**).
-        if raw.endswith("**") or _MONEY_MARKET.fullmatch(sym):
+        # Fidelity marks its core cash position with ** (SPAXX**, FDRXX**, FCASH**); Schwab uses a cash row.
+        cash_row = raw == "CASH & CASH INVESTMENTS"
+        if raw.endswith("**") or _MONEY_MARKET.fullmatch(sym) or (cash_row and (_num(get("value")) or 0) > 0):
             amount = _num(get("value"))
             qty = _num(get("shares"))
             if amount is None and qty:
@@ -722,34 +723,49 @@ def reconcile(user_id: int, rows: list[dict], account: str | None = None) -> dic
     """Compare a broker positions file with what is recorded in one account, per stock ticker and option contract."""
     lots, options = _recorded(user_id, account)
     rec_stock, file_stock = defaultdict(float), defaultdict(float)
+    rec_cost, file_cost = defaultdict(float), defaultdict(float)
     for h in lots:
         rec_stock[h["ticker"]] += h["shares"]
+        rec_cost[h["ticker"]] += h["shares"] * h["buy_price"]
     for r in rows:
         if r["kind"] == "stock":
             file_stock[r["ticker"]] += r["shares"]
+            file_cost[r["ticker"]] += r["shares"] * (r.get("price") or 0)
     rec_opt, file_opt = defaultdict(int), defaultdict(int)
+    rec_prem, file_prem = defaultdict(float), defaultdict(float)
     for o in options:
         rec_opt[_option_key(o)] += o["contracts"]
+        rec_prem[_option_key(o)] += o["contracts"] * o["premium"]
     for r in rows:
         if r["kind"] == "option":
             file_opt[_option_key(r)] += r["contracts"]
+            file_prem[_option_key(r)] += r["contracts"] * (r.get("premium") or 0)
 
-    def status(recorded, in_file):
+    def status(recorded, in_file, cost_recorded=0.0, cost_file=0.0):
         if not recorded:
             return "new"
         if not in_file:
             return "missing"
-        return "match" if abs(recorded - in_file) < 1e-6 else "changed"
+        if abs(recorded - in_file) >= 1e-6:
+            return "changed"
+        # Same quantity: a cost gap over $1 and 0.5% is reported, not applied, so lot dates are kept
+        return "basis" if cost_file and abs(cost_recorded - cost_file) > max(1.0, 0.005 * abs(cost_file)) else "match"
 
+    avg = lambda total, qty: round(total / qty, 4) if qty else None  # noqa: E731
     stocks = [{"ticker": t, "recorded": round(rec_stock[t], 6), "file": round(file_stock[t], 6),
-               "status": status(rec_stock[t], file_stock[t])} for t in sorted(set(rec_stock) | set(file_stock))]
-    opts = [{"label": _option_label(k), "recorded": rec_opt[k], "file": file_opt[k], "status": status(rec_opt[k], file_opt[k])}
+               "recorded_cost": avg(rec_cost[t], rec_stock[t]), "file_cost": avg(file_cost[t], file_stock[t]),
+               "status": status(rec_stock[t], file_stock[t], rec_cost[t], file_cost[t])}
+              for t in sorted(set(rec_stock) | set(file_stock))]
+    opts = [{"label": _option_label(k), "recorded": rec_opt[k], "file": file_opt[k],
+             "recorded_cost": avg(rec_prem[k], rec_opt[k]), "file_cost": avg(file_prem[k], file_opt[k]),
+             "status": status(rec_opt[k], file_opt[k], rec_prem[k], file_prem[k])}
             for k in sorted(set(rec_opt) | set(file_opt))]
     counts = defaultdict(int)
     for item in stocks + opts:
         counts[item["status"]] += 1
     return {"stocks": stocks, "options": opts, "counts": dict(counts),
-            "changes": sum(n for s, n in counts.items() if s != "match")}
+            "changes": sum(n for s, n in counts.items() if s not in ("match", "basis")),
+            "basis_differences": counts.get("basis", 0)}
 
 
 def apply_reconcile(user_id: int, rows: list[dict], account: str | None = None, money_market_total: float = 0) -> dict:
@@ -760,7 +776,7 @@ def apply_reconcile(user_id: int, rows: list[dict], account: str | None = None, 
     from database import add_user_option, delete_user_holding, delete_user_option
     diff = reconcile(user_id, rows, account)
     lots, options = _recorded(user_id, account)
-    stale_stocks = {s["ticker"] for s in diff["stocks"] if s["status"] != "match"}
+    stale_stocks = {s["ticker"] for s in diff["stocks"] if s["status"] not in ("match", "basis")}
     rec_opt, file_opt = defaultdict(int), defaultdict(int)
     for o in options:
         rec_opt[_option_key(o)] += o["contracts"]
@@ -790,7 +806,8 @@ def apply_reconcile(user_id: int, rows: list[dict], account: str | None = None, 
     cash = None
     if money_market_total and money_market_total > 0:
         cash = accounts.set_cash(user_id, database.account_name(account) or database.DEFAULT_ACCOUNT, round(money_market_total, 2))
-    return {"kept": diff["counts"].get("match", 0), "removed_records": removed, "added_records": added, "cash": cash}
+    return {"kept": diff["counts"].get("match", 0) + diff["basis_differences"], "removed_records": removed,
+            "added_records": added, "cash": cash, "basis_differences": diff["basis_differences"]}
 
 
 def import_rows(user_id: int, rows: list[dict], account: str | None = None) -> int:

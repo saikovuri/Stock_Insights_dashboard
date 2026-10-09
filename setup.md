@@ -165,7 +165,7 @@ Run a single test:
 | Backend, by name | `$env:PYTHONPATH='backend'; .\.venv\Scripts\python.exe -m unittest discover -s backend/tests -k next_steps` |
 | Frontend unit test | `cd frontend; npx vitest run src -t "next steps"` |
 | Browser (e2e) test | `cd frontend; npx playwright test -g "watchlist"` (tests the built `dist/`, served on port 4174; run `npm run build` first or results are stale) |
-| Phone layout audit | With local servers running: `cd frontend; node scripts/mobile-audit.mjs http://localhost:5173 $env:TEMP\mobile-audit`. Registers a throwaway local user with sample positions, screenshots every main view at Pixel 7 size and lists elements wider than the screen. Local only. |
+| Phone layout audit | With local servers running: `cd frontend; node scripts/mobile-audit.mjs http://localhost:5173 $env:TEMP\mobile-audit` (add `desktop` as a third argument for 1440-wide screenshots). Registers a throwaway local user with sample positions, screenshots every main view at Pixel 7 size and lists elements wider than the screen. Local only. |
 
 What the tests do:
 - Backend tests use a throwaway SQLite database, never your real one.
@@ -341,9 +341,9 @@ Ordered by value for effort. Each item names where to start.
    - import E*TRADE's transaction history with **Transaction history**, which records real dates.
 
    After changing dates, check Holdings for any newly offered split adjustment.
-3. **Use Sync for repeat imports** (built). Holdings → Import from broker CSV → **Sync account to this file** compares the file with an account, shows the differences, and only changes what differs. Possible follow-up: also flag cost-basis differences (sync currently compares quantities only), in `portfolio_insights.reconcile`.
-4. **Test the Robinhood / Webull / Fidelity importers with real files.**
-   - They were built from the brokers' published column layouts and tested with sample files only.
+3. **Use Sync for repeat imports** (built). Holdings → Data tools → Import from broker CSV → **Sync account to this file** compares the file with an account, shows the differences, and only changes what differs. It also flags cost-basis differences ("Cost differs: kept"), which you fix by editing the lot.
+4. **Test the importers with your real files.**
+   - Fixtures now cover title rows above the header, byte-order marks, Windows line endings, Schwab/E*TRADE/Fidelity cash and total rows, and Robinhood/Webull activity layouts. Real exports can still differ.
    - If a real file fails, the preview shows "Detected columns". Add the missing header spelling to `_COLS` or `_ACTIVITY_COLS` in `portfolio_insights.py`, then add that file's header to the test.
 5. **Manage the AMD $580 short calls that are now in the money.**
    - Portfolio Risk → Option alerts → 🔧 **Repair** already prices rolls for short calls (strategy `cc` in `options_analytics.roll_ideas`).
@@ -356,15 +356,13 @@ Ordered by value for effort. Each item names where to start.
 8. **Restrict sign-up on the public server** (built; needs one setting).
    - `/api/auth/register` is open while `REGISTRATION_CODE` is unset. Each user sees only their own data, but strangers would use your free API quotas.
    - On the VM: `echo 'REGISTRATION_CODE=<a code you choose>' >> ~/stock-insights/backend/.env`, then `sudo systemctl restart stock-insights`. The sign-up form then asks for the code; give it only to people you invite.
-9. **Housekeeping:**
-   - replace the deprecated `datetime.utcnow()` in `database.py` (around line 1412) with `datetime.now(timezone.utc)`;
-   - once a month, run `npm outdated` / `pip list --outdated`, upgrade one package at a time, run `scripts/check.ps1`, then push.
+9. **Housekeeping:** once a month, run `npm outdated` / `pip list --outdated`, upgrade one package at a time, run `scripts/check.ps1`, then push.
 10. **Monitoring:**
     - create free Sentry projects and set `SENTRY_DSN` (VM `.env`) and `VITE_SENTRY_DSN` (Vercel) so production errors reach you by email;
     - set up an ntfy topic in the app for phone alerts.
-11. **Every December: extend the market holiday list.** `backend/market_calendar.py` lists NYSE full-day closures for 2026–2027 only. Add the next year from nyse.com; otherwise scans and alerts run on holidays with frozen quotes.
-12. **Live option quotes (optional).** Option data comes from Yahoo and can lag. For your own positions, the free E*TRADE API gives real-time quotes (needs a daily OAuth approval; data is for your use only, not for other users). Start in `options_analytics._chain` / `_spot`. Shared scans (Wheel, Setups) would need a paid feed that allows redistribution.
-13. **Show a price time on Portfolio holdings and Options desk.** They use quotes cached up to 5 minutes without a visible time. Add an `as_of` to `/api/portfolio/summary` and the options summary, as done for income ideas (`PricedAt.jsx`).
+11. **Every December: extend the market calendar.** `backend/market_calendar.py` lists NYSE full-day closures (`HOLIDAYS`) and 1 p.m. early closes (`EARLY_CLOSES`) for 2026–2027 only. Add the next year from nyse.com; otherwise scans and alerts run on holidays with frozen quotes.
+12. **Live option quotes (optional, needs you).** Option data comes from Yahoo and can lag. For your own positions, the free E*TRADE API gives real-time quotes, but it needs your consumer key/secret from developer.etrade.com and a daily OAuth approval, and its data is for your use only. Start in `options_analytics._chain` / `_spot` behind an env var, and test in E*TRADE's sandbox first. Shared scans (Wheel, Setups) would need a paid feed that allows redistribution.
+13. **Watchlist table on phones.** Open options and peer comparisons are cards on phones; the watchlist stays a sortable table with the ticker pinned and secondary columns hidden. A card layout would need its sort menu reworked (`Watchlist.jsx`).
 
 Before each production release, follow [deploy/RELEASE_CHECKLIST.md](deploy/RELEASE_CHECKLIST.md).
 
@@ -383,7 +381,4 @@ The app has about 70 views. Fewer, clearer views help new users more than new fe
 - The checklist and position calculator were already inside **Plan a trade**; the button is now primary with a one-line hint.
 - Labels: **Signals** (stock Overview), **Price alerts**, **Option alerts** (Portfolio Risk; the anchor id stays `position-alerts`), **Next steps**. The bell stays **Notifications**.
 
-**Still open**
-- Income ideas (one ticker), Wheel candidates (scan), and the covered-call finder (shares you own) are related; give each a one-line "use this when…" at the top.
-
-**Already done (Oct 2026)**: login export/import moved out of Journal into Portfolio → Holdings → Data tools and renamed (it is not for brokerage accounts); the account bar is compact outside Holdings; the stock Overview shows the price before alerts; phone layouts tightened (three metrics per row, three form fields per row, consistent holding rows).
+**Already done (Oct 2026)**: login export/import moved out of Journal into Portfolio → Holdings → Data tools and renamed (it is not for brokerage accounts); the account bar is compact outside Holdings; the stock Overview shows the price before alerts; phone layouts tightened (three metrics per row, three form fields per row, consistent holding rows, positions listed before the entry forms, open options and peers as cards); "Use this when" notes on Income ideas, Wheel candidates and Manage a wheel position; a Jump-to row on Portfolio Risk.

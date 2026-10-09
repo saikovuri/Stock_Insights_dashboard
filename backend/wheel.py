@@ -170,14 +170,15 @@ def _safe_run(short_dated: bool = False):
 
 
 def _last_close(now: datetime) -> datetime:
-    """Most recent trading-day 4 PM ET at or before now."""
-    from market_calendar import trading_day
-    close = now.replace(hour=16, minute=0, second=0, microsecond=0)
-    if close > now:
-        close -= timedelta(days=1)
-    while not trading_day(close):
-        close -= timedelta(days=1)
-    return close
+    """Most recent trading-day close (4 PM ET, or 1 PM on early-close days) at or before now."""
+    from market_calendar import close_time, trading_day
+    day = now
+    while True:
+        hour, minute = close_time(day)
+        close = day.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if trading_day(day) and close <= now:
+            return close
+        day = (day - timedelta(days=1)).replace(hour=23, minute=59)
 
 
 def refresh_due(updated_at: str | None, now: datetime | None = None) -> bool:

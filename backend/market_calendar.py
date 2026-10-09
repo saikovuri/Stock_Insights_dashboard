@@ -1,4 +1,4 @@
-"""NYSE full-day closures. Extend HOLIDAYS each December from nyse.com; 1 p.m. early closes are not modeled."""
+"""NYSE full-day closures and 1 p.m. early closes. Extend both sets each December from nyse.com."""
 
 from datetime import date, datetime
 
@@ -11,7 +11,16 @@ HOLIDAYS = {
     date(2027, 6, 18), date(2027, 7, 5), date(2027, 9, 6), date(2027, 11, 25), date(2027, 12, 24),
 }
 
+# Stocks and equity options stop trading at 1 p.m. ET on these days
+EARLY_CLOSES = {date(2026, 11, 27), date(2026, 12, 24), date(2027, 11, 26)}
+
 
 def trading_day(day: date | datetime) -> bool:
     day = day.date() if isinstance(day, datetime) else day
     return day.weekday() < 5 and day not in HOLIDAYS
+
+
+def close_time(day: date | datetime) -> tuple[int, int]:
+    """Regular-session close (hour, minute) in New York time for that day."""
+    day = day.date() if isinstance(day, datetime) else day
+    return (13, 0) if day in EARLY_CLOSES else (16, 0)

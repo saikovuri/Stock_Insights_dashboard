@@ -39,12 +39,12 @@ const EXPLAIN = {
   reversal: {
     what: 'A hammer (long lower wick, close near the high) or a bullish engulfing candle formed within 5 days of RSI dropping below 35. Any trend.',
     why: 'Shows buyers stepping in after heavy selling. It is a "watch" signal: many reversal candles fail and the slide resumes.',
-    how: 'Add it to your watchlist and wait for confirmation (see Reclaim 21/50). A stop just below the candle\'s low defines the risk if you act early.',
+    how: 'Add it to your watchlist and wait for confirmation (see Reclaim 21/50). A stop just below the candle\'s low defines the risk if you act early. In our one-year check (Oct 2026) these did better above the 200-day average: tick "Uptrend only".',
   },
   reclaim: {
     what: 'Within 15 days of an oversold reversal candle, price closed back above both the 21-day EMA and the 50-day SMA (in the last 3 days).',
     why: 'Waiting for price to clear both averages confirms the bounce has follow-through, at the cost of a later, higher entry.',
-    how: 'Enter near the reclaim close; a stop below the 21-day EMA or the reversal low. Check the trend column: below the 200-day it is a counter-trend bounce.',
+    how: 'Enter near the reclaim close; a stop below the 21-day EMA or the reversal low. Below the 200-day it is a counter-trend bounce, which did clearly worse in our one-year check: tick "Uptrend only".',
   },
 };
 
@@ -81,6 +81,7 @@ export default function SetupScanner({ onSelect }) {
   const [setup, setSetup] = useState('all');
   const [sector, setSector] = useState('all');
   const [minRs, setMinRs] = useState(0);
+  const [uptrendOnly, setUptrendOnly] = useState(false);
   const [sort, setSort] = useState({ key: 'rs_rating', dir: -1 });
 
   useEffect(() => {
@@ -101,9 +102,10 @@ export default function SetupScanner({ onSelect }) {
       .filter(r => (setup === 'all' ? r.setups.length > 0 : setup === 'any' ? true : r.setups.includes(setup)))
       .filter(r => sector === 'all' || r.sector === sector)
       .filter(r => r.rs_rating >= minRs)
+      .filter(r => !uptrendOnly || r.trend === 'uptrend')
       .sort((a, b) => ((a[sort.key] ?? -1e9) > (b[sort.key] ?? -1e9) ? 1 : -1) * sort.dir)
       .slice(0, 150);
-  }, [data, setup, sector, minRs, sort]);
+  }, [data, setup, sector, minRs, uptrendOnly, sort]);
   const fits = usePortfolioFit(rows.slice(0, FIT_ROWS).map(r => ({ ticker: r.symbol })));
 
   if (error) return <div className="card"><p className="error-text">{error}</p></div>;
@@ -155,6 +157,9 @@ export default function SetupScanner({ onSelect }) {
           <label className="market-sub">
             Min RS {minRs}
             <input type="range" min={0} max={95} step={5} value={minRs} onChange={e => setMinRs(Number(e.target.value))} />
+          </label>
+          <label className="prepost-toggle" title="Above the 200-day SMA with the 50-day above the 200-day">
+            <input type="checkbox" checked={uptrendOnly} onChange={e => setUptrendOnly(e.target.checked)} /> Uptrend only
           </label>
         </div>
         {setup !== 'all' && setup !== 'any' ? (

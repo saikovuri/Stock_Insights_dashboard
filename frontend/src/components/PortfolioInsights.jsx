@@ -251,14 +251,19 @@ export function ImportCsv({ onImported, account = '' }) {
           <p className="market-sub">Detected columns: {Object.entries(preview.columns).map(([k, v]) => `${k} = "${v}"`).join(', ')}</p>
           {syncing && preview.reconcile && <>
             <p className="market-sub">{preview.reconcile.changes ? `${preview.reconcile.changes} difference(s)` : 'Already in sync: nothing to change'}
-              {preview.reconcile.counts.match ? ` · ${preview.reconcile.counts.match} matching` : ''}</p>
+              {preview.reconcile.counts.match ? ` · ${preview.reconcile.counts.match} matching` : ''}
+              {preview.reconcile.basis_differences ? ` · ${preview.reconcile.basis_differences} with a different cost basis (kept as recorded so lot dates survive; edit those lots if the file is right)` : ''}</p>
             <div className="table-scroll"><table className="market-table" aria-label="Differences">
               <thead><tr><th>Position</th><th>Recorded</th><th>In file</th><th>Result</th></tr></thead>
               <tbody>{[...preview.reconcile.stocks.map(s => ({ ...s, label: s.ticker, unit: 'sh' })), ...preview.reconcile.options.map(o => ({ ...o, unit: 'ct' }))]
-                .filter(item => item.status !== 'match').map(item => <tr key={item.label} className="no-click">
-                  <td>{item.label}</td><td>{item.recorded ? `${item.recorded} ${item.unit}` : '—'}</td><td>{item.file ? `${item.file} ${item.unit}` : '—'}</td>
-                  <td className={item.status === 'missing' ? 'negative' : item.status === 'new' ? 'positive' : ''}>
-                    {{ new: 'Add', missing: 'Remove', changed: 'Replace lots' }[item.status]}</td></tr>)}</tbody>
+                .filter(item => item.status !== 'match').map(item => {
+                  const cost = value => (item.status === 'basis' && value != null ? ` @ $${value}` : '');
+                  return <tr key={item.label} className="no-click">
+                    <td>{item.label}</td><td>{item.recorded ? `${item.recorded} ${item.unit}${cost(item.recorded_cost)}` : '—'}</td>
+                    <td>{item.file ? `${item.file} ${item.unit}${cost(item.file_cost)}` : '—'}</td>
+                    <td className={item.status === 'missing' ? 'negative' : item.status === 'new' ? 'positive' : item.status === 'basis' ? 'rvol-warm' : ''}>
+                      {{ new: 'Add', missing: 'Remove', changed: 'Replace lots', basis: 'Cost differs: kept' }[item.status]}</td></tr>;
+                })}</tbody>
             </table></div>
           </>}
           {!syncing && <div className="table-scroll"><table className="market-table">

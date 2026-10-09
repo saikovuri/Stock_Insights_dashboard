@@ -118,7 +118,10 @@ def _days_until(day: str) -> int:
 
 
 def _close_at(expiry: str) -> datetime:
-    return datetime.strptime(expiry, "%Y-%m-%d").replace(hour=16, tzinfo=_ET)
+    from market_calendar import close_time
+    day = datetime.strptime(expiry, "%Y-%m-%d")
+    hour, minute = close_time(day)
+    return day.replace(hour=hour, minute=minute, tzinfo=_ET)
 
 
 def _live(expiry: str) -> bool:
@@ -332,9 +335,9 @@ def _now_iso() -> str:
 
 
 def _market_open() -> bool:
-    from market_calendar import trading_day
+    from market_calendar import close_time, trading_day
     now = datetime.now(ZoneInfo("America/New_York"))
-    return trading_day(now) and (9, 45) <= (now.hour, now.minute) <= (16, 0)
+    return trading_day(now) and (9, 45) <= (now.hour, now.minute) <= close_time(now)
 
 
 # ── Volatility overview ──────────────────────────────────────────────────

@@ -1330,7 +1330,7 @@ def get_active_alerts() -> list[dict]:
 
 def mark_alert_triggered(alert_id: int) -> bool:
     """Returns False if another worker already triggered it."""
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    now = utc_now().strftime("%Y-%m-%d %H:%M:%S")
     return _run(f"UPDATE user_alerts SET active=0, triggered_at={PH} WHERE id={PH} AND active=1",
                 (now, alert_id)) > 0
 
@@ -1386,14 +1386,14 @@ def list_theses(user_id: int | None = None) -> list[dict]:
 
 
 def save_thesis(user_id: int, ticker: str, thesis: str, next_earnings: str | None) -> None:
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    now = utc_now().strftime("%Y-%m-%d %H:%M:%S")
     _run(f"INSERT INTO theses (user_id, ticker, thesis, next_earnings, updated_at) VALUES ({PH}, {PH}, {PH}, {PH}, {PH}) "
          f"ON CONFLICT (user_id, ticker) DO UPDATE SET thesis=excluded.thesis, next_earnings=excluded.next_earnings, "
          f"updated_at=excluded.updated_at", (user_id, ticker.upper(), thesis, next_earnings, now))
 
 
 def save_thesis_check(thesis_id: int, check: dict, next_earnings: str | None) -> None:
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    now = utc_now().strftime("%Y-%m-%d %H:%M:%S")
     _run(f"UPDATE theses SET last_check={PH}, last_checked_at={PH}, next_earnings={PH} WHERE id={PH}",
          (json.dumps(check), now, next_earnings, thesis_id))
 
@@ -1412,7 +1412,7 @@ def kv_get(key: str) -> dict | None:
 
 
 def kv_set(key: str, data) -> None:
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    now = utc_now().strftime("%Y-%m-%d %H:%M:%S")
     _run(f"INSERT INTO kv_cache (key, data, updated_at) VALUES ({PH}, {PH}, {PH}) "
          f"ON CONFLICT (key) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at",
          (key, json.dumps(data), now))

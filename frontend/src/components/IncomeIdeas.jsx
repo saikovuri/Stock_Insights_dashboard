@@ -207,6 +207,7 @@ export default function IncomeIdeas({ ticker }) {
         </div>
       </div>
 
+      <p className="use-when"><b>Use this when</b> you already picked this stock and want the best strike for one premium trade. To find stocks, use Ideas → Wheel; for shares you were assigned, use Manage a wheel position → Assigned.</p>
       <p className="structures-intro">{MODES[mode].intro}</p>
 
       {data && (

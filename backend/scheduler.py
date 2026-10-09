@@ -32,11 +32,12 @@ _started = False
 
 
 def _market_open(now: datetime) -> bool:
-    from market_calendar import trading_day
+    from market_calendar import close_time, trading_day
     if not trading_day(now):
         return False
     minutes = now.hour * 60 + now.minute
-    return 9 * 60 + 30 <= minutes <= 16 * 60
+    close_h, close_m = close_time(now)
+    return 9 * 60 + 30 <= minutes <= close_h * 60 + close_m
 
 
 def push_ntfy(topic: str | None, title: str, body: str, tags: str = "chart_with_upwards_trend") -> None:
@@ -415,7 +416,7 @@ def _ran(job: str) -> None:
 
 
 def _loop() -> None:
-    from market_calendar import trading_day
+    from market_calendar import close_time, trading_day
     last_scan = datetime.min.replace(tzinfo=ET)
     last_briefing_day = None
     last_cleanup_day = None
@@ -434,12 +435,14 @@ def _loop() -> None:
             now = datetime.now(ET)
             HEARTBEAT["last_tick"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
             # Late in the session, while option quotes are still live, so marks are real
-            if _market_open(now) and (now.hour, now.minute) >= (15, 45) and last_nav_day != now.date():
+            close_h, close_m = close_time(now)
+            to_close = close_h * 60 + close_m - (now.hour * 60 + now.minute)
+            if _market_open(now) and to_close <= 15 and last_nav_day != now.date():
                 last_nav_day = now.date()
                 import accounts
                 accounts.snapshot_all()
                 _ran("account_value_snapshot")
-            if _market_open(now) and (now.hour, now.minute) >= (14, 0) and last_pin_day != now.date():
+            if _market_open(now) and to_close <= 120 and last_pin_day != now.date():
                 last_pin_day = now.date()
                 _run_position_checks({"pin_risk"})
                 _ran("pin_risk_checks")
@@ -476,7 +479,7 @@ def _loop() -> None:
                 if n:
                     log.info("Alert scan created %d notifications", n)
             # Near the close, when option quotes are live, so IV snapshots are comparable day to day
-            if _market_open(now) and now.hour == 15 and now.minute >= 30 and last_iv_day != now.date():
+            if _market_open(now) and to_close <= 30 and last_iv_day != now.date():
                 last_iv_day = now.date()
                 _record_iv_snapshots()
             if now.weekday() < 5 and now.hour >= BRIEFING_HOUR_ET and last_briefing_day != now.date():

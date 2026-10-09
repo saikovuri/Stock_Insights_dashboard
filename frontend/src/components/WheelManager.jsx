@@ -167,6 +167,7 @@ export default function WheelManager({ preset }) {
           <button className={mode === 'assigned' ? 'active' : ''} onClick={() => setMode('assigned')}>📞 Assigned</button>
         </div>
       </div>
+      <p className="use-when"><b>Use this when</b> you already hold the trade: <b>Put tested</b> finds rolls for a short put in trouble; <b>Assigned</b> finds covered calls at or above your cost for shares you own.</p>
       {mode === 'repair' ? (
         <>
           {!preset?.strike && (

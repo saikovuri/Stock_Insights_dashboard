@@ -1094,6 +1094,14 @@ class WheelExpiryTests(unittest.TestCase):
         self.assertFalse(wheel.plan_stale(datetime(2026, 10, 12, 10, 0, tzinfo=et).isoformat(),
                                           datetime(2026, 10, 12, 12, 0, tzinfo=et)))
         self.assertTrue(wheel.plan_stale(None))
+        # Day after Thanksgiving closes at 1 PM
+        import options_analytics
+        early = datetime(2026, 11, 27, 12, 30, tzinfo=et)
+        self.assertTrue(scheduler._market_open(early))
+        self.assertFalse(scheduler._market_open(early.replace(hour=13, minute=30)))
+        self.assertEqual(options_analytics._close_at("2026-11-27").hour, 13)
+        self.assertEqual(wheel._last_close(early.replace(hour=15)), early.replace(hour=13, minute=0))
+        self.assertEqual(wheel._last_close(datetime(2026, 11, 30, 9, 0, tzinfo=et)), early.replace(hour=13, minute=0))
 
 
 class EvaluationTests(unittest.TestCase):
