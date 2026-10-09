@@ -37,7 +37,7 @@ def _option_items(actions: dict) -> list[dict]:
         hits = [(p, a) for p in actions.get("positions", []) for a in p["actions"][:1] if a["level"] == level]
         if hits:
             points = [f"{p['ticker']} ${p['strike']:g} {p['type']}: {a['text']}" for p, a in hits[:3]]
-            more = f"{len(hits) - 3} more in Position alerts below." if len(hits) > 3 else "Details in Position alerts below."
+            more = f"{len(hits) - 3} more in Option alerts below." if len(hits) > 3 else "Details in Option alerts below."
             items.append({"level": level, "code": f"options_{level}", "title": f"{len(hits)} option position(s) {verb}",
                           "points": points, "detail": more, "link": {"kind": "alerts"}})
     return items

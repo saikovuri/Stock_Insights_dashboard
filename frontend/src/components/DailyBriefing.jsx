@@ -21,21 +21,15 @@ export default function DailyBriefing({ onSelect }) {
   useEffect(() => { load(); }, []);
 
   if (data?.empty) {
-    return (
-      <div className="card daily-briefing">
-        <h3>📰 Daily Briefing</h3>
-        <p className="empty-state" style={{ padding: 0 }}>Add holdings or watchlist stocks to get a personalized daily briefing.</p>
-      </div>
-    );
+    return <p className="market-sub briefing-empty">Add holdings or watchlist stocks to get a personal daily briefing here.</p>;
   }
 
   const movers = data?.data?.movers || [];
-  const earnings = data?.data?.earnings || [];
 
   return (
-    <div className="card daily-briefing">
+    <section className="daily-briefing" aria-label="Your briefing">
       <div className="bull-bear-header">
-        <h3 style={{ margin: 0 }}>📰 {data?.title || 'Daily Briefing'}</h3>
+        <h4 style={{ margin: 0 }}>📰 {data?.title || 'Your briefing'}</h4>
         <button className="btn-secondary btn-sm" onClick={() => load(true)} disabled={loading}>
           {loading ? 'Loading…' : '↻ Refresh'}
         </button>
@@ -55,11 +49,8 @@ export default function DailyBriefing({ onSelect }) {
               ))}
             </div>
           )}
-          {earnings.length > 0 && (
-            <p className="ai-brief-meta">📅 Earnings this week: {earnings.map(e => `${e.ticker} (${e.date})`).join(', ')}</p>
-          )}
         </>
       )}
-    </div>
+    </section>
   );
 }

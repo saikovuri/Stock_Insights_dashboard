@@ -51,7 +51,7 @@ An absent candidate does not necessarily mean a bad investment. It can mean miss
 | Portfolio | Recorded holdings and options, account risks, income/performance, and the account ledger. |
 | Journal | Separate recorded trading history from manually written trade plans and reviews. |
 
-The Dashboard has Overview, Analysis, Fundamentals, and News subtabs. Overview starts with the quote and key metrics, then technical alerts and "since last look". When a row of subtabs is wider than the screen, it scrolls sideways without a scrollbar: fades and ‹ › arrows mark hidden tabs, and the selected tab scrolls into view. On phones the subtabs wrap into an even grid instead (up to three per row, four as a 2×2 block), with equal-height cells and each emoji kept beside its first word. On phones the five main tabs show an icon above a one-line label; the header shows the trading style as its icon (tap opens the full list), a 🔍 jump-to button in place of ⌘K, and compact theme, notification and Sign Out controls that stay within the screen. Stock alerts put the badge above the message, and segmented filters wrap rather than hide options. The trading-style selector changes defaults, ordering, and visibility; it is not an account risk limit. Sign-in enables account-specific features. Theme controls affect appearance only. Older `#setups`, `#screener`, and `#tools` links route to Ideas, Watchlist, and Journal respectively.
+The Dashboard has Overview, Analysis, Fundamentals, and News subtabs. Overview starts with the quote and key metrics, then **Signals** (recent chart events such as "Lost 200-day" or "Oversold") and "since last look". When a row of subtabs is wider than the screen, it scrolls sideways without a scrollbar: fades and ‹ › arrows mark hidden tabs, and the selected tab scrolls into view. On phones the subtabs wrap into an even grid instead (up to three per row, four as a 2×2 block), with equal-height cells and each emoji kept beside its first word. On phones the five main tabs show an icon above a one-line label; the header shows the trading style as its icon (tap opens the full list), a 🔍 jump-to button in place of ⌘K, and compact theme, notification and Sign Out controls that stay within the screen. Stock alerts put the badge above the message, and segmented filters wrap rather than hide options. The trading-style selector changes defaults, ordering, and visibility; it is not an account risk limit. Sign-in enables account-specific features. Theme controls affect appearance only. Older `#setups`, `#screener`, and `#tools` links route to Ideas, Watchlist, and Journal respectively.
 
 **Jump to (Ctrl+K / ⌘K)** opens a command palette from anywhere; the ⌘K button in the header does the same.
 - Type words to filter destinations: every tab, each Ideas view, each Portfolio section, and the main tools (import broker CSV, expiration ladder, trim planner, trading rules, buy zones, edge report, P&L calendar). It also offers System status (signed in) and the theme toggle.
@@ -76,7 +76,7 @@ Source: [frontend/src/ProfileContext.jsx](frontend/src/ProfileContext.jsx).
 
 ### Dashboard Before Selecting a Stock
 
-The landing dashboard presents market overview data, a compact economic calendar, and a daily briefing for signed-in users. The watchlist rail provides ticker shortcuts. Searching or selecting a ticker opens that stock's research; the Dashboard is not a broker order-entry screen.
+The landing dashboard opens with one **Today** card: market status and trend, index/VIX/10-year tiles, and for signed-in users the daily briefing (summary, mover chips, refresh) and one list of your stocks reporting in the next two weeks. Top movers, sectors and a compact economic calendar follow. The watchlist rail provides ticker shortcuts. Searching or selecting a ticker opens that stock's research; the Dashboard is not a broker order-entry screen.
 
 The search box accepts a ticker or a company name. Suggestions come from the S&P 500 / Nasdaq-100 directory first (exact symbol, then symbol prefix, then name matches, larger companies first), followed by Yahoo symbol search for other stocks and ETFs. Use the arrow keys and Enter, or click a suggestion. An uppercase ticker-shaped entry (for example `F`) is opened literally; a lowercase word such as `apple` opens the top suggestion. Press `/` anywhere outside a text field, or Ctrl/Cmd+K, to jump to Dashboard and focus search. Suggestions are cached for a day and can miss recent listings or name changes.
 
@@ -97,7 +97,7 @@ The market overview shows when its quotes were fetched, and a selected stock sho
 
 ### Analysis Tab
 
-The panel order is relative strength, Options Hub, short interest/smart money, analyst ratings, peer comparisons, and AI Chat. Relative strength is hidden initially for the long-term profile. The Options Hub's four views are Volatility, Income ("Sell premium"), Directional, and Flow & positioning; their rules are detailed below.
+The panel order is relative strength, Options Hub, short interest/smart money, analyst ratings, peer comparisons, and AI Chat. Relative strength is hidden initially for the long-term profile. The Options Hub's three views are **Volatility & positioning**, Income ("Sell premium"), and Directional; their rules are detailed below. Volatility & positioning shows IV rank and expected moves plus the former Flow tab (put/call ratios, call/put walls, gamma flip, max pain, and this stock's unusual contracts). Day traders see positioning first; long-term investors see it folded under "Positioning & unusual activity".
 
 Relative strength is not RSI. The scanner's raw RS measure is `0.4 * 3-month return + 0.2 * 6-month return + 0.2 * 9-month return + 0.2 * 12-month return`, using approximately 63/126/189/252 trading bars. It converts this into a roughly 1-99 percentile rating within the available scan. Separate one-, three-, six-, and twelve-month comparisons show stock return minus SPY return, in percentage points. Sector rankings average member RS ratings. A ticker outside the current scan can be compared against its stored distribution; if no suitable distribution exists, its RS rating can be unavailable.
 
@@ -469,7 +469,7 @@ Source: [backend/intraday.py](backend/intraday.py), [frontend/src/components/InP
 
 ## Options Flow and Unusual Options
 
-**Dashboard > Analysis > Flow & positioning** examines one ticker. **Ideas > Unusual options** applies the unusual-activity filter across a fixed list of 40 liquid names plus account-held/watched names, capped at 80 unique symbols. CBOE delayed chains are primary here, with Yahoo fallback; only expirations within 0-60 DTE are included.
+**Dashboard > Analysis > Options > Volatility & positioning** examines one ticker. **Ideas > Unusual options** applies the unusual-activity filter across a fixed list of 40 liquid names plus account-held/watched names, capped at 80 unique symbols. CBOE delayed chains are primary here, with Yahoo fallback; only expirations within 0-60 DTE are included.
 
 ### Unusual-Activity Qualification
 
@@ -708,7 +708,7 @@ The top of Portfolio Risk gathers open issues and opportunities across all accou
 
 | Item | Rule | Shortcut |
 | --- | --- | --- |
-| Options needing action / a look | Count of positions whose top Position Alert is Act or Warn, with the first three listed. | Scrolls to Position alerts. |
+| Options needing action / a look | Count of positions whose top Option Alert is Act or Warn, with the first three listed. | Scrolls to Option alerts. |
 | Over-committed account | Entered cash is below short-put collateral (`strike × 100 × contracts`). Margin accounts may accept this. | — |
 | Short puts without cash | An account has short puts but no cash balance entered. | — |
 | Concentration | A ticker is more than 25% of stock market value (two or more priced tickers). Suggests trimming, covered calls or a protective put/collar. | — |
@@ -727,7 +727,7 @@ Under Suggested next steps, **My trading rules** stores optional personal limits
 | --- | --- |
 | Max % of stock value in one stock (1-100) | A ticker's share of priced stock value exceeds it. This replaces the default 25% concentration check. |
 | Minimum free cash % (0-100) | An account's free cash (cash minus short-put collateral) divided by cash plus its priced stock value is below it. Accounts without an entered cash balance are skipped. |
-| Take profit at % captured (1-100) | A short option's captured premium (from Position alerts' midpoint) reaches it. |
+| Take profit at % captured (1-100) | A short option's captured premium (from Option alerts' midpoint) reaches it. |
 | Stop at a multiple of the credit (0.5-10) | A short option's loss, (midpoint − opening premium) ÷ opening premium, reaches it. 2 means the option costs 3× what it was sold for. |
 | Never sell a call below my average cost | A short call's strike is below the average cost of the recorded shares of that ticker in the same account. |
 | No short options through earnings | A short option has an earnings-before-expiry alert. |
@@ -744,8 +744,9 @@ The trim planner sizes sales that bring one recorded stock down to a target shar
 
 It is arithmetic, not a price forecast: later steps happen only if the stock reaches those prices. Not tax advice.
 
-### Position Alerts
+### Option Alerts
 
+Portfolio Risk's **Option alerts** (formerly Position alerts) checks each open option record.
 Open option records are checked individually using the exact contract quote, canonical earnings data and recorded share coverage. Severity order is Act, Warn, Info, then remaining DTE.
 
 | Trigger | Current rule |
@@ -782,7 +783,7 @@ Portfolio Risk lists every recorded option with expiry today or later, grouped b
 
 Per position it shows:
 - in or out of the money from the latest quote, coloured by risk to you: a short in the money is red and out of the money green; a long in the money is green;
-- the strike's distance from the stock price, and the chance of finishing in the money as the option's |delta| (a model estimate, shown when Position alerts has a quote);
+- the strike's distance from the stock price, and the chance of finishing in the money as the option's |delta| (a model estimate, shown when Option alerts has a quote);
 - for short puts, the cash needed if assigned next to the account's free cash;
 - for long options, today's intrinsic value.
 
@@ -798,9 +799,11 @@ Brokers apply the account's cost-basis method in force at assignment, so set it 
 
 Combines recorded stock/option tickers, listing earnings within the next 30 days and reports within the past ten days. It flags option expiries spanning the report, displays date confidence, and can estimate stock-dollar movement as `shares * spot * mean absolute historical reaction`. This is a scenario magnitude, not expected P&L or a probability. Unknown dates are listed as unavailable, not cleared.
 
-### Portfolio Doctor
+### Portfolio Health (formerly Portfolio Doctor)
 
-Doctor primarily analyzes **stock holdings** using current market-value weights. It is not the full option-risk or account-cash engine. Its historical risk series uses today's normalized weights applied to aligned past returns, not the actual historical trading path. At least 30 aligned return observations are required; missing tickers can leave partial coverage.
+The **🩺 Portfolio health** strip sits at the top of Suggested next steps and runs on request (**Run health check**), because it downloads a year of prices and may call AI. It shows the score, headline, effective positions, beta, one-year volatility and drawdown, average correlation and largest position. **Strengths, risks and things to consider** expands to the review, tax-loss candidates and earnings list.
+
+The health check primarily analyzes **stock holdings** using current market-value weights. It is not the full option-risk or account-cash engine. Its historical risk series uses today's normalized weights applied to aligned past returns, not the actual historical trading path. At least 30 aligned return observations are required; missing tickers can leave partial coverage.
 
 | Flag | Threshold |
 | --- | --- |
@@ -967,7 +970,7 @@ Source: [backend/fundamentals.py](backend/fundamentals.py).
 
 ## Journal and Trade Planning
 
-The Journal workspace has **Trade history**, **Manual journal**, **Options review**, and **Wheel cycles**. One **Plan a trade** action in the shared Journal header opens a dialog containing the Pre-Trade Checklist and Position Size Calculator. Planning tools are not repeated inline on each tab. Close or Escape dismisses the dialog; the draft remains while switching Journal tabs, but is not saved across leaving the workspace or changing accounts. Guests can use these tools but need sign-in for saved journal/review data.
+The Journal workspace has **Trade history**, **Manual journal**, **Options review**, and **Wheel cycles**. One **📝 Plan a trade** button (with the hint "Checklist and position size before you enter") in the shared Journal header opens a dialog containing the Pre-Trade Checklist and Position Size Calculator. Planning tools are not repeated inline on each tab. Close or Escape dismisses the dialog; the draft remains while switching Journal tabs, but is not saved across leaving the workspace or changing accounts. Guests can use these tools but need sign-in for saved journal/review data.
 
 ### Trade History
 
@@ -1114,7 +1117,7 @@ Indicator periods refer to bars, not always calendar days. Chart overlays, setup
 
 ### Other Nested Controls
 
-- **Market Overview:** Index tiles show ETF proxies (SPY, QQQ, DIA, IWM) labeled with their tickers, so prices are ETF share prices, not index levels; VIX and the 10-year yield are index values. Top movers switches among Gainers, Losers and Most active. Sector performance switches Today, 1W, 1M, 3M and sorts by the chosen return. It also shows upcoming earnings for tracked stocks.
+- **Today card and market data:** Index tiles show ETF proxies (SPY, QQQ, DIA, IWM) labeled with their tickers, so prices are ETF share prices, not index levels; VIX and the 10-year yield are index values. Top movers switches among Gainers, Losers and Most active. Sector performance switches Today, 1W, 1M, 3M and sorts by the chosen return. The Today card also lists tracked stocks (holdings and watchlist) reporting in the next 14 days; the briefing no longer repeats its own seven-day list.
 - **Financial statements:** Income Statement, Balance Sheet, Cash Flow; annual/quarterly selection and key/all-row display. Missing fields and incomparable fiscal periods require care.
 - **Ownership:** Institutional holders and Insider transactions. These are the selected stock's provider disclosures, separate from Ideas' cross-company insider cluster filter.
 - **Thesis:** Save/edit the user's thesis and review its Intact/Weakening/Broken status. These are AI assessments of the recorded thesis and available evidence, not binding eligibility rules.
@@ -1124,9 +1127,9 @@ Sources: [frontend/src/components/CandleChart.jsx](frontend/src/components/Candl
 
 ## Alerts, Notifications and Briefings
 
-### Automatic Stock Alerts
+### Automatic Stock Alerts (Signals)
 
-These are distinct from the option-position alerts in Portfolio Risk:
+The same events appear as **Signals** on a stock's Overview. These are distinct from the **Option alerts** in Portfolio Risk:
 
 | Alert | Rule |
 | --- | --- |
@@ -1141,9 +1144,9 @@ These are distinct from the option-position alerts in Portfolio Risk:
 
 Price and volume defaults can be overridden through server configuration. Notifications are deduplicated by ticker/type/date; crossover notifications use the crossover's date rather than announcing it repeatedly while it remains recent.
 
-### Saved Price/Technical Alerts
+### Price Alerts (saved price/technical alerts)
 
-Signed-in users can create ticker alerts from Dashboard or Watchlist: price above/below, daily percentage up/down, RSI above/below, or percentage below the 52-week high. Comparisons are inclusive: above means `>=`, below means `<=`; daily-down compares change to the negative of the entered positive threshold.
+Signed-in users can create **Price alerts** for a ticker from Dashboard or Watchlist: price above/below, daily percentage up/down, RSI above/below, or percentage below the 52-week high. Comparisons are inclusive: above means `>=`, below means `<=`; daily-down compares change to the negative of the entered positive threshold.
 
 These check the current condition, not necessarily a newly observed crossing. If the condition already holds at the next scan, it may fire. Custom alerts are **one-shot**: after firing they deactivate, with a notification and optional push. Failed/missing market data can postpone a check; absence of notification does not prove the threshold was never reached.
 

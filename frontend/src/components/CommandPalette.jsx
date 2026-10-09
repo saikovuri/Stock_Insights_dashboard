@@ -17,7 +17,7 @@ export const COMMANDS = [
   { label: 'Portfolio: Holdings', keywords: 'stocks options lots positions', go: { tab: 'portfolio', section: 'holdings' } },
   { label: 'Portfolio: Import broker CSV', keywords: 'upload etrade fidelity schwab robinhood webull sync', go: { tab: 'portfolio', section: 'holdings', anchor: 'import-csv' } },
   { label: 'Portfolio Risk: Suggested next steps', keywords: 'suggestions todo', go: { tab: 'portfolio', section: 'risk' } },
-  { label: 'Portfolio Risk: Position alerts', keywords: 'option alerts take profit tested', go: { tab: 'portfolio', section: 'risk', anchor: 'position-alerts' } },
+  { label: 'Portfolio Risk: Option alerts', keywords: 'position alerts take profit stop tested pin', go: { tab: 'portfolio', section: 'risk', anchor: 'position-alerts' } },
   { label: 'Portfolio Risk: Expiration ladder', keywords: 'expiry assignment tax lots', go: { tab: 'portfolio', section: 'risk', anchor: 'expiry-ladder' } },
   { label: 'Portfolio Risk: Trim planner', keywords: 'concentration sell reduce exit', go: { tab: 'portfolio', section: 'risk', anchor: 'trim-planner' } },
   { label: 'Portfolio Risk: My trading rules', keywords: 'rules limits discipline', go: { tab: 'portfolio', section: 'risk', anchor: 'trading-rules' } },

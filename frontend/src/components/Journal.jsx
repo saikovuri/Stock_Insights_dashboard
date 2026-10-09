@@ -183,7 +183,10 @@ function PlanTrade() {
   const dialog = useRef(null);
   return (
     <>
-      <button className="btn-secondary btn-sm" aria-haspopup="dialog" onClick={() => dialog.current.showModal()}>Plan a trade</button>
+      <span className="plan-trade-launch">
+        <span className="market-sub">Checklist and position size before you enter</span>
+        <button className="btn-primary btn-sm" aria-haspopup="dialog" onClick={() => dialog.current.showModal()}><span aria-hidden="true">📝 </span>Plan a trade</button>
+      </span>
       <dialog ref={dialog} className="journal-plan-dialog" aria-labelledby="journal-plan-title">
         <div className="journal-plan-header">
           <h2 id="journal-plan-title">Plan a trade</h2>

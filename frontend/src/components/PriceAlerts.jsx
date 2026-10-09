@@ -35,7 +35,7 @@ export default function PriceAlerts({ ticker, price, onSignIn }) {
   if (!user) {
     return ticker ? (
       <div className="card">
-        <h3>🎯 Alerts</h3>
+        <h3>🎯 Price alerts</h3>
         <p className="empty-state" style={{ padding: 0 }}>Sign in to set price and RSI alerts with phone push notifications.</p>
         {onSignIn && <button className="btn-primary btn-sm" onClick={onSignIn}>Sign in</button>}
       </div>
@@ -60,7 +60,7 @@ export default function PriceAlerts({ ticker, price, onSignIn }) {
 
   return (
     <div className="card price-alerts">
-      <h3>🎯 {ticker ? `Alerts for ${ticker}` : 'My alerts'}</h3>
+      <h3>🎯 {ticker ? `Price alerts for ${ticker}` : 'My price alerts'}</h3>
       {ticker && (
         <div className="alert-form">
           <select className="candle-select" value={kind} onChange={e => setKind(e.target.value)}>

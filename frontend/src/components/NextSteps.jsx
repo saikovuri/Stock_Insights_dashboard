@@ -24,7 +24,7 @@ export default function NextSteps({ version, onShowAlerts, onShowTax, onTrim }) 
   const action = (item, i) => {
     const link = item.link;
     if (!link) return null;
-    if (link.kind === 'alerts') return <button className="link-btn" onClick={onShowAlerts}>See position alerts</button>;
+    if (link.kind === 'alerts') return <button className="link-btn" onClick={onShowAlerts}>See option alerts</button>;
     if (link.kind === 'wheel') return <button className="link-btn" onClick={openWheel}>Open Wheel ideas</button>;
     if (link.kind === 'tax') return <button className="link-btn" onClick={onShowTax}>Open tax check</button>;
     if (link.kind === 'trim' && onTrim) return <button className="link-btn" onClick={() => onTrim(link.ticker)}>Plan a trim</button>;

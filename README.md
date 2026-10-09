@@ -42,7 +42,7 @@ Without optional keys, some features use Yahoo data or rule-based analysis. Prov
 ## Portfolio Workflows
 
 - **Holdings** is the default portfolio view, with lot-specific closing, FIFO ticker sales and atomic assignment recording.
-- **Portfolio Risk** groups position alerts, earnings exposure, portfolio checks, stress scenarios and correlations.
+- **Portfolio Risk** groups option alerts, earnings exposure, portfolio health, stress scenarios and correlations.
 - **Income & Performance** separates combined marked P&L from premium cash flow, benchmarks, dividends, tax checks and weekly review.
 - **Journal** separates recorded stock/option trade history from manual notes and options reviews.
 - **Account ledger** under Income & Performance records immutable before/after changes, manual fees, deposits, withdrawals, dividends, account valuations, reversals and explicit quantity-limited strategy/wheel-cycle allocations. Requests are idempotent. Opening fees are allocated proportionally across partial lot sales; the US informational report retains the selected lot and acquisition date. Enter total-account NAV immediately before external cash flows to calculate TWR; missing valuations leave it unavailable. Export produces a JSON accounting report; the change-history API is paginated.

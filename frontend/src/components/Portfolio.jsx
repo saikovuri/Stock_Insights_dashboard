@@ -397,6 +397,7 @@ export default function Portfolio() {
       {section === 'risk' && <section className="portfolio-section">
         {isGuest ? <p>Sign in to review portfolio risk.</p> : <>
           <h3>Suggested next steps</h3>
+          <PortfolioDoctor key={version} />
           <NextSteps version={`${version}:${rulesRevision}`}
             onShowAlerts={() => document.getElementById('position-alerts')?.scrollIntoView({ behavior: 'smooth' })}
             onShowTax={() => { setInsightsTab('tax'); setSection('performance'); }}
@@ -404,10 +405,9 @@ export default function Portfolio() {
           <details className="risk-tool" id="trading-rules"><summary><h3>My trading rules</h3></summary><TradingRules onSaved={() => setRulesRevision(value => value + 1)} /></details>
           <h3 id="trim-planner">Trim planner</h3>
           <TrimPlanner tickers={[...new Set(holdings.map(item => item.ticker))].sort()} initialTicker={trimTicker} />
-          <h3 id="position-alerts">Position alerts</h3><Today version={version} onRepair={repair} onAssign={id => { const option = options.find(item => item.id === id); if (option) handleAssign(option); }} />
+          <h3 id="position-alerts">Option alerts</h3><Today version={version} onRepair={repair} onAssign={id => { const option = options.find(item => item.id === id); if (option) handleAssign(option); }} />
           <h3>Earnings exposure</h3><Earnings version={version} />
           <h3 id="expiry-ladder">Expiration ladder</h3><ExpiryLadder version={version} />
-          <PortfolioDoctor key={version} />
           <h3>Stress scenarios</h3><WhatIf options={options} holdings={holdings} />
           {holdings.length >= 2 && <CorrelationHeatmap tickers={[...new Set(holdings.map(item => item.ticker))]} />}
           {holdings.length > 0 && !portfolio?.incomplete && <SectorAllocation holdings={holdings} />}

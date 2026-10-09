@@ -587,6 +587,19 @@ body {
   margin-bottom: 1rem;
 }
 
+.signals-title { margin: 0; font-size: 0.85rem; font-weight: 700; }
+.signals-title .market-sub { font-weight: 400; font-size: 0.75rem; }
+.plan-trade-launch { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 0.5rem; }
+.positioning-fold { margin-top: 0.75rem; }
+.market-regime .daily-briefing, .today-earnings { margin-top: 0.9rem; padding-top: 0.75rem; border-top: 1px solid var(--border); }
+.today-earnings h4 { margin: 0 0 0.4rem; font-size: 0.9rem; }
+.briefing-empty { margin: 0.75rem 0 0; }
+.portfolio-health { border: 1px solid var(--border); border-radius: var(--radius); padding: 0.6rem 0.8rem; margin-bottom: 0.75rem; }
+.portfolio-health .bull-bear-header { gap: 0.5rem; flex-wrap: wrap; }
+.health-score { font-weight: 800; font-size: 1.1rem; margin-left: auto; }
+.health-score small { font-size: 0.7rem; color: var(--text-muted); font-weight: 600; }
+.portfolio-health .doctor-headline { margin: 0.4rem 0; font-size: 0.85rem; }
+
 .alert-banner {
   display: flex;
   align-items: center;

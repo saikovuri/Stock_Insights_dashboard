@@ -346,7 +346,7 @@ Ordered by value for effort. Each item names where to start.
    - They were built from the brokers' published column layouts and tested with sample files only.
    - If a real file fails, the preview shows "Detected columns". Add the missing header spelling to `_COLS` or `_ACTIVITY_COLS` in `portfolio_insights.py`, then add that file's header to the test.
 5. **Manage the AMD $580 short calls that are now in the money.**
-   - Portfolio Risk → Position alerts → 🔧 **Repair** already prices rolls for short calls (strategy `cc` in `options_analytics.roll_ideas`).
+   - Portfolio Risk → Option alerts → 🔧 **Repair** already prices rolls for short calls (strategy `cc` in `options_analytics.roll_ideas`).
    - A possible improvement: have **Suggested next steps** link straight to Repair for tested short calls, in `next_steps._option_items`, using the alert's `repair` flag.
 6. **Next steps improvements** (`next_steps.py`):
    - honour the selected account (`?account=` like `/api/portfolio/summary`);
@@ -376,16 +376,14 @@ The app has about 70 views. Fewer, clearer views help new users more than new fe
 
 **Kept by choice:** Dashboard → Analysis → **Short interest & smart money**. Its insider-buying line overlaps Fundamentals → Ownership → Insider Trades, but it is the only insider view for the Day trader style.
 
-**Merge (same job in two places)**
-| Merge | Into | Why |
-| --- | --- | --- |
-| Options → **Flow** tab (`OptionsFlow`) | Ideas → Unusual options (filter by ticker) | Two views of the same unusual-activity data. |
-| **Portfolio Doctor** | Suggested next steps + Sector allocation | The health score repeats concentration and tax items Next steps already lists with actions. |
-| Journal → **Pre-trade checklist** + **Position calculator** | One "Plan a trade" dialog | The Plan a trade button already exists; two more tools beside it confuse first-time users. |
-| Dashboard home: **Daily briefing** + **Market overview** | One "Today" card | Both summarize the market when no ticker is open. |
+**Merged and renamed (Oct 2026), nothing lost:**
+- The Options **Flow** tab now sits inside **Volatility & positioning** (`OptionsHub.jsx`); day traders see it first, long-term investors folded. Ideas → Unusual options remains the market-wide scan.
+- **Portfolio Doctor** is the on-request **Portfolio health** strip at the top of Suggested next steps (`PortfolioDoctor.jsx`); its full review stays under an expandable section.
+- **Daily briefing** and **Market overview** are one **Today** card (`MarketOverview.jsx` renders `DailyBriefing.jsx`), with a single 14-day earnings list.
+- The checklist and position calculator were already inside **Plan a trade**; the button is now primary with a one-line hint.
+- Labels: **Signals** (stock Overview), **Price alerts**, **Option alerts** (Portfolio Risk; the anchor id stays `position-alerts`), **Next steps**. The bell stays **Notifications**.
 
-**Keep but rename for clarity**
-- "Alerts" means four different things: technical signals on a stock, saved price alerts, option position alerts, and Next steps. Suggested labels: **Signals** (stock overview), **Price alerts**, **Option alerts**, **Next steps**.
+**Still open**
 - Income ideas (one ticker), Wheel candidates (scan), and the covered-call finder (shares you own) are related; give each a one-line "use this when…" at the top.
 
 **Already done (Oct 2026)**: login export/import moved out of Journal into Portfolio → Holdings → Data tools and renamed (it is not for brokerage accounts); the account bar is compact outside Holdings; the stock Overview shows the price before alerts; phone layouts tightened (three metrics per row, three form fields per row, consistent holding rows).

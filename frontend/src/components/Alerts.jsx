@@ -24,7 +24,8 @@ export default function Alerts({ alerts }) {
   if (!alerts || alerts.length === 0) return null;
 
   return (
-    <div className="alerts-container">
+    <section className="alerts-container" aria-label="Signals">
+      <h4 className="signals-title">Signals <span className="market-sub">· chart events in the last few days, not trade instructions</span></h4>
       {alerts.map((a, i) => {
         const style = severityStyle[a.severity] || severityStyle.info;
         return (
@@ -35,6 +36,6 @@ export default function Alerts({ alerts }) {
           </div>
         );
       })}
-    </div>
+    </section>
   );
 }

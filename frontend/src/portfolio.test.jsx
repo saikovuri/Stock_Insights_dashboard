@@ -30,6 +30,8 @@ import { TradingRules, TrimPlanner } from './components/RiskTools';
 import { BuyZones, EventWeek } from './components/WatchlistExtras';
 import CommandPalette, { matchCommands } from './components/CommandPalette';
 import { lastLookChanges } from './components/SinceLastLook';
+import Alerts from './components/Alerts';
+import PortfolioDoctor from './components/PortfolioDoctor';
 
 beforeEach(() => {
   localStorage.clear(); sessionStorage.clear();
@@ -697,6 +699,24 @@ test.each([['Max loss as % of account', '3', 'Risk guideline exceeded.'],
     expect(screen.getByText(warning)).toBeTruthy();
     expect(screen.queryByText('Checklist complete.')).toBeNull();
   });
+
+test('stock signals are labeled, and the health check keeps its full review on request', async () => {
+  render(<Alerts alerts={[{ type: 'RSI_OVERSOLD', severity: 'medium', message: 'RSI 28' }]} />);
+  expect(screen.getByRole('region', { name: 'Signals' }).textContent).toMatch(/Oversold/);
+  cleanup();
+  vi.spyOn(stockApi, 'fetchPortfolioDoctor').mockResolvedValue({ health_score: 62, headline: 'Concentrated in AMD', effective_positions: 1.8,
+    portfolio_beta: 1.6, risk: { annual_volatility_pct: 48, max_drawdown_1y_pct: -35, avg_pairwise_correlation: 0.4 },
+    positions: [{ ticker: 'AMD', weight_pct: 74 }], strengths: ['Profitable'], risks: ['One stock is 74%'], actions: ['Trim AMD'],
+    tax_loss_candidates: [{ ticker: 'KO', pnl_pct: -12 }], upcoming_earnings: [{ ticker: 'AMD', date: '2026-10-28' }], ai: false });
+  render(<PortfolioDoctor />);
+  fireEvent.click(screen.getByRole('button', { name: 'Run health check' }));
+  expect((await screen.findByText('Concentrated in AMD'))).toBeTruthy();
+  expect(screen.getByText('62').closest('.health-score')).toBeTruthy();
+  expect(screen.getByText('AMD 74%')).toBeTruthy();
+  expect(screen.getByText('Strengths, risks and things to consider')).toBeTruthy();
+  expect(screen.getByText(/Tax-loss candidates: KO/)).toBeTruthy();
+  expect(screen.getByText(/Earnings in 2 weeks: AMD 2026-10-28/)).toBeTruthy();
+});
 
 test('limit ladder, post-earnings window and assignment share', () => {
   expect(limitLadder(1.2, 1.4)).toEqual({ steps: [1.3, 1.29, 1.28], floor: 1.2, tick: 0.01 });
@@ -1384,7 +1404,7 @@ test('next steps list suggestions and open covered calls inline', async () => {
   vi.spyOn(auth, 'useAuth').mockReturnValue({ user: { id: 1 } });
   vi.spyOn(stockApi, 'fetchNextSteps').mockResolvedValue({ note: 'Rule-based.', items: [
     { level: 'act', code: 'options_act', title: '1 option position(s) need action', points: ['KO $50 put: Take profit.'],
-      detail: 'Details in Position alerts below.', link: { kind: 'alerts' } },
+      detail: 'Details in Option alerts below.', link: { kind: 'alerts' } },
     { level: 'idea', code: 'covered_call', ticker: 'AMD', account: 'A', title: 'AMD: 2 uncovered 100-share block(s) in A',
       detail: 'Average cost $100.00.', link: { kind: 'covered_calls', ticker: 'AMD', cost_basis: 100, shares: 200 } }] });
   const calls = vi.spyOn(stockApi, 'fetchAssignedCalls').mockResolvedValue({ ticker: 'AMD', spot: 150, cost_basis: 100, shares: 200,

@@ -54,14 +54,14 @@ export default function OptionsFlow({ ticker }) {
     fetchOptionsFlow(ticker).then(setData).catch(e => setError(e.message));
   }, [ticker]);
 
-  if (error) return <div className="card"><h3>🌊 Flow & positioning</h3><p className="empty-state" style={{ padding: 0 }}>{error}</p></div>;
+  if (error) return <div className="card"><h3>🌊 Positioning & unusual activity</h3><p className="empty-state" style={{ padding: 0 }}>{error}</p></div>;
   if (!data) return <div className="card"><p className="loading-text">Loading options flow…</p></div>;
 
   const pcCls = data.pc_volume > 1 ? 'negative' : data.pc_volume < 0.6 ? 'positive' : '';
   return (
     <div className="card">
       <div className="ivrank-header">
-        <h3 style={{ margin: 0 }}>🌊 Flow & positioning</h3>
+        <h3 style={{ margin: 0 }}>🌊 Positioning & unusual activity</h3>
         <span className="market-sub">Spot ${data.spot}</span>
       </div>
       {data.summary && <ClampText className="ivrank-verdict-desc">{data.summary}</ClampText>}

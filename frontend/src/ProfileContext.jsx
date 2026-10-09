@@ -10,14 +10,14 @@ export const PROFILES = {
     chart: { period: '1d', interval: '5m' },
     subTabs: ['overview', 'analysis', 'news', 'fundamentals'],
     hide: ['thesis', 'longterm', 'financials', 'ownership'],
-    options: ['flow', 'volatility', 'directional', 'income'],
+    options: ['volatility', 'directional', 'income'],
   },
   swing: {
     label: 'Swing trader', icon: '🌊',
     chart: { period: '6mo', interval: '1d' },
     subTabs: ['overview', 'analysis', 'fundamentals', 'news'],
     hide: ['financials'],
-    options: ['volatility', 'flow', 'directional', 'income'],
+    options: ['volatility', 'directional', 'income'],
   },
   long: {
     label: 'Long-term investor', icon: '🌳',
@@ -28,7 +28,7 @@ export const PROFILES = {
   },
 };
 
-export const ALL_OPTION_TABS = ['volatility', 'income', 'directional', 'flow'];
+export const ALL_OPTION_TABS = ['volatility', 'income', 'directional'];
 
 const KEY = 'trader_profile';
 const ProfileContext = createContext(null);

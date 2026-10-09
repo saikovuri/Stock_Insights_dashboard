@@ -20,7 +20,6 @@ import Financials from './components/Financials';
 import Ownership from './components/Ownership';
 const OptionsHub = lazy(() => import('./components/OptionsHub'));
 import NotificationBell from './components/NotificationBell';
-import DailyBriefing from './components/DailyBriefing';
 import MarketOverview from './components/MarketOverview';
 import PriceAlerts from './components/PriceAlerts';
 const Ideas = lazy(() => import('./components/Ideas'));
@@ -271,7 +270,6 @@ function AppShell() {
             {loading && !metrics && <Skeleton label={`Loading ${ticker || 'ticker'}`} lines={1} tiles={8} chart />}
             {!ticker && !loading && (
               <>
-                {user && <DailyBriefing onSelect={(t) => handleSearch(t)} />}
                 <MarketOverview onSelect={(t) => handleSearch(t)} />
                 <EconomicCalendar compact />
               </>

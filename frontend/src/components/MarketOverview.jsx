@@ -3,6 +3,7 @@ import { useAuth } from '../AuthContext';
 import { useProfile } from '../ProfileContext';
 import { fetchMarketOverview, fetchMovers, fetchMyEarnings } from '../api/stockApi';
 import Skeleton from './Skeleton';
+import DailyBriefing from './DailyBriefing';
 
 function pct(v, digits = 2) {
   if (v == null) return '—';
@@ -104,11 +105,14 @@ export default function MarketOverview({ onSelect }) {
 
   return (
     <div className="market-overview">
-      <div className="card market-regime">
-        <div className="market-status">
-          <span className={`market-dot market-${data.status.state.replace(' ', '-')}`} />
-          Market {data.status.state} · {data.status.time_et}
-          {data.updated_at && <span className="as-of"> · quotes updated {new Date(data.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}
+      <section className="card market-regime" aria-label="Today">
+        <div className="ivrank-header">
+          <h3 style={{ margin: 0 }}>☀️ Today</h3>
+          <div className="market-status">
+            <span className={`market-dot market-${data.status.state.replace(' ', '-')}`} />
+            Market {data.status.state} · {data.status.time_et}
+            {data.updated_at && <span className="as-of"> · quotes updated {new Date(data.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}
+          </div>
         </div>
         <p className={`market-regime-text ${regimeCls}`}>{data.regime.summary}</p>
         <div className="market-tiles">
@@ -121,21 +125,21 @@ export default function MarketOverview({ onSelect }) {
             </button>
           ))}
         </div>
-      </div>
-
-      {earnings && earnings.length > 0 && (
-        <div className="card">
-          <h3>📅 Earnings in the next 2 weeks (your stocks)</h3>
-          <div className="ai-brief-signals">
-            {earnings.map(e => (
-              <button key={e.ticker + e.date} className="signal-chip" onClick={() => onSelect(e.ticker)}>
-                {e.ticker} · {new Date(e.date + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-                {e.hour === 'bmo' ? ' (pre-market)' : e.hour === 'amc' ? ' (after close)' : ''}
-              </button>
-            ))}
+        {user && <DailyBriefing onSelect={onSelect} />}
+        {earnings && earnings.length > 0 && (
+          <div className="today-earnings">
+            <h4>📅 Your stocks reporting in the next 2 weeks</h4>
+            <div className="ai-brief-signals">
+              {earnings.map(e => (
+                <button key={e.ticker + e.date} className="signal-chip" onClick={() => onSelect(e.ticker)}>
+                  {e.ticker} · {new Date(e.date + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                  {e.hour === 'bmo' ? ' (pre-market)' : e.hour === 'amc' ? ' (after close)' : ''}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </section>
 
       <div className="two-column">
         {profile === 'long' ? [sectors, movers] : [movers, sectors]}

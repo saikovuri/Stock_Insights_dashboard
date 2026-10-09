@@ -4,14 +4,24 @@ import IncomeIdeas from './IncomeIdeas';
 import Structures from './Structures';
 import OptionsFlow from './OptionsFlow';
 import EarningsIntel from './EarningsIntel';
+import { useProfile } from '../ProfileContext';
 
-const Volatility = ({ ticker }) => <><IvRank ticker={ticker} /><EarningsIntel ticker={ticker} /></>;
+// Positioning (walls, gamma, max pain, unusual contracts) leads for day traders and is folded away for long-term investors
+function Volatility({ ticker }) {
+  const { profile } = useProfile();
+  const positioning = <OptionsFlow key="flow" ticker={ticker} />;
+  const volatility = [<IvRank key="iv" ticker={ticker} />, <EarningsIntel key="er" ticker={ticker} />];
+  if (profile === 'day') return <>{positioning}{volatility}</>;
+  if (profile === 'long') {
+    return <>{volatility}<details className="setup-guide positioning-fold"><summary>🌊 Positioning & unusual activity</summary>{positioning}</details></>;
+  }
+  return <>{volatility}{positioning}</>;
+}
 
 const TABS = {
-  volatility: { icon: '📊', label: 'Volatility', short: 'Volatility', Comp: Volatility },
+  volatility: { icon: '📊', label: 'Volatility & positioning', short: 'Volatility', Comp: Volatility },
   income: { icon: '💵', label: 'Sell premium', short: 'Income', Comp: IncomeIdeas },
   directional: { icon: '🛠', label: 'Directional', short: 'Directional', Comp: Structures },
-  flow: { icon: '🌊', label: 'Flow & positioning', short: 'Flow', Comp: OptionsFlow },
 };
 
 export default function OptionsHub({ ticker, tabs }) {
