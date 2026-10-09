@@ -380,7 +380,7 @@ The app has about 70 views. Fewer, clearer views help new users more than new fe
 | Unreachable "corr" view in `PortfolioInsights.jsx` (line ~306) | Not in its tab list; the heatmap already shows under Portfolio Risk. | Delete the branch and the `CorrelationHeatmap` import there. |
 | Ideas → Macro calendar → **Prediction markets / Reddit attention** (`MarketContext.jsx`) | Noisy, rarely actionable, depends on third-party feeds that change often. | Remove from `Ideas.jsx`; keep the Economic calendar. Delete its test in `portfolio.test.jsx` and the backend route if unused. |
 | Ideas → **Superinvestors** | 13F data is 45+ days old and quarterly; slow OpenFIGI lookups. | Remove the tab from `Ideas.jsx` (and `COMMANDS` in `CommandPalette.jsx`). |
-| Dashboard → Analysis → **Smart money** (`ShortAndSmartMoney.jsx`) | Overlaps Ownership (Fundamentals) and Unusual options. | Remove from `App.jsx`, or move its short-interest line into `Ownership.jsx`. |
+| Dashboard → Analysis → **Smart money** (`ShortAndSmartMoney.jsx`): the insider-buying and superinvestor sections only | Insider buying repeats Fundamentals → Ownership's "Insider Trades" tab (same Form 4 filings, summarized). Superinvestors repeats the Ideas → Superinvestors data for this one ticker. **Short interest is unique: keep it.** | Move the one-line insider-buying summary to the top of `Ownership.jsx`'s Insider Trades tab; drop the superinvestor list if the Superinvestors tab is removed. Rename the card "Short interest". |
 
 **Merge (same job in two places)**
 | Merge | Into | Why |
