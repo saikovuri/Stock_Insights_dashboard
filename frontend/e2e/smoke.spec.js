@@ -45,47 +45,20 @@ test.afterEach(async ({ page }) => {
   expect(errors.get(page)).toEqual([]);
 });
 
-test('external context stays distinct and usable on desktop and mobile', async ({ page }, testInfo) => {
+test('ideas show in play and the macro calendar without removed feeds', async ({ page }) => {
   await page.route('**/api/ideas/in-play*', route => route.fulfill({ json: {
     market_state: 'closed', screened: 100, as_of: '2026-10-05T12:00:00Z', rows: [],
   } }));
   await page.route('**/api/market/calendar?*', route => route.fulfill({ json: { events: [] } }));
-  await page.route('**/api/market/context/attention', route => route.fulfill({ json: {
-    status: 'ready', fetched_at: '2026-10-05T12:00:00Z', scope: 'Selected Reddit communities, not X.', rows: [
-      { ticker: 'MU', name: 'Micron Technology', mentions: 122, previous_mentions: 20, change_pct: 510, url: 'https://apewisdom.io/stocks/MU/' },
-      { ticker: 'SPY', name: 'SPDR S&P 500 ETF Trust', mentions: 112, previous_mentions: null, change_pct: null, url: 'https://apewisdom.io/stocks/SPY/' },
-    ],
-  } }));
-  await page.route('**/api/market/context/predictions', route => route.fulfill({ json: {
-    status: 'ready', fetched_at: '2026-10-05T12:00:00Z', scope: 'Economy and finance sample.', rows: [
-      { id: '1', question: 'Will there be no change in Fed interest rates after the October meeting?', yes_pct: 78.5, change_pp: -4,
-        volume_24h: 334209, liquidity: 536038, end_at: '2026-10-29T03:59:00Z', updated_at: '2026-10-05T11:00:00Z',
-        warnings: [], url: 'https://polymarket.com/event/fed-decision' },
-      { id: '2', question: 'Will inflation remain above target?', yes_pct: 35, change_pp: null, volume_24h: 300, liquidity: null,
-        end_at: '2026-12-31T00:00:00Z', updated_at: null, warnings: ['Liquidity unavailable', 'Low 24h volume (under $1,000)'],
-        url: 'https://polymarket.com/event/inflation' },
-    ],
-  } }));
   await page.goto('/#ideas');
-  await page.getByRole('button', { name: /In play/ }).click();
-  const attention = page.getByRole('region', { name: 'Reddit attention', exact: true });
-  await expect(attention.getByText('+510%', { exact: true })).toBeVisible();
-  await expect(attention.getByText(/not sentiment or verified news/)).toBeVisible();
-  expect(await attention.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
-  await attention.screenshot({ path: testInfo.outputPath('reddit-attention.png') });
-  await page.getByRole('button', { name: /Macro calendar/ }).click();
-  const predictions = page.getByRole('region', { name: 'Prediction-market context', exact: true });
-  await expect(predictions.getByText('Yes 78.5%', { exact: true })).toBeVisible();
-  await expect(predictions.getByText('-4 pp', { exact: true })).toBeVisible();
-  await expect(predictions.getByText('Liquidity unavailable', { exact: true })).toBeVisible();
-  await expect(predictions.getByRole('link', { name: 'Market and resolution rules' }).first()).toHaveAttribute('rel', 'noopener noreferrer');
-  expect(await predictions.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
-  await predictions.screenshot({ path: testInfo.outputPath('prediction-context.png') });
-  await page.route('**/api/market/context/attention', route => route.fulfill({ status: 503, json: { detail: 'Provider unavailable' } }));
-  await page.getByRole('button', { name: /In play/ }).click();
-  await expect(attention.getByText(/Missing data does not mean no activity/)).toBeVisible();
-  await expect(attention.getByRole('table')).toHaveCount(0);
+  const tabs = page.getByRole('navigation', { name: 'Ideas views' });
+  await expect(tabs.getByRole('button', { name: /Superinvestors/ })).toHaveCount(0);
+  await tabs.getByRole('button', { name: /In play/ }).click();
   await expect(page.getByRole('heading', { name: /Stocks in play/ })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Reddit attention' })).toHaveCount(0);
+  await tabs.getByRole('button', { name: /Macro calendar/ }).click();
+  await expect(page.getByRole('region', { name: 'Prediction-market context' })).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
 });
 
 test('weekly covered calls show projected ownership cost', async ({ page }, testInfo) => {

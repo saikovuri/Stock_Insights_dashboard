@@ -214,11 +214,9 @@ def superinvestors() -> dict:
 
 
 def held_by_superinvestors(ticker: str) -> list[dict]:
-    cached = kv_get(SUPER_KEY)
-    if not cached:
-        return []
+    data = superinvestors()  # also starts the daily background refresh
     out = []
-    for f in cached["data"]["funds"]:
+    for f in data.get("funds", []):
         for h in f["top"] + f["changes"]:
             if h.get("ticker") == ticker:
                 out.append({"manager": f["manager"], "firm": f["firm"], "weight": h.get("weight"),

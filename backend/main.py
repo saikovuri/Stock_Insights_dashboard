@@ -1206,17 +1206,6 @@ def stock_roll(request: Request, ticker: str,
         raise _upstream_error(e)
 
 
-@app.get("/api/stock/{ticker}/earnings-moves")
-@limiter.limit("30/minute")
-def stock_earnings_moves(request: Request, ticker: str):
-    """Actual moves on past reports vs the move options price for the next one."""
-    ticker = _valid_ticker(ticker)
-    try:
-        return options_analytics.earnings_moves(ticker)
-    except Exception as e:
-        raise _upstream_error(e)
-
-
 # ── Options desk: position actions, earnings exposure, wheel ledger, reviews ──
 
 def _options_version(uid: int) -> str:
@@ -1691,12 +1680,6 @@ def ideas_insiders(request: Request, days: int = Query(30, ge=7, le=60)):
     return smart_money.insider_buying(days)
 
 
-@app.get("/api/ideas/superinvestors")
-@limiter.limit("20/minute")
-def ideas_superinvestors(request: Request):
-    return smart_money.superinvestors()
-
-
 @app.get("/api/stock/{ticker}/smart-money")
 @limiter.limit("60/minute")
 def stock_smart_money(request: Request, ticker: str):
@@ -1837,13 +1820,6 @@ def stock_levels(request: Request, ticker: str):
         return intraday.key_levels(ticker)
     except Exception as e:
         raise _upstream_error(e, 404)
-
-
-@app.get("/api/market/context/{kind}")
-@limiter.limit("20/minute")
-def external_market_context(request: Request, kind: Literal["attention", "predictions"]):
-    from market_context import get_context
-    return get_context(kind)
 
 
 @app.get("/api/ideas/in-play")

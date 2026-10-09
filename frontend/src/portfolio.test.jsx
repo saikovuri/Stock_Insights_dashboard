@@ -15,7 +15,6 @@ import Structures from './components/Structures';
 import Accounting from './components/Accounting';
 import WheelIdeas, { wheelFreshness } from './components/WheelIdeas';
 import { AssignmentShare, isPostEarnings, limitLadder } from './components/TradeSizing';
-import MarketContext from './components/MarketContext';
 import PreTradeChecklist from './components/PreTradeChecklist';
 import Journal, { recordedTradeMetrics, recordedOptionStats, groupedOptionStats, edgeHighlights, howClosed } from './components/Journal';
 import SearchBar from './components/SearchBar';
@@ -698,44 +697,6 @@ test.each([['Max loss as % of account', '3', 'Risk guideline exceeded.'],
     expect(screen.getByText(warning)).toBeTruthy();
     expect(screen.queryByText('Checklist complete.')).toBeNull();
   });
-
-test('market attention keeps missing baselines unknown and opens ticker research', async () => {
-  const onSelect = vi.fn();
-  vi.spyOn(stockApi, 'fetchMarketContext').mockResolvedValue({ status: 'ready', fetched_at: '2026-10-05T12:00:00Z',
-    rows: [{ ticker: 'PYPL', name: 'PayPal', mentions: 20, previous_mentions: 0, change_pct: null, url: 'https://apewisdom.io/stocks/PYPL/' }] });
-  render(<MarketContext kind="attention" onSelect={onSelect} />);
-  expect(await screen.findByText('No baseline')).toBeTruthy();
-  expect(screen.getByText(/X is not connected/)).toBeTruthy();
-  expect(screen.queryByText(/Infinity/)).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: 'PYPL' }));
-  expect(onSelect).toHaveBeenCalledWith('PYPL');
-});
-
-test('prediction context uses percentage points and preserves unavailable liquidity', async () => {
-  vi.spyOn(stockApi, 'fetchMarketContext').mockResolvedValue({ status: 'ready', fetched_at: '2026-10-05T12:00:00Z',
-    rows: [{ id: '1', question: 'Fed cut?', yes_pct: 40, change_pp: -3, volume_24h: 2000, liquidity: null,
-      end_at: '2026-10-29T00:00:00Z', updated_at: null, warnings: ['Liquidity unavailable'], url: 'https://polymarket.com/event/fed' }] });
-  render(<MarketContext kind="predictions" />);
-  expect(await screen.findByText('Yes 40%')).toBeTruthy();
-  expect(screen.getByText('-3 pp')).toBeTruthy();
-  expect(screen.getByText('Liquidity unavailable')).toBeTruthy();
-  expect(screen.getByText(/Provider updated Unavailable/)).toBeTruthy();
-  expect(screen.getByRole('link', { name: 'Market and resolution rules' }).getAttribute('href')).toBe('https://polymarket.com/event/fed');
-});
-
-test('context ignores an old response after switching feeds and retries a network outage', async () => {
-  let resolveOld;
-  const fetch = vi.spyOn(stockApi, 'fetchMarketContext').mockReturnValueOnce(new Promise(resolve => { resolveOld = resolve; }))
-    .mockRejectedValueOnce(new Error('offline')).mockResolvedValue({ status: 'ready', rows: [] });
-  const view = render(<MarketContext kind="attention" />);
-  view.rerender(<MarketContext kind="predictions" />);
-  await screen.findByText(/Market context is unavailable/);
-  await act(async () => resolveOld({ status: 'ready', rows: [{ ticker: 'OLD' }] }));
-  expect(screen.queryByText('OLD')).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
-  await screen.findByText('No qualifying records in the provider sample.');
-  expect(fetch).toHaveBeenLastCalledWith('predictions');
-});
 
 test('limit ladder, post-earnings window and assignment share', () => {
   expect(limitLadder(1.2, 1.4)).toEqual({ steps: [1.3, 1.29, 1.28], floor: 1.2, tick: 0.01 });

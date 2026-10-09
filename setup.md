@@ -97,7 +97,6 @@ Paste the values you saved in section 1. If you are starting fresh, every key be
 | `NTFY_SERVER` | Optional | Phone push server (default https://ntfy.sh). Each user enters their topic in the app. |
 | `REGISTRATION_CODE` | Optional | When set, creating an account requires this invite code (existing users can still sign in). Unset means open sign-up. |
 | `TOKEN_EXPIRE_MINUTES`, `REFRESH_EXPIRE_DAYS` | Optional | Session length (defaults: 60 minutes and 30 days). |
-| `EXTERNAL_CONTEXT_ENABLED` | Optional | `0` turns off the Reddit attention and prediction-market feeds. |
 | `RESEARCH_UNIVERSE_SOURCE` | Optional | Dated S&P constituent snapshots for the scanner (see README). |
 | `SENTRY_DSN`, `SENTRY_ENVIRONMENT` | Optional | Backend error tracking. |
 | `STOCKPILOT_DB_PATH` | Optional | A different SQLite file path. Tests set this themselves. |
@@ -371,16 +370,11 @@ Before each production release, follow [deploy/RELEASE_CHECKLIST.md](deploy/RELE
 
 ## 9. Simplification plan (what to remove or merge)
 
-The app has about 70 views. Fewer, clearer views help new users more than new features. Nothing below has been removed yet; each item says what to do and where. Remove one at a time, run `scripts/check.ps1`, and update `intro.md`.
+The app has about 70 views. Fewer, clearer views help new users more than new features. Remove one at a time, run `scripts/check.ps1`, and update `intro.md`.
 
-**Remove (low value or dead code)**
-| Item | Why | How |
-| --- | --- | --- |
-| `EarningsMoves.jsx` | Not imported anywhere. The same data shows in Volatility & Expected Move (`EarningsIntel`). | Delete the file and `fetchEarningsMoves` in `api/stockApi.js`; keep the backend route only if something else uses it. |
-| Unreachable "corr" view in `PortfolioInsights.jsx` (line ~306) | Not in its tab list; the heatmap already shows under Portfolio Risk. | Delete the branch and the `CorrelationHeatmap` import there. |
-| Ideas → Macro calendar → **Prediction markets / Reddit attention** (`MarketContext.jsx`) | Noisy, rarely actionable, depends on third-party feeds that change often. | Remove from `Ideas.jsx`; keep the Economic calendar. Delete its test in `portfolio.test.jsx` and the backend route if unused. |
-| Ideas → **Superinvestors** | 13F data is 45+ days old and quarterly; slow OpenFIGI lookups. | Remove the tab from `Ideas.jsx` (and `COMMANDS` in `CommandPalette.jsx`). |
-| Dashboard → Analysis → **Smart money** (`ShortAndSmartMoney.jsx`): the insider-buying and superinvestor sections only | Insider buying repeats Fundamentals → Ownership's "Insider Trades" tab (same Form 4 filings, summarized). Superinvestors repeats the Ideas → Superinvestors data for this one ticker. **Short interest is unique: keep it.** | Move the one-line insider-buying summary to the top of `Ownership.jsx`'s Insider Trades tab; drop the superinvestor list if the Superinvestors tab is removed. Rename the card "Short interest". |
+**Removed (Oct 2026):** the unused `EarningsMoves.jsx` and its `/earnings-moves` route; the unreachable correlation view in `PortfolioInsights.jsx`; Reddit attention and prediction markets (`MarketContext.jsx`, `backend/market_context.py`, `/api/market/context`); the Ideas → Superinvestors tab and `/api/ideas/superinvestors`. The stock page's Smart money card still lists superinvestors for one ticker and now starts the 13F refresh itself.
+
+**Kept by choice:** Dashboard → Analysis → **Short interest & smart money**. Its insider-buying line overlaps Fundamentals → Ownership → Insider Trades, but it is the only insider view for the Day trader style.
 
 **Merge (same job in two places)**
 | Merge | Into | Why |

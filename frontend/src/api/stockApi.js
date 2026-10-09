@@ -491,10 +491,8 @@ export const fetchOptionsFlow = (t) => getJson(`${BASE}/stock/${t}/flow`, 'Faile
 export const fetchUnusualOptions = () => getJson(`${BASE}/ideas/unusual-options`, 'Failed to load unusual options');
 export const fetchWheelIdeas = (shortDated = false) => getJson(`${BASE}/ideas/wheel?short_dated=${shortDated}`, 'Failed to load wheel candidates');
 export const fetchEconomicCalendar = (days = 7) => getJson(`${BASE}/market/calendar?days=${days}`, 'Failed to load calendar');
-export const fetchMarketContext = (kind) => getJson(`${BASE}/market/context/${kind}`, 'Market context is unavailable');
 export const fetchShortInterest = (t) => getJson(`${BASE}/stock/${t}/short-interest`, 'No short interest data');
 export const fetchInsiderBuying = () => getJson(`${BASE}/ideas/insiders`, 'Failed to load insider buying');
-export const fetchSuperinvestors = () => getJson(`${BASE}/ideas/superinvestors`, 'Failed to load superinvestors');
 export const fetchSmartMoney = (t) => getJson(`${BASE}/stock/${t}/smart-money`, 'Failed to load smart money');
 
 // ── Portfolio insights ───────────────────────────────────────────
@@ -524,7 +522,6 @@ export const fetchOptionsCoach = () => getJson(`${BASE}/portfolio/options/coach`
 export const fetchTrackRecord = () => getJson(`${BASE}/ideas/track-record`, 'Failed to load track record');
 export const fetchWheelPlan = (capital, maxPct, maxPerSector, shortDated = false) =>
   getJson(`${BASE}/ideas/wheel/plan?capital=${capital}&max_pct=${maxPct}&max_per_sector=${maxPerSector}&short_dated=${shortDated}`, 'Failed to build plan', true);
-export const fetchEarningsMoves = (t) => getJson(`${BASE}/stock/${t}/earnings-moves`, 'Failed to load earnings moves');
 export const assignOption = (id, cycle = '') => sendJson(`${BASE}/portfolio/options/${id}/assign`, 'POST', cycle ? { cycle } : null, 'Could not record assignment');
 export const expireOption = (id, cycle = '') => sendJson(`${BASE}/portfolio/options/${id}/expire`, 'POST', cycle ? { cycle } : null, 'Could not record expiry');
 export const deleteClosedTrade = (id) => sendJson(`${BASE}/portfolio/closed/${id}`, 'DELETE', null, 'Failed to delete trade');

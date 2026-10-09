@@ -5,17 +5,15 @@ import EconomicCalendar from './EconomicCalendar';
 import InPlay from './InPlay';
 import StrategyTester from './StrategyTester';
 import WheelIdeas from './WheelIdeas';
-import MarketContext from './MarketContext';
 import { useProfile } from '../ProfileContext';
 import { FlowTable } from './OptionsFlow';
-import { fetchUnusualOptions, fetchInsiderBuying, fetchSuperinvestors, fetchTrackRecord } from '../api/stockApi';
+import { fetchUnusualOptions, fetchInsiderBuying, fetchTrackRecord } from '../api/stockApi';
 
 const money = v => v >= 1e9 ? `$${(v / 1e9).toFixed(1)}B` : v >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : `$${(v / 1e3).toFixed(0)}K`;
 const TABS = [
   ['inplay', '⚡ In play'], ['setups', '🎯 Setups'], ['wheel', '🎡 Wheel'], ['flow', '🌊 Unusual options'], ['insiders', '🕴️ Insider buying'],
-  ['super', '🧠 Superinvestors'], ['macro', '📅 Macro calendar'], ['tester', '🧪 Strategy tester'], ['record', '📋 Options track record'],
+  ['macro', '📅 Macro calendar'], ['tester', '🧪 Strategy tester'], ['record', '📋 Options track record'],
 ];
-const ACTION = { new: ['🆕 New', 'positive'], added: ['➕ Added', 'positive'], reduced: ['➖ Reduced', 'negative'], sold: ['❌ Sold', 'negative'] };
 
 function useLoad(fn, poll) {
   const [data, setData] = useState(null);
@@ -122,79 +120,6 @@ function InsiderBuying({ onSelect }) {
   );
 }
 
-function Superinvestors({ onSelect }) {
-  const [data, error] = useLoad(fetchSuperinvestors, true);
-  const [fund, setFund] = useState(null);
-  if (error) return <div className="card"><p className="error-text">{error}</p></div>;
-  if (!data) return <div className="card"><p className="loading-text">Loading…</p></div>;
-  if (data.status === 'building') {
-    return <div className="card"><p className="loading-text">Reading the latest 13F filings from SEC EDGAR — takes about 2 minutes the first time…</p></div>;
-  }
-  const f = data.funds.find(x => x.cik === fund) || data.funds[0];
-  const tick = h => h.ticker
-    ? <button className="link-btn" onClick={() => onSelect(h.ticker)}><strong>{h.ticker}</strong></button>
-    : <span className="market-sub">—</span>;
-  return (
-    <>
-      {data.consensus.length > 0 && (
-        <div className="card">
-          <h3>🤝 Consensus holdings</h3>
-          <p className="market-sub">Stocks in the top 15 of two or more tracked superinvestors.</p>
-          <ul className="smart-list">
-            {data.consensus.map(c => (
-              <li key={c.ticker}>
-                <button className="link-btn" onClick={() => onSelect(c.ticker)}><strong>{c.ticker}</strong></button>
-                {' '}<span className="rs-badge rs-mid">{c.holders.length}</span> <span className="market-sub">{c.holders.join(', ')}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      <div className="card">
-        <div className="ivrank-header">
-          <h3 style={{ margin: 0 }}>🧠 Superinvestor portfolios</h3>
-          <select className="candle-select" value={f?.cik || ''} onChange={e => setFund(Number(e.target.value))}>
-            {data.funds.map(x => <option key={x.cik} value={x.cik}>{x.manager} — {x.firm}</option>)}
-          </select>
-        </div>
-        {f && (
-          <>
-            <p className="market-sub">
-              13F for quarter ending {f.period}, filed {f.filed} · {f.positions} positions · {money(f.total_value)} in US stocks.
-              13Fs are filed up to 45 days after quarter end, so positions may have changed.
-            </p>
-            <div className="two-column">
-              <div>
-                <h4 className="sub-chart-title">Top holdings</h4>
-                <table className="market-table">
-                  <tbody>
-                    {f.top.map(h => (
-                      <tr key={h.cusip}><td>{tick(h)}</td><td>{h.name}</td><td><strong>{h.weight}%</strong></td></tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div>
-                <h4 className="sub-chart-title">Changes last quarter</h4>
-                <table className="market-table">
-                  <tbody>
-                    {f.changes.map(h => (
-                      <tr key={h.cusip + h.action}>
-                        <td>{tick(h)}</td><td>{h.name}</td>
-                        <td className={ACTION[h.action][1]}>{ACTION[h.action][0]}{h.pct_change != null && h.action !== 'sold' ? ` ${h.pct_change > 0 ? '+' : ''}${h.pct_change}%` : ''}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </>
-        )}
-      </div>
-    </>
-  );
-}
-
 function TrackRecord() {
   const [data, error] = useLoad(fetchTrackRecord);
   if (error) return <div className="card"><p className="error-text">{error}</p></div>;
@@ -238,7 +163,10 @@ function TrackRecord() {
 
 export default function Ideas({ onSelect }) {
   const { profile } = useProfile();
-  const [tab, setTab] = useState(() => sessionStorage.getItem('ideas_tab') || (profile === 'day' ? 'inplay' : 'setups'));
+  const [tab, setTab] = useState(() => {
+    const saved = sessionStorage.getItem('ideas_tab');
+    return TABS.some(([id]) => id === saved) ? saved : profile === 'day' ? 'inplay' : 'setups';
+  });
   const choose = t => { setTab(t); sessionStorage.setItem('ideas_tab', t); };
   useEffect(() => {
     const onGoto = event => { if (event.detail?.ideasTab) setTab(event.detail.ideasTab); };
@@ -252,13 +180,12 @@ export default function Ideas({ onSelect }) {
           <button key={id} className={`sub-tab ${tab === id ? 'active' : ''}`} onClick={() => choose(id)}>{label}</button>
         ))}
       </TabStrip>
-      {tab === 'inplay' && <><InPlay onSelect={onSelect} /><MarketContext key="attention" kind="attention" onSelect={onSelect} /></>}
+      {tab === 'inplay' && <InPlay onSelect={onSelect} />}
       {tab === 'setups' && <SetupScanner onSelect={onSelect} />}
       {tab === 'wheel' && <WheelIdeas onSelect={onSelect} />}
       {tab === 'flow' && <UnusualOptions onSelect={onSelect} />}
       {tab === 'insiders' && <InsiderBuying onSelect={onSelect} />}
-      {tab === 'super' && <Superinvestors onSelect={onSelect} />}
-      {tab === 'macro' && <><EconomicCalendar /><MarketContext key="predictions" kind="predictions" /></>}
+      {tab === 'macro' && <EconomicCalendar />}
       {tab === 'tester' && <StrategyTester />}
       {tab === 'record' && <TrackRecord />}
     </div>

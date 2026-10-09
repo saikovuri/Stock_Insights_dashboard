@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import TabStrip from './TabStrip';
 import { ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid } from 'recharts';
-import CorrelationHeatmap from './CorrelationHeatmap';
 import Accounting from './Accounting';
 import { Ledger, PremiumIncome } from './OptionsDesk';
 import {
@@ -303,7 +302,6 @@ export default function PortfolioInsights({ tickers, version, onImported, initia
       {tab === 'spy' && <VsSpy version={version} />}
       {tab === 'divs' && <DividendIncome version={version} />}
       {tab === 'tax' && <TaxCheck version={version} />}
-      {tab === 'corr' && (tickers.length >= 2 ? <CorrelationHeatmap tickers={tickers} /> : <p className="empty-state">Hold at least two stocks to see correlations.</p>)}
       {tab === 'weekly' && <WeeklyReview />}
       {tab === 'import' && <ImportCsv onImported={onImported} />}
     </div>

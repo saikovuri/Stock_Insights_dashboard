@@ -13,10 +13,10 @@ This guide describes the implementation as inspected on October 5, 2026. It expl
 - [Income / Sell premium](#options-hub-income--sell-premium)
 - [Directional](#options-hub-directional)
 - [Wheel assessment and management](#wheel-ask-assigned-calls-and-roll--repair)
-- [In Play and Reddit attention](#ideas-in-play)
+- [In Play](#ideas-in-play)
 - [Flow and unusual options](#options-flow-and-unusual-options)
-- [Insider buying and Superinvestors](#ideas-insider-buying-and-superinvestors)
-- [Macro and prediction markets](#ideas-macro-calendar-and-prediction-markets)
+- [Insider buying](#ideas-insider-buying)
+- [Macro calendar](#ideas-macro-calendar)
 - [Strategy Tester](#ideas-strategy-tester)
 - [Paper options track record](#ideas-options-track-record)
 - [Watchlist](#watchlist)
@@ -113,7 +113,7 @@ Shows the selected ticker's articles and sentiment summaries. A sentiment score 
 
 ## Ideas: Navigation and Setup Scanner
 
-The nine tabs are **In play**, **Setups**, **Wheel**, **Unusual options**, **Insider buying**, **Superinvestors**, **Macro calendar**, **Strategy tester**, and **Options track record**. The selected Ideas tab is remembered for the session; absent a saved choice, day traders start at In play and other profiles at Setups.
+The eight tabs are **In play**, **Setups**, **Wheel**, **Unusual options**, **Insider buying**, **Macro calendar**, **Strategy tester**, and **Options track record**. The selected Ideas tab is remembered for the session; absent a saved choice, day traders start at In play and other profiles at Setups.
 
 ### Setups: Universe and Trend
 
@@ -467,14 +467,6 @@ Short percentage here divides reported short shares by **shares outstanding**, n
 
 Source: [backend/intraday.py](backend/intraday.py), [frontend/src/components/InPlay.jsx](frontend/src/components/InPlay.jsx).
 
-### Reddit Attention
-
-This independent section uses ApeWisdom's `all-stocks` feed for selected stock-focused Reddit communities. It retrieves the first page (up to 100 ranked symbols), normalizes valid records, deduplicates tickers, sorts by provider rank, and displays up to 12. It is **not X coverage**, sentiment analysis, bot filtering or verified news.
-
-The change is `(current mentions / provider's 24h-ago snapshot mentions - 1) * 100`. A missing or zero baseline does not produce infinite growth: it remains unavailable/no baseline. This compares provider snapshots, not a multiweek historical average or a proven unusual-attention threshold. Ticker clicks open stock research for separate investigation.
-
-The provider supplies no reliable update timestamp in this integration; the app labels retrieval time. Absence from the sample does not mean zero mentions.
-
 ## Options Flow and Unusual Options
 
 **Dashboard > Analysis > Flow & positioning** examines one ticker. **Ideas > Unusual options** applies the unusual-activity filter across a fixed list of 40 liquid names plus account-held/watched names, capped at 80 unique symbols. CBOE delayed chains are primary here, with Yahoo fallback; only expirations within 0-60 DTE are included.
@@ -503,7 +495,7 @@ Single-stock flow caches for ten minutes; the cross-stock scan for 15. "Most cal
 
 Source: [backend/options_flow.py](backend/options_flow.py).
 
-## Ideas: Insider Buying and Superinvestors
+## Ideas: Insider Buying
 
 ### Insider Buying
 
@@ -516,42 +508,26 @@ The default lookback is 30 calendar days, querying weekday observations. Eligibl
 
 Insider activity can lag transactions and can have motives other than predicting a price increase. The name-based buyer grouping is not a full beneficial-owner identity resolution system.
 
-### Superinvestors
+### Superinvestors (per stock)
 
-The tracked firms are Berkshire Hathaway, Pershing Square, Baupost, Appaloosa, Duquesne, Third Point, Himalaya, Tiger Global, Lone Pine, Coatue, Viking and ARK. The app compares their latest two regular `13F-HR` filings, not every investment manager. A fund is skipped if its latest filing is more than 200 days old. Reported option positions are excluded from this holdings comparison.
+There is no separate Superinvestors tab. The stock page's **Short interest & smart money** card (Dashboard → Analysis) lists which tracked funds hold or recently changed the stock. The tracked firms are Berkshire Hathaway, Pershing Square, Baupost, Appaloosa, Duquesne, Third Point, Himalaya, Tiger Global, Lone Pine, Coatue, Viking and ARK. The app compares their latest two regular `13F-HR` filings, not every investment manager. A fund is skipped if its latest filing is more than 200 days old. Reported option positions are excluded from this holdings comparison.
 
 | Label | Rule |
 | --- | --- |
 | New | CUSIP in the current filing but not the previous filing. |
 | Added / Reduced | Absolute change in reported shares at least 10%; direction determines label. |
 | Sold | Previous CUSIP absent from the current filing. |
-| Top holdings | Largest 15 reported holdings by value per fund. |
-| Changes | Largest 25 changes by reported value per fund. |
-| Consensus | A mapped ticker appears in at least two tracked funds' top-15 lists; keep the top 15 by holder count. |
+| Listed for a stock | The stock is in that fund's largest 15 holdings or its largest 25 changes by reported value. |
 
-CUSIPs are mapped through OpenFIGI; missing mappings remain limitations. A first available filing without a previous comparison can make holdings appear new. A 13F is delayed, incomplete portfolio disclosure: shorts, cash, hedges and subsequent trades may not be represented. "Consensus" is not all-manager consensus. Refresh is triggered after 24 hours, with cached results visible while rebuilding.
+CUSIPs are mapped through OpenFIGI; missing mappings remain limitations. A first available filing without a previous comparison can make holdings appear new. A 13F is delayed (filed up to 45 days after quarter end), incomplete portfolio disclosure: shorts, cash, hedges and subsequent trades may not be represented. Viewing the card starts a background refresh when the data is over 24 hours old; the first build takes a few minutes and the list is empty until then.
 
 Source: [backend/smart_money.py](backend/smart_money.py).
 
-## Ideas: Macro Calendar and Prediction Markets
+## Ideas: Macro Calendar
 
 The Economic calendar groups releases by date, showing times in Eastern Time, impact, actual/consensus/previous values when available, and the next Fed decision. Actual values are hidden for future-dated releases because the provider can repeat a prior figure before publication. The full view requests 14 days and initially includes medium-impact releases; the compact Dashboard view requests seven days and initially shows high impact only. The checkbox controls display filtering, not options eligibility. Scheduled events and reported dates can change.
 
-### Prediction-Market Context
-
-The separate Polymarket section samples up to 20 economy events and 20 finance events ordered by 24-hour volume, merges their markets, and displays up to 12 qualifying unique markets by market volume.
-
-- Require active, not-closed events and markets, valid locally constructed event URLs, and a future parsed market end time.
-- Require exactly Yes/No outcomes and corresponding finite prices between zero and one, summing to within 0.02 of one. Outcome labels determine the displayed Yes price; array position alone does not.
-- Display `Yes price * 100`, reported 24-hour volume/liquidity and provider update time. Daily price change is multiplied by 100 and labeled **percentage points**, not percent return. If Yes is not the first outcome, that change is omitted because its mapping is not established.
-- Warn on liquidity below $10,000, volume below $1,000, unknown fields, update times older than 24 hours or over five minutes in the future. These are explicit heuristics, not validated trading filters.
-- Market end time is not necessarily a scheduled economic release or final resolution time. Read the linked resolution rules; differently worded markets need not be comparable.
-
-Reddit and prediction feeds cache results and failures for ten minutes per server process. One can fail without breaking the other page features. An outage is not displayed as zero interest or zero probability. Neither changes sizing, Wheel rules or automated alerts. They are public read-only integrations, not trading connections. X's paid API is not connected.
-
-Commercial redistribution, attribution and regional terms still require operator review before public deployment. `EXTERNAL_CONTEXT_ENABLED=0` disables these external feeds; default is enabled. See [README.md](README.md#external-market-context).
-
-Sources: [frontend/src/components/EconomicCalendar.jsx](frontend/src/components/EconomicCalendar.jsx), [backend/market_context.py](backend/market_context.py).
+Source: [frontend/src/components/EconomicCalendar.jsx](frontend/src/components/EconomicCalendar.jsx).
 
 ## Ideas: Strategy Tester
 
@@ -1254,8 +1230,6 @@ Sources: [backend/news_sentiment.py](backend/news_sentiment.py), [backend/ai_bri
 | Annual fundamentals, insider transactions, fund disclosures | SEC EDGAR/XBRL/Form 4/13F; reporting delays and amendments matter. |
 | Scanner membership | Current S&P 500 and Nasdaq-100 Wikipedia constituent lists, independently cached and deduplicated; point-in-time research requires separately configured membership history. |
 | US macro releases | Nasdaq calendar and the maintained Federal Reserve date fallback. |
-| Reddit attention | ApeWisdom aggregate observations, read-only. |
-| Prediction markets | Polymarket public market data, read-only. |
 | Account holdings, fills, journal, fees and cash flows | What the user records/imports, not automatic broker confirmation. |
 
 Quotes can be delayed or stale, and provider symbol coverage can vary. Prices, dividends and option data may use different adjustment/timing conventions. A displayed refresh button can refresh the UI/request while an upstream cache still applies. Read timestamps and incomplete/stale labels; do not substitute unknown values with zero risk.

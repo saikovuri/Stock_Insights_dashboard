@@ -9,7 +9,7 @@ AI-powered stock research and portfolio assistant. FastAPI backend + React (Vite
 - **Portfolio Doctor** — concentration, sector exposure, beta, correlation, volatility, drawdown, tax-loss candidates, upcoming earnings + AI review
 - **Alerts & Daily Briefing** — scanned every 15 min during market hours and each weekday morning; in-app bell + optional free phone push via [ntfy](https://ntfy.sh)
 - **News Sentiment** — AI-scored sentiment and relevance (VADER fallback)
-- **Ideas** — S&P 500 setup scanner with a 1-year backtested track record per setup, market-wide unusual options activity, insider cluster buying (Form 4), superinvestor 13F changes, US economic calendar
+- **Ideas** — S&P 500 setup scanner with a 1-year backtested track record per setup, market-wide unusual options activity, insider cluster buying (Form 4), US economic calendar
 - **Options hub** — volatility & expected move, covered-call / cash-secured-put ideas, directional structures, and flow & positioning (put/call, max pain, call/put walls, dealer gamma flip) from free CBOE delayed quotes
 - **Portfolio insights** — performance vs the same dollars in SPY, projected dividend income calendar, wash-sale warnings, correlation, broker CSV import, weekly AI review
 - **Thesis tracker** — write why you own a stock; the AI re-checks it after every earnings report and notifies you
@@ -38,15 +38,6 @@ npm install && npm run dev
 ```
 
 Without optional keys, some features use Yahoo data or rule-based analysis. Provider failures can still make data unavailable; an unavailable quote is not a zero price or zero P&L.
-
-## External Market Context
-
-- **Ideas > In play > Reddit attention** shows ApeWisdom's stock-community mention rankings, prior-snapshot counts and changes. Click a ticker for stock research and news; attention itself is not verified news, sentiment or a buy/sell signal. Coverage is a sample of selected Reddit communities, not X or the entire internet. The feed does not supply a reliable update timestamp, so retrieval time is labeled separately.
-- **Ideas > Macro calendar > Prediction-market context** shows Polymarket economy/finance questions, Yes prices, 24-hour percentage-point changes, reported liquidity/volume, provider timestamps and links to market resolution rules. Only active, unexpired binary markets with valid prices are displayed. Prices are market-implied, not calibrated probabilities; market end times are not necessarily scheduled economic-release times. Low liquidity/volume thresholds are caution heuristics, not validated trading filters.
-- These are read-only public API integrations. No account, wallet, API key, order placement or paid subscription is created. Requests and failures are cached for 10 minutes per server process; retries do not bypass this cache. Attention uses one bounded request; predictions use two (20 economy and 20 finance events), deduplicate markets, and show up to 12 results. Missing feeds remain unavailable instead of being treated as zero activity. Set `EXTERNAL_CONTEXT_ENABLED=0` in the backend environment and restart to disable all new provider requests; the default is `1`.
-- **X is not connected.** The [official pricing page](https://docs.x.com/x-api/getting-started/pricing), checked October 5, 2026, describes prepaid pay-per-use access (listed post reads: $0.005/resource; recent counts: $0.005/request). Actual rates/access must be confirmed in the developer console before purchasing credits. No scraping or paid fallback is implemented.
-- Source documentation checked: [ApeWisdom API](https://apewisdom.io/api), [Polymarket public data](https://docs.polymarket.com/market-data/discover-markets), [Gamma events API](https://docs.polymarket.com/api-reference/events/list-events). Both public endpoints returned data without authentication during the local smoke check. A public endpoint is not blanket permission for commercial redistribution: ApeWisdom's docs did not establish a redistribution license or SLA, and the [Polymarket terms page](https://polymarket.com/tos) did not expose the full terms in the automated check. Confirm applicable terms, attribution, commercial rights and regional restrictions before public deployment, or disable these feeds. This integration does not bypass trading restrictions or connect to Polymarket US trading.
-- Neither feed modifies Wheel eligibility, position sizing or automated alerts. No social-to-stock predictive edge, bot filtering, historical baseline or news corroboration is claimed.
 
 ## Portfolio Workflows
 

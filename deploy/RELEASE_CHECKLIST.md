@@ -13,7 +13,6 @@
 
 ## Research Data
 
-- Before publicly enabling external context, confirm ApeWisdom and Polymarket access, attribution and redistribution terms for the deployment's commercial use and jurisdiction. Unauthenticated API access alone does not establish those rights. Set `EXTERNAL_CONTEXT_ENABLED=0` until cleared; see README's External Market Context section. X is not connected and must not be enabled without explicit budget approval.
 - Historical membership requires a documented dataset with effective dates and actual publication timestamps. Import via `backend/research_universe.py` and set `RESEARCH_UNIVERSE_SOURCE`; do not backfill today's members as historical facts.
 - Missing constituent dates or price series suppress scanner historical results. Check delisted securities, corporate actions and source coverage before trusting even populated results.
 - Walk-forward choices are made on training history only. The small parameter grid is not a discovery of trading edge. New paper results subtract frozen modeled costs; they are not executed trades.
