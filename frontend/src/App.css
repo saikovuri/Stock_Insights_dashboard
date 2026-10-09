@@ -5151,6 +5151,13 @@ button.signal-chip { cursor: pointer; }
   .account-table th, .account-table td { white-space: nowrap; }
   .corporate-actions > summary { font-size: 0.9rem; }
 
+  /* Today card: three index tiles per row, smaller trend line */
+  .market-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.35rem; }
+  .market-tile { padding: 0.4rem 0.45rem; font-size: 0.72rem; }
+  .market-tile-price { font-size: 0.9rem; }
+  .market-tile-name { font-size: 0.62rem; }
+  .market-regime-text { font-size: 0.85rem; }
+
   /* Trade entry forms: three fields per row instead of one per screen line */
   .portfolio-form.labeled-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.4rem 0.5rem; }
   .portfolio-form.labeled-form > .form-actions, .portfolio-form.labeled-form > .sell-lot-banner { grid-column: 1 / -1; }

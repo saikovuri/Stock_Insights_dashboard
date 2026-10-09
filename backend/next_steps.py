@@ -51,7 +51,7 @@ def _cash_items(user_id: int) -> list[dict]:
             if reserved > 0:
                 items.append({"level": "warn", "code": "cash_unknown", "account": name,
                               "title": f"{name}: short puts reserve {_usd(reserved)} but no cash balance is recorded",
-                              "detail": "Enter the account's cash in the account bar so collateral and free cash can be checked."})
+                              "detail": "Enter the account's cash under Portfolio → Holdings (account bar) so collateral and free cash can be checked."})
         elif free < 0:
             items.append({"level": "warn", "code": "over_committed", "account": name,
                           "title": f"{name}: short puts need {_usd(-free)} more cash than recorded",
