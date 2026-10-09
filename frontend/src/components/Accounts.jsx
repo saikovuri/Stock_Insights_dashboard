@@ -5,7 +5,7 @@ import { fetchAccounts, saveCash, fetchNavHistory, recordNavSnapshot, fetchCorpo
 const money = (value) => (value == null ? '—' : `${Number(value) < 0 ? '-' : ''}$${Math.abs(Number(value)).toLocaleString(undefined, { maximumFractionDigits: 2 })}`);
 const ACCOUNT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 ._&'()-]{0,39}$/;
 
-export function AccountBar({ account, onChange, version, onCashSaved }) {
+export function AccountBar({ account, onChange, version, onCashSaved, compact = false }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [cash, setCash] = useState('');
@@ -50,6 +50,19 @@ export function AccountBar({ account, onChange, version, onCashSaved }) {
     setBusy(false);
   };
 
+  if (compact) {
+    return (
+      <section className="account-bar-compact" aria-label="Brokerage accounts">
+        <label htmlFor="account-select">Account</label>
+        <select id="account-select" className="tool-input" value={account} onChange={e => onChange(e.target.value)}>
+          <option value="">All accounts</option>
+          {accounts.map(a => <option key={a.name} value={a.name}>{a.name}</option>)}
+        </select>
+        <span className="market-sub">Cash and new accounts are managed under Holdings.</span>
+      </section>
+    );
+  }
+
   return (
     <section className="card account-bar" aria-label="Brokerage accounts">
       <div className="account-bar-row">
@@ -75,13 +88,15 @@ export function AccountBar({ account, onChange, version, onCashSaved }) {
           <tbody>{shown.map(a => (
             <tr key={a.name}>
               <td>{a.name}</td><td>{money(a.cash)}</td><td>{money(a.put_collateral)}</td>
-              <td className={a.free_cash != null && a.free_cash < 0 ? 'negative' : ''}>{a.cash == null ? 'Enter cash' : money(a.free_cash)}</td>
+              <td className={a.free_cash != null && a.free_cash < 0 ? 'negative' : ''}>{a.cash == null
+                ? <button className="link-btn" onClick={() => onChange(a.name)} title={`Select ${a.name} to enter its cash balance`}>Enter cash</button>
+                : money(a.free_cash)}</td>
               <td>{a.cash_updated_at ? new Date(a.cash_updated_at).toLocaleString() : '—'}</td>
             </tr>))}
           </tbody>
         </table></div>
       )}
-      {!account && <p className="market-sub">Choose an account to enter its cash balance. New lots and options are recorded in the selected account; "All accounts" uses Default.</p>}
+      {!account && <p className="market-sub">Pick an account to enter its cash. New trades go into the selected account (All accounts uses Default).</p>}
     </section>
   );
 }

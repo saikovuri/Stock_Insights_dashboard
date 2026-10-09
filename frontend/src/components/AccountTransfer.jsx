@@ -73,15 +73,16 @@ function TransferControls({ user, onImported }) {
     finally { pending.current = false; if (mounted.current) setBusy(''); }
   };
   return <section className="account-transfer" aria-label="Account transfer">
+    <p className="market-sub">Copy your portfolio and Journal to another StockPilot sign-in. This is not for moving positions between brokerage accounts.</p>
     <div className="accounting-toolbar">
-      <button className="btn-secondary btn-sm" disabled={!!busy} onClick={download}><span aria-hidden="true">&#8595; </span>{busy === 'export' ? 'Exporting...' : 'Export to another account'}</button>
-      <button className="btn-secondary btn-sm" disabled={!!busy} aria-haspopup="dialog" onClick={() => { setError(''); setStatus(''); setShow(true); }}><span aria-hidden="true">&#8593; </span>Import from another account</button>
+      <button className="btn-secondary btn-sm" disabled={!!busy} onClick={download}><span aria-hidden="true">&#8595; </span>{busy === 'export' ? 'Exporting...' : 'Export data to another login'}</button>
+      <button className="btn-secondary btn-sm" disabled={!!busy} aria-haspopup="dialog" onClick={() => { setError(''); setStatus(''); setShow(true); }}><span aria-hidden="true">&#8593; </span>Import data from another login</button>
     </div>
     {status && <p role="status">{status}</p>}
     {error && !show && <p className="error-text" role="alert">{error}</p>}
     {show && <dialog ref={dialog} className="journal-plan-dialog account-transfer-dialog" aria-labelledby="account-transfer-title"
       onCancel={event => { event.preventDefault(); close(); }}>
-      <div className="journal-plan-header"><h3 id="account-transfer-title">Import from another account</h3>
+      <div className="journal-plan-header"><h3 id="account-transfer-title">Import data from another login</h3>
         <button className="btn-secondary btn-sm" disabled={!!busy} onClick={close}>Cancel</button></div>
       <p>Destination: <strong>{destination}</strong> (account {user.id})</p>
       <p className="market-sub">Adds portfolio, Journal, recorded fees, reviews, wheel links and watchlist data. Existing trades are not matched or overwritten. The source account is not deleted.</p>

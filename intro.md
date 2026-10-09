@@ -51,7 +51,7 @@ An absent candidate does not necessarily mean a bad investment. It can mean miss
 | Portfolio | Recorded holdings and options, account risks, income/performance, and the account ledger. |
 | Journal | Separate recorded trading history from manually written trade plans and reviews. |
 
-The Dashboard has Overview, Analysis, Fundamentals, and News subtabs. When a row of subtabs is wider than the screen, it scrolls sideways without a scrollbar: fades and ‹ › arrows mark hidden tabs, and the selected tab scrolls into view. On phones the subtabs wrap into an even grid instead (up to three per row, four as a 2×2 block), with equal-height cells and each emoji kept beside its first word. On phones the five main tabs show an icon above a one-line label; the header shows the trading style as its icon (tap opens the full list), a 🔍 jump-to button in place of ⌘K, and compact theme, notification and Sign Out controls that stay within the screen. Stock alerts put the badge above the message, and segmented filters wrap rather than hide options. The trading-style selector changes defaults, ordering, and visibility; it is not an account risk limit. Sign-in enables account-specific features. Theme controls affect appearance only. Older `#setups`, `#screener`, and `#tools` links route to Ideas, Watchlist, and Journal respectively.
+The Dashboard has Overview, Analysis, Fundamentals, and News subtabs. Overview starts with the quote and key metrics, then technical alerts and "since last look". When a row of subtabs is wider than the screen, it scrolls sideways without a scrollbar: fades and ‹ › arrows mark hidden tabs, and the selected tab scrolls into view. On phones the subtabs wrap into an even grid instead (up to three per row, four as a 2×2 block), with equal-height cells and each emoji kept beside its first word. On phones the five main tabs show an icon above a one-line label; the header shows the trading style as its icon (tap opens the full list), a 🔍 jump-to button in place of ⌘K, and compact theme, notification and Sign Out controls that stay within the screen. Stock alerts put the badge above the message, and segmented filters wrap rather than hide options. The trading-style selector changes defaults, ordering, and visibility; it is not an account risk limit. Sign-in enables account-specific features. Theme controls affect appearance only. Older `#setups`, `#screener`, and `#tools` links route to Ideas, Watchlist, and Journal respectively.
 
 **Jump to (Ctrl+K / ⌘K)** opens a command palette from anywhere; the ⌘K button in the header does the same.
 - Type words to filter destinations: every tab, each Ideas view, each Portfolio section, and the main tools (import broker CSV, expiration ladder, trim planner, trading rules, buy zones, edge report, P&L calendar). It also offers System status (signed in) and the theme toggle.
@@ -642,7 +642,7 @@ Portfolio has **Holdings**, **Portfolio Risk**, and **Income & Performance**. Ho
 
 Signed-in users can label records with brokerage accounts (for example Taxable, Roth IRA) inside one login. The account bar's selector filters current stocks, options and closed history; **All accounts** combines them and shows a badge on records outside Default. New lots, options and imports go into the selected account (All accounts records into **Default**). Ticker-level sales consume FIFO lots from the selected account only, and covered-call assignment only uses shares in the option's account; assigned puts add shares to the option's account. Closed records inherit the lot's account. Existing records belong to Default. Names allow letters, numbers, spaces and `. _ & ' ( ) -`, up to 40 characters.
 
-Select an account to enter its **cash balance**. Free cash = cash minus gross short-put collateral (strike × 100 × contracts) for that account, without netting credits or protective wings. Cash is a user-entered balance, not a ledger: it does not change automatically when you record trades, and it is not broker buying power or margin. Risk, Doctor, tax, dividends, the ledger report and the SPY comparison remain combined across accounts. Account ledger deposits and withdrawals can name a brokerage account, which makes that account's value history flow-adjusted; entries without an account count toward Default.
+Select an account to enter its **cash balance** (or choose **Enter cash** in its row). The full account bar, with cash, new accounts and the cash table, appears under Holdings; Portfolio Risk and Income & Performance show only the account selector. Free cash = cash minus gross short-put collateral (strike × 100 × contracts) for that account, without netting credits or protective wings. Cash is a user-entered balance, not a ledger: it does not change automatically when you record trades, and it is not broker buying power or margin. Risk, Doctor, tax, dividends, the ledger report and the SPY comparison remain combined across accounts. Account ledger deposits and withdrawals can name a brokerage account, which makes that account's value history flow-adjusted; entries without an account count toward Default.
 
 ### Stocks
 
@@ -652,7 +652,7 @@ Guest stock holdings live only in browser storage; signed-in holdings are accoun
 
 ### Import From a Broker CSV
 
-Signed-in users can expand **Import from broker CSV** in Holdings, choose **Open positions**, **Transaction history** or **Closed trade history**, preview recognized/skipped rows, then confirm. Rows go into the currently selected account. The file control rejects files over 1 MB; the server parses the text and does not store the file.
+Signed-in users can expand **Import from broker CSV** under **Data tools** at the bottom of Holdings (with **Record a spin-off or merger** and the login export/import), choose **Open positions**, **Transaction history** or **Closed trade history**, preview recognized/skipped rows, then confirm. Rows go into the currently selected account. The file control rejects files over 1 MB; the server parses the text and does not store the file.
 
 | Broker | What to export | Import type |
 | --- | --- | --- |
@@ -895,13 +895,13 @@ Only recorded fees/dividends/flows are included. Partial closes allocate opening
 
 TWR links subperiod returns around external flows; it is not cash-flow-adjusted P&L divided by starting cash. Enter total NAV including cash, stock and long-option assets and short-option liabilities. Wash-sale adjustments, option-specific tax rules, assignment/exercise tax treatment, corporate actions and cross-account reconciliation are not a complete automated tax engine. The report is US informational accounting only.
 
-### Export and Import Between Accounts
+### Export and Import Between Logins
 
-Signed-in users have **Export to another account** and **Import from another account** controls in both Portfolio and Journal. These copy data between StockPilot accounts on the same installation; they do not move broker assets, place orders, or delete the source account.
+Signed-in users have **Export data to another login** and **Import data from another login** controls under **Data tools** at the bottom of Portfolio → Holdings. These copy data between StockPilot sign-ins on the same installation; they are not for moving positions between brokerage accounts, and they do not move broker assets, place orders, or delete the source login.
 
-1. In the source account, choose **Export to another account** to download a signed JSON transfer file.
-2. Sign out and sign in to the destination account.
-3. Choose **Import from another account** and select the file.
+1. In the source login, choose **Export data to another login** to download a signed JSON transfer file.
+2. Sign out and sign in to the destination login.
+3. Choose **Import data from another login** and select the file.
 4. Check the destination account name/ID and preview of incoming versus existing records. No records are changed by previewing.
 5. Confirm that you have checked for overlapping trades, then choose **Confirm import**. Portfolio/Journal data refreshes after success.
 

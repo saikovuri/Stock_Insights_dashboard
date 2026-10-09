@@ -293,10 +293,10 @@ function AppShell() {
                 {/* ── Overview ────────────────────────────────── */}
                 {subTab === 'overview' && (
                   <>
+                    <KeyMetrics metrics={metrics} />
                     <Alerts alerts={alerts} />
                     <SinceLastLook ticker={ticker} price={metrics.price} articles={newsData?.articles || EMPTY_LIST}
                       earningsDate={events?.earnings_date} lastEarnings={events?.last_earnings} />
-                    <KeyMetrics metrics={metrics} />
                     <AiBrief ticker={ticker} profile={profile} onSignIn={() => setShowLogin(true)} />
                     {show('thesis') && <ThesisCard ticker={ticker} />}
                     {user && <MyStock ticker={ticker} price={metrics.price} onLevels={setMyLevels} />}

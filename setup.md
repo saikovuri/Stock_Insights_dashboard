@@ -15,7 +15,7 @@ None of these items are in GitHub. Keep them somewhere safe, such as a password 
 | Save | Where it is now | Why you need it |
 | --- | --- | --- |
 | Every value in `backend/.env` (`JWT_SECRET`, `GROQ_API_KEY`, `GEMINI_API_KEY`, `FINNHUB_API_KEY`, `TWELVEDATA_API_KEY`, `SEC_USER_AGENT`, `CORS_ORIGINS`, ...) | `backend/.env` on this machine | Without these the app has no AI or real-time data. Keep the **same `JWT_SECRET`** if you want old account-transfer files to import. |
-| Your local data | `backend/stockinsights.db` (SQLite). The E*TRADE imports you tested locally live here, **not** in production. | Run `.venv\Scripts\python.exe backend\backup_sqlite.py` and copy the file from `backups\`. Or use **Portfolio → Export to another account** to get a JSON file. |
+| Your local data | `backend/stockinsights.db` (SQLite). The E*TRADE imports you tested locally live here, **not** in production. | Run `.venv\Scripts\python.exe backend\backup_sqlite.py` and copy the file from `backups\`. Or use **Portfolio → Holdings → Data tools → Export data to another login** to get a JSON file. |
 | SSH private key for the Oracle VM | `~/.ssh/stockpilot_deploy` (plus `~/.ssh/stockpilot_known_hosts`) on this machine. Log in with `ssh -i ~/.ssh/stockpilot_deploy -o UserKnownHostsFile=~/.ssh/stockpilot_known_hosts ubuntu@157.151.152.97` | Needed to log in to the production server. Oracle does not keep private keys and GitHub never shows secrets again. If it is lost, see section 6 (Lost SSH key). |
 | The production `backend/.env` on the VM, including `DATABASE_URL` | `~/stock-insights/backend/.env` on the VM | Run `ssh ubuntu@157.151.152.97 "cat ~/stock-insights/backend/.env"` and store the output safely. |
 | `BACKUP_PASSPHRASE` | A GitHub secret, and wherever you first wrote it | Without it the weekly database backups cannot be decrypted. |
@@ -140,7 +140,7 @@ Check the backend at http://localhost:8000/api/health. It should return `{"statu
 
 **Export file:**
 1. Sign in to the new installation.
-2. Go to Portfolio → **Import from another account**.
+2. Go to Portfolio → Holdings → Data tools → **Import data from another login**.
 3. This needs the same `JWT_SECRET` as the installation that made the file.
 
 **Into production:** sign in at the Vercel URL and use **Import from broker CSV** (Holdings) to re-import your E*TRADE positions files. Then check the cash balance in the account bar.
@@ -368,3 +368,30 @@ Ordered by value for effort. Each item names where to start.
 13. **Show a price time on Portfolio holdings and Options desk.** They use quotes cached up to 5 minutes without a visible time. Add an `as_of` to `/api/portfolio/summary` and the options summary, as done for income ideas (`PricedAt.jsx`).
 
 Before each production release, follow [deploy/RELEASE_CHECKLIST.md](deploy/RELEASE_CHECKLIST.md).
+
+## 9. Simplification plan (what to remove or merge)
+
+The app has about 70 views. Fewer, clearer views help new users more than new features. Nothing below has been removed yet; each item says what to do and where. Remove one at a time, run `scripts/check.ps1`, and update `intro.md`.
+
+**Remove (low value or dead code)**
+| Item | Why | How |
+| --- | --- | --- |
+| `EarningsMoves.jsx` | Not imported anywhere. The same data shows in Volatility & Expected Move (`EarningsIntel`). | Delete the file and `fetchEarningsMoves` in `api/stockApi.js`; keep the backend route only if something else uses it. |
+| Unreachable "corr" view in `PortfolioInsights.jsx` (line ~306) | Not in its tab list; the heatmap already shows under Portfolio Risk. | Delete the branch and the `CorrelationHeatmap` import there. |
+| Ideas → Macro calendar → **Prediction markets / Reddit attention** (`MarketContext.jsx`) | Noisy, rarely actionable, depends on third-party feeds that change often. | Remove from `Ideas.jsx`; keep the Economic calendar. Delete its test in `portfolio.test.jsx` and the backend route if unused. |
+| Ideas → **Superinvestors** | 13F data is 45+ days old and quarterly; slow OpenFIGI lookups. | Remove the tab from `Ideas.jsx` (and `COMMANDS` in `CommandPalette.jsx`). |
+| Dashboard → Analysis → **Smart money** (`ShortAndSmartMoney.jsx`) | Overlaps Ownership (Fundamentals) and Unusual options. | Remove from `App.jsx`, or move its short-interest line into `Ownership.jsx`. |
+
+**Merge (same job in two places)**
+| Merge | Into | Why |
+| --- | --- | --- |
+| Options → **Flow** tab (`OptionsFlow`) | Ideas → Unusual options (filter by ticker) | Two views of the same unusual-activity data. |
+| **Portfolio Doctor** | Suggested next steps + Sector allocation | The health score repeats concentration and tax items Next steps already lists with actions. |
+| Journal → **Pre-trade checklist** + **Position calculator** | One "Plan a trade" dialog | The Plan a trade button already exists; two more tools beside it confuse first-time users. |
+| Dashboard home: **Daily briefing** + **Market overview** | One "Today" card | Both summarize the market when no ticker is open. |
+
+**Keep but rename for clarity**
+- "Alerts" means four different things: technical signals on a stock, saved price alerts, option position alerts, and Next steps. Suggested labels: **Signals** (stock overview), **Price alerts**, **Option alerts**, **Next steps**.
+- Income ideas (one ticker), Wheel candidates (scan), and the covered-call finder (shares you own) are related; give each a one-line "use this when…" at the top.
+
+**Already done (Oct 2026)**: login export/import moved out of Journal into Portfolio → Holdings → Data tools and renamed (it is not for brokerage accounts); the account bar is compact outside Holdings; the stock Overview shows the price before alerts; phone layouts tightened (three metrics per row, three form fields per row, consistent holding rows).

@@ -389,8 +389,7 @@ export default function Portfolio() {
         {[['holdings', 'Holdings'], ['risk', 'Portfolio Risk'], ['performance', 'Income & Performance']].map(([id, label]) =>
           <button key={id} className={`sub-tab ${section === id ? 'active' : ''}`} onClick={() => setSection(id)}>{label}</button>)}
       </TabStrip>
-      <AccountTransfer onImported={() => { loadStocks(); loadOptions(); loadClosed(); setTransferRevision(value => value + 1); }} />
-      {!isGuest && <AccountBar account={account} onChange={setAccount} version={version} />}
+      {!isGuest && <AccountBar account={account} onChange={setAccount} version={version} compact={section !== 'holdings'} />}
       {loadError && <p className="error-text" role="alert">{loadError} <button className="link-btn" onClick={() => { setLoadError(null); loadStocks(); loadOptions(); loadClosed(); }}>Retry</button></p>}
       {portfolio?.incomplete && <p className="error-text">Some stock quotes are unavailable. Current value and P&L totals are incomplete.</p>}
       {!portfolio && !loadError && <Skeleton label="Loading holdings" />}
@@ -420,7 +419,6 @@ export default function Portfolio() {
         {!isGuest && <PortfolioInsights key={insightsTab || ''} initialTab={insightsTab} tickers={[...new Set(holdings.map(item => item.ticker))]} version={version} onImported={loadStocks} />}
       </section>}
       {section === 'holdings' && <>
-      {!isGuest && <CorporateActions version={transferRevision} onApplied={() => { loadStocks(); loadOptions(); }} />}
       {/* ── Realized P/L Banner ─────────────────────────── */}
       {(closedStocks?.trades?.length > 0 || closedOpts?.trades?.length > 0) && (
         <div className={`realized-pnl-banner ${totalRealizedPnl >= 0 ? 'banner-positive' : 'banner-negative'}`}>
@@ -530,11 +528,11 @@ export default function Portfolio() {
                 <div className="metrics-grid" style={{ marginTop: '1rem' }}>
                   <div className="metric">
                     <span className="metric-label">Invested</span>
-                    <span className="metric-value">${portfolio.total_invested.toLocaleString()}</span>
+                    <span className="metric-value">{usd(portfolio.total_invested)}</span>
                   </div>
                   <div className="metric">
                     <span className="metric-label">Current Value</span>
-                    <span className="metric-value">{portfolio.total_current == null ? 'Unavailable' : `$${portfolio.total_current.toLocaleString()}`}</span>
+                    <span className="metric-value">{portfolio.total_current == null ? 'Unavailable' : usd(portfolio.total_current)}</span>
                   </div>
                   <div className={`metric ${portfolio.total_pnl == null ? '' : portfolio.total_pnl >= 0 ? 'metric-positive' : 'metric-negative'}`}>
                     <span className="metric-label">Total P/L</span>
@@ -872,7 +870,12 @@ export default function Portfolio() {
           <ClosedOptions data={closedOpts} confirmDelete={confirmDelete} setConfirmDelete={setConfirmDelete} onDelete={handleDeleteClosed} />
         )
       )}
-      {!isGuest && <details className="portfolio-section" id="import-csv"><summary>Import from broker CSV</summary><ImportCsv account={account} onImported={() => { loadStocks(); loadOptions(); loadClosed(); }} /></details>}
+      {!isGuest && <section className="data-tools" aria-label="Data tools">
+        <h3>Data tools</h3>
+        <details className="portfolio-section" id="import-csv"><summary>Import from broker CSV</summary><ImportCsv account={account} onImported={() => { loadStocks(); loadOptions(); loadClosed(); }} /></details>
+        <CorporateActions version={transferRevision} onApplied={() => { loadStocks(); loadOptions(); }} />
+        <AccountTransfer onImported={() => { loadStocks(); loadOptions(); loadClosed(); setTransferRevision(value => value + 1); }} />
+      </section>}
       </>}
     </div>
   );

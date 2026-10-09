@@ -236,13 +236,13 @@ test('account transfer downloads, previews and confirms without duplicate retrie
   });
   await page.goto('/#portfolio');
   const downloadPromise = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Export to another account' }).click();
+  await page.getByRole('button', { name: 'Export data to another login' }).click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toMatch(/^stockpilot-account-transfer-.*\.json$/);
   expect(await download.failure()).toBeNull();
   await expect(page.getByText(/Export downloaded/)).toBeVisible();
-  await page.getByRole('button', { name: 'Import from another account' }).click();
-  const dialog = page.getByRole('dialog', { name: 'Import from another account' });
+  await page.getByRole('button', { name: 'Import data from another login' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Import data from another login' });
   await dialog.getByLabel('Transfer file (.json)').setInputFiles({ name: 'wrong.json', mimeType: 'application/json', buffer: Buffer.from('not json') });
   await expect(dialog.getByRole('alert')).toHaveText('Choose a valid StockPilot transfer JSON file.');
   expect(previews).toBe(0);
@@ -259,8 +259,7 @@ test('account transfer downloads, previews and confirms without duplicate retrie
   await expect(dialog).toHaveCount(0);
   expect(submitted).toEqual([{ package: bundle, confirm: true }, { package: bundle, confirm: true }]);
   await expect(page.getByText('This export was already imported. No duplicate records were added.')).toBeVisible();
-  await page.goto('/#journal');
-  await page.getByRole('button', { name: 'Import from another account' }).click();
+  await page.getByRole('button', { name: 'Import data from another login' }).click();
   await dialog.getByLabel('Transfer file (.json)').setInputFiles({ name: 'transfer.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(bundle)) });
   await expect(dialog.getByText('This export was already imported. No duplicate records will be added.')).toBeVisible();
   await expect(dialog.getByRole('button', { name: 'Confirm import' })).toHaveCount(0);

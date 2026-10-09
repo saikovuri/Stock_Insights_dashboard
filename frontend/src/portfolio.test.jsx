@@ -46,7 +46,7 @@ test('account transfer previews before confirmation and retries the identical fi
   const save = vi.spyOn(stockApi, 'importAccountData').mockRejectedValueOnce(new Error('Import response unavailable')).mockResolvedValue({ already_imported: false });
   const refresh = vi.fn();
   render(<AccountTransfer onImported={refresh} />);
-  fireEvent.click(screen.getByRole('button', { name: 'Import from another account' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Import data from another login' }));
   expect(screen.queryByRole('button', { name: 'Confirm import' })).toBeNull();
   fireEvent.change(screen.getByLabelText('Transfer file (.json)'), { target: { files: [{ size: 100, text: async () => JSON.stringify(bundle) }] } });
   const confirm = await screen.findByRole('button', { name: 'Confirm import' });
@@ -70,7 +70,7 @@ test('account transfer blocks invalid files and duplicate imports and clears dra
     counts: {}, destination_counts: {}, ledger_events: 1, already_imported: true });
   const save = vi.spyOn(stockApi, 'importAccountData');
   const view = render(<AccountTransfer />);
-  fireEvent.click(screen.getByRole('button', { name: 'Import from another account' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Import data from another login' }));
   const input = screen.getByLabelText('Transfer file (.json)');
   fireEvent.change(input, { target: { files: [{ size: 11 * 1024 * 1024 }] } });
   await screen.findByText('Transfer file exceeds 10 MB.');
@@ -84,12 +84,12 @@ test('account transfer blocks invalid files and duplicate imports and clears dra
   user.mockReturnValue({ user: { id: 3, display_name: 'Other' } });
   view.rerender(<AccountTransfer />);
   expect(screen.queryByRole('dialog')).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: 'Import from another account' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Import data from another login' }));
   expect(screen.queryByText('Source')).toBeNull();
   expect(screen.queryByRole('button', { name: 'Confirm import' })).toBeNull();
   user.mockReturnValue({ user: null });
   view.rerender(<AccountTransfer />);
-  expect(screen.queryByRole('button', { name: 'Export to another account' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Export data to another login' })).toBeNull();
 });
 
 test('journal capture and holding metrics respect direction, losses and missing history', () => {

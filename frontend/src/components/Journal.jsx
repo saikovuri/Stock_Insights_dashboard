@@ -5,7 +5,6 @@ import PreTradeChecklist from './PreTradeChecklist';
 import PositionCalculator from './PositionCalculator';
 import { Review } from './OptionsDesk';
 import WheelCycles from './WheelCycles';
-import AccountTransfer from './AccountTransfer';
 import Skeleton from './Skeleton';
 import TabStrip from './TabStrip';
 import PnlCalendar from './PnlCalendar';
@@ -468,11 +467,9 @@ function ClosedOptionJournal() {
 
 export default function Journal(props) {
   const { user } = useAuth();
-  const [revision, setRevision] = useState(0);
   return <div className="journal-workspace" key={user?.id ?? user?.username ?? 'guest'}>
     <header className="journal-plan-header"><h2>Journal</h2><PlanTrade /></header>
-    <AccountTransfer onImported={() => setRevision(value => value + 1)} />
-    <JournalViews key={revision} {...props} />
+    <JournalViews {...props} />
   </div>;
 }
 
