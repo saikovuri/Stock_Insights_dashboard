@@ -245,6 +245,8 @@ Lost your SSH key?
 
 Alternative host: [render.yaml](render.yaml) describes the same backend for Render.com. Render's free tier sleeps when idle, which pauses the scheduler.
 
+Home laptop: [setup_laptop.md](setup_laptop.md) runs the backend on an always-on Ubuntu 24.04 laptop, reached through Tailscale Funnel or Cloudflare Tunnel, with a pull-based auto-deploy that waits for CI.
+
 ### 5.4 Database (Supabase)
 
 - **Tables:** the backend creates and updates tables itself at startup (`database.init_db`). There are no manual migrations.
