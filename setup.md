@@ -18,7 +18,7 @@ None of these items are in GitHub. Keep them somewhere safe, such as a password 
 | Your local data | `backend/stockinsights.db` (SQLite). The E*TRADE imports you tested locally live here, **not** in production. | Run `.venv\Scripts\python.exe backend\backup_sqlite.py` and copy the file from `backups\`. Or use **Portfolio → Holdings → Data tools → Export data to another login** to get a JSON file. |
 | SSH private key for the Oracle VM | `~/.ssh/stockpilot_deploy` (plus `~/.ssh/stockpilot_known_hosts`) on this machine. Log in with `ssh -i ~/.ssh/stockpilot_deploy -o UserKnownHostsFile=~/.ssh/stockpilot_known_hosts ubuntu@157.151.152.97` | Needed to log in to the production server. Oracle does not keep private keys and GitHub never shows secrets again. If it is lost, see section 6 (Lost SSH key). |
 | The production `backend/.env` on the VM, including `DATABASE_URL` | `~/stock-insights/backend/.env` on the VM | Run `ssh ubuntu@157.151.152.97 "cat ~/stock-insights/backend/.env"` and store the output safely. |
-| `BACKUP_PASSPHRASE` | A GitHub secret, and wherever you first wrote it | Without it the weekly database backups cannot be decrypted. |
+| `BACKUP_PASSPHRASE` | **Not set yet** (checked 2026-10-12): you choose it and add it as a GitHub secret (see 5.4). | Weekly backups fail until it exists, and they cannot be decrypted without it. |
 | Logins for GitHub, Vercel, Supabase, Oracle Cloud, Groq, Google AI Studio, Finnhub, Twelve Data, Sentry (if used), ntfy topic | Your accounts | Every service is on a free tier, but you must be able to sign in to each one. |
 
 Finally, run `git status` and push anything that isn't pushed yet.
@@ -252,7 +252,7 @@ Home laptop: [setup_laptop.md](setup_laptop.md) runs the backend on an always-on
 - **Tables:** the backend creates and updates tables itself at startup (`database.init_db`). There are no manual migrations.
 - **Row-level security:** after a new database's first start, run [deploy/supabase_rls.sql](deploy/supabase_rls.sql) in the Supabase SQL editor. It blocks Supabase's public REST roles from your tables.
 - **Backups:**
-  - automatic every Sunday (GitHub Actions artifact, kept for 90 days);
+  - automatic every Sunday (GitHub Actions artifact, kept for 90 days). Needs both repo secrets: `DATABASE_URL` (Supabase session pooler, port 5432; set 2026-10-12) and `BACKUP_PASSPHRASE` (choose a long passphrase, store it in your password manager, then `gh secret set BACKUP_PASSPHRASE` and type it at the prompt, or add it under Settings → Secrets and variables → Actions). Until both exist, the workflow fails at "Check secrets". Test with Actions → Database backup → Run workflow;
   - manual: `DATABASE_URL=... bash deploy/backup.sh`.
 - **Restore:** `gpg -d FILE.sql.gz.gpg | gunzip | psql "$TARGET_DATABASE_URL"`. Practise on a scratch database first. A new Supabase project or a non-Supabase Postgres needs small preparations first; see [move_to_local_db.md](move_to_local_db.md).
 - **Moving the database** (second Supabase project, Postgres or SQLite on the laptop, Neon): [move_to_local_db.md](move_to_local_db.md).
