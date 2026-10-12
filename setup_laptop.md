@@ -63,6 +63,33 @@ Also store its contents in your password manager. You'll copy this file to the l
 
 **Recommended:** in your router's admin page, add a **DHCP reservation** so the laptop always gets the same local address.
 
+### 1.1 If you install Ubuntu Desktop 24.04 instead
+
+Desktop works too; everything in this guide runs as system services that start at boot without anyone logging in. Server is leaner, but you can use Desktop if you prefer having a screen to fall back on. Follow the guide with these changes:
+
+- **Installer:** set the computer name to `stockpilot`. Don't turn on automatic login (not needed).
+- **SSH isn't installed by default.** Before step 2.1: `sudo apt update && sudo apt -y install openssh-server`.
+- **Wi-Fi:** skip step 2.5 (netplan); Desktop uses NetworkManager. Connect through the Wi-Fi menu, then make the connection come up at boot before anyone logs in:
+
+  ```bash
+  nmcli connection show                                      # find your Wi-Fi connection name
+  sudo nmcli connection modify "YOUR-WIFI-NAME" connection.autoconnect yes connection.permissions "" 802-11-wireless-security.psk-flags 0
+  ```
+
+- **Sleep:** step 3.1 still applies and is enough (masking the sleep targets stops GNOME from suspending too). Also set **Settings → Power → Automatic Suspend: Off** and **Power Saving → Screen Blank: 5 minutes** so the screen turns off but the laptop doesn't.
+- **Run without the desktop (recommended for 24/7):** the desktop uses about 1–1.5 GB of memory and some CPU even when idle. Boot to text mode instead:
+
+  ```bash
+  sudo systemctl set-default multi-user.target      # takes effect at next reboot
+  sudo reboot
+  ```
+
+  To get the desktop back: `sudo systemctl set-default graphical.target` and reboot (or `sudo systemctl start gdm3` once).
+- **Battery limit (step 3.3):** installing `tlp` removes Desktop's `power-profiles-daemon`; apt will ask, answer yes. You lose the Power Mode switch in Settings, which doesn't matter for a server.
+- **Time zone:** `sudo timedatectl set-timezone Etc/UTC` makes the desktop clock show UTC. That's fine; it only affects the clock display.
+
+Everything else (firewall, backend, tunnels, auto-deploy, switch-over) is identical.
+
 ---
 
 ## 2. Basic setup
