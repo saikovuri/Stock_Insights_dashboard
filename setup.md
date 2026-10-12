@@ -41,7 +41,7 @@ flowchart LR
 | Piece | Production | Local development |
 | --- | --- | --- |
 | Frontend | https://stock-insights-dashboard.vercel.app (Vercel) | http://localhost:5173 (Vite; `/api` is forwarded to port 8000) |
-| Backend | https://157-151-152-97.sslip.io (Oracle Cloud Always Free ARM VM, Ubuntu 24.04, Caddy for HTTPS, systemd service `stock-insights`) | http://localhost:8000 (uvicorn) |
+| Backend | https://157-151-152-97.sslip.io (Oracle Cloud Always Free ARM VM, Ubuntu 20.04 (checked 2026-10-10; standard support ended April 2025), Caddy for HTTPS, systemd service `stock-insights`) | http://localhost:8000 (uvicorn) |
 | Database | Supabase PostgreSQL (`DATABASE_URL`) | SQLite file `backend/stockinsights.db`, used when `DATABASE_URL` is empty |
 | CI/CD | `.github/workflows/ci.yml` (tests), `deploy-oci.yml` (backend deploy), `db-backup.yml` (weekly encrypted backup) | `scripts/check.ps1` runs the same checks |
 
@@ -254,7 +254,8 @@ Home laptop: [setup_laptop.md](setup_laptop.md) runs the backend on an always-on
 - **Backups:**
   - automatic every Sunday (GitHub Actions artifact, kept for 90 days);
   - manual: `DATABASE_URL=... bash deploy/backup.sh`.
-- **Restore:** `gpg -d FILE.sql.gz.gpg | gunzip | psql "$TARGET_DATABASE_URL"`. Practise on a scratch database first.
+- **Restore:** `gpg -d FILE.sql.gz.gpg | gunzip | psql "$TARGET_DATABASE_URL"`. Practise on a scratch database first. A new Supabase project or a non-Supabase Postgres needs small preparations first; see [move_to_local_db.md](move_to_local_db.md).
+- **Moving the database** (second Supabase project, Postgres or SQLite on the laptop, Neon): [move_to_local_db.md](move_to_local_db.md).
 - **Pausing:** free Supabase projects pause after a week without activity. The weekly backup counts as activity. If the project pauses anyway, press **Restore** in the Supabase dashboard.
 
 ### 5.5 Mobile apps (Capacitor)
@@ -289,6 +290,7 @@ The bundled app calls the URL in `VITE_API_URL`, or the fallback in `src/api/con
 | A PostgreSQL query works locally but fails on the server | Use `database.PH` for SQL placeholders (`?` in SQLite, `%s` in PostgreSQL); see `database._run`. |
 | Option quote "unavailable" for a position | The data provider has no quote. The stress test won't guess a price; use **Run without it** (the result is then marked as leaving it out), close or edit the position, or wait for a quote. |
 | Quotes are slow or rate-limited | Finnhub's free tier allows about 60 calls/minute. Lower the number of watchlist and holding tickers, or set `FINNHUB_RATE_PER_MIN`. |
+| `apt update` on the Oracle VM fails with `402 Payment Required` for `dl.cloudsmith.io` (seen 2026-10-10) | Caddy's package repository refuses downloads, so `deploy/oracle-setup.sh` would stop at step 1 on a rebuild. Caddy already installed keeps working. For a rebuild, install Caddy another way (see caddyserver.com/docs/install) and remove `/etc/apt/sources.list.d/caddy-stable.list`, or move to the laptop ([setup_laptop.md](setup_laptop.md)), which doesn't use Caddy. |
 | Lost SSH key | Oracle cannot re-download it. Create a new pair (`ssh-keygen -t ed25519 -f ~/.ssh/stockpilot_new`), then add the `.pub` line to `~/.ssh/authorized_keys` on the VM. Without any working key: Oracle Cloud console → the instance → **Console connection** (or **Run command**, if the Oracle Cloud Agent plugin is enabled) to append it, or rebuild the VM (section 5.3). Also update the `OCI_SSH_KEY` secret in GitHub (Settings → Secrets → Actions) if you replace the deploy key, so CI deploys keep working. |
 
 ---
