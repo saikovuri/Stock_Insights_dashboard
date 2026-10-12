@@ -18,7 +18,7 @@ None of these items are in GitHub. Keep them somewhere safe, such as a password 
 | Your local data | `backend/stockinsights.db` (SQLite). The E*TRADE imports you tested locally live here, **not** in production. | Run `.venv\Scripts\python.exe backend\backup_sqlite.py` and copy the file from `backups\`. Or use **Portfolio → Holdings → Data tools → Export data to another login** to get a JSON file. |
 | SSH private key for the Oracle VM | `~/.ssh/stockpilot_deploy` (plus `~/.ssh/stockpilot_known_hosts`) on this machine. Log in with `ssh -i ~/.ssh/stockpilot_deploy -o UserKnownHostsFile=~/.ssh/stockpilot_known_hosts ubuntu@157.151.152.97` | Needed to log in to the production server. Oracle does not keep private keys and GitHub never shows secrets again. If it is lost, see section 6 (Lost SSH key). |
 | The production `backend/.env` on the VM, including `DATABASE_URL` | `~/stock-insights/backend/.env` on the VM | Run `ssh ubuntu@157.151.152.97 "cat ~/stock-insights/backend/.env"` and store the output safely. |
-| `BACKUP_PASSPHRASE` | **Not set yet** (checked 2026-10-12): you choose it and add it as a GitHub secret (see 5.4). | Weekly backups fail until it exists, and they cannot be decrypted without it. |
+| `BACKUP_PASSPHRASE` | A GitHub secret (set 2026-10-12; first backup succeeded that day), and your password manager | Without it the weekly database backups cannot be decrypted. |
 | Logins for GitHub, Vercel, Supabase, Oracle Cloud, Groq, Google AI Studio, Finnhub, Twelve Data, Sentry (if used), ntfy topic | Your accounts | Every service is on a free tier, but you must be able to sign in to each one. |
 
 Finally, run `git status` and push anything that isn't pushed yet.
