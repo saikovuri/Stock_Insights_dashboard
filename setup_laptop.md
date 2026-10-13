@@ -371,6 +371,27 @@ Install Tailscale on your Windows computer and sign in with the same account. Th
 
 To turn the public address off later: `sudo tailscale funnel reset`.
 
+### 6A.5 Security notes for Funnel
+
+What Funnel does and doesn't expose:
+- Only what you pass to `tailscale funnel` (the API on `127.0.0.1:8000`) is public. Check with `tailscale funnel status`; never funnel other ports. SSH, PostgreSQL (if you add it) and everything else stay private.
+- No router ports are opened and your home IP isn't shown to visitors; they see Tailscale's relay. HTTPS is terminated on the laptop, so the relay passes encrypted traffic it can't read.
+- The `*.ts.net` name appears in public certificate logs, so bots will find and probe it, just as they do the Oracle address today. The app's logins, `REGISTRATION_CODE` and rate limits are what protect it.
+
+The one new risk compared with a cloud VM: the server now sits **inside your home network**. If someone ever broke into the app, they'd be on a machine next to your other devices. Reduce that:
+1. **Put the laptop on your router's guest network** (or an isolated VLAN) so it can reach the internet but not your other devices. Use a cable to a guest LAN port if your router has one; otherwise guest Wi-Fi.
+2. **Keep the tailnet to the laptop alone**, or know that your default Tailscale access policy lets any of your devices reach any other. If you add your PC (6A.4), the laptop can reach the PC too; skip 6A.4 if you don't need remote SSH.
+3. **Protect the Tailscale account** with two-factor authentication on the Google/Microsoft/GitHub login you used. Whoever controls it controls the tailnet.
+4. Keep automatic security updates on (2.2) and don't run other software on this laptop.
+
+**If the laptop is stolen or you suspect a break-in:**
+1. Tailscale admin console → Machines → stockpilot → **Remove** (the public address stops working).
+2. Change the Supabase database password (Project settings → Database → Reset password) and put the new URL into the next server's `.env` and the GitHub `DATABASE_URL` secret (session pooler, port 5432).
+3. Generate a new `JWT_SECRET` (everyone signs in again; old transfer files stop importing).
+4. Regenerate the API keys in `.env` (Groq, Gemini, Finnhub, Twelve Data) on each provider's site.
+
+The disk isn't encrypted in this guide on purpose: encryption asks for a passphrase at every boot, so the laptop couldn't restart by itself after a power cut. The steps above are the trade-off.
+
 ---
 
 ## 6B. Option B: Cloudflare Tunnel
