@@ -689,6 +689,31 @@ class ManualAccountingTests(unittest.TestCase):
         review = database.get_closed_options(self.user)[0]["review"]
         self.assertEqual((review["followed_plan"], review["tags"]), (None, []))
 
+    def test_review_lessons_feed_options_coach_and_weekly_journal(self):
+        import journal, llm, options_desk, scheduler
+        from datetime import date
+        trades = [self.closed_option() for _ in range(5)]
+        loser = trades[-1]
+        conn = database.get_db()
+        conn.execute("UPDATE closed_options SET pnl=-200 WHERE id=?", (loser["id"],))
+        conn.commit()
+        conn.close()
+        self.entry("review", event_id=loser["ledger_event_id"], followed_plan=False, tags=["fomo"])
+        self.entry("review", event_id=trades[0]["ledger_event_id"], followed_plan=True, tags=["patient_entry"])
+        lessons = journal.review_lessons(database.get_closed_options(self.user))
+        self.assertEqual([(g["label"], g["trades"], g["net"]) for g in lessons][0], ("Broke my plan", 1, -200))
+        self.assertIn(("FOMO entry", False), [(g["label"], g["good"]) for g in lessons])
+        with patch.object(llm, "ai_enabled", return_value=True), \
+                patch.object(llm, "chat_json", return_value={"summary": "ok"}) as chat:
+            options_desk.options_coach(self.user)
+        prompt = chat.call_args.args[1]
+        self.assertIn("'label': 'FOMO entry'", prompt)
+        self.assertIn("'followed_plan': False", prompt)
+        closed_on = date.fromisoformat(str(loser["closed_at"])[:10])
+        week = scheduler._journal_week(self.user, closed_on)
+        self.assertEqual((week["closed_this_week"], week["unreviewed_this_week"], week["broke_plan_this_week"]), (5, 3, 1))
+        self.assertEqual(week["costliest_habit"], {"label": "FOMO entry", "trades": 1, "net": -200})
+
     def test_journal_review_rejects_capture_target_on_long_option(self):
         trade = self.closed_option(position="long")
         with self.assertRaisesRegex(ValueError, "short options"):

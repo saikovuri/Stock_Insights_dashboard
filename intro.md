@@ -942,6 +942,8 @@ It cannot see all accounts, spouse/IRA trades, disposed replacement lots or ever
 
 Provides the saved/generated portfolio review and optional phone-delivery settings. It is narrative context based on recorded account information, not an automatic rebalancing instruction or a guarantee that delivery occurred.
 
+When there are recorded closes this week (Monday through the generation date, Eastern) or a costly habit, it adds a journal line: closed stock/option records this week with net P&L (recorded fees deducted where known), how many of them still need a Journal review, how many were reviewed as "Broke my plan", and the mistake tag with the most negative all-time net among reviewed trades. These come from self-reported reviews, so they show only what was recorded.
+
 Sources: [frontend/src/components/PortfolioInsights.jsx](frontend/src/components/PortfolioInsights.jsx), [backend/portfolio_insights.py](backend/portfolio_insights.py), [backend/options_desk.py](backend/options_desk.py), [backend/accounting.py](backend/accounting.py).
 
 ## Fundamentals: Long-Term Criteria
@@ -1085,7 +1087,7 @@ Manual statistics do not automatically include broker fees, financing, tax adjus
 
 Analyzes recorded closed options, including historical entries, separately from manual stock-journal entries. Shows count, positive-net-P&L win rate, net P&L after recorded fees, average win/loss, profit factor and worst recorded outcome. Unrecorded costs are not inferred. Realized option results in Combined P&L and Premium income also include recorded fees; premium cash-flow totals still exclude fees. Breakdowns are long/short call/put, ticker, exit type, and DTE at opening: <=0, 1-7, 8-30, 31-60, over 60, or unknown.
 
-A zero close price is labeled "zero-price close (reason unrecorded)" rather than assumed to be expiry or assignment. This existing exit-type breakdown is derived from fills and does not use the separately recorded Journal review reason. Multi-leg records are not automatically reconstructed into fully linked strategy trades. Options AI coaching requires at least five closed option records and AI access. Its conclusions are separate from the manual-journal coach.
+A zero close price is labeled "zero-price close (reason unrecorded)" rather than assumed to be expiry or assignment. This existing exit-type breakdown is derived from fills and does not use the separately recorded Journal review reason. Multi-leg records are not automatically reconstructed into fully linked strategy trades. Options AI coaching requires at least five closed option records and AI access. It also receives the Journal review answers (plan followed, habit tags, exit reason, capture target) for the 40 most recent closes and the plan/tag net-P&L summary, labeled as self-reported. Its conclusions are separate from the manual-journal coach.
 
 ### Pre-Trade Checklist
 
@@ -1190,7 +1192,7 @@ Defaults are server-side and require a running scheduler process. "Market window
 | Thesis checks | Weekdays after 5 p.m. Eastern for eligible tracked theses. |
 | Account value snapshots | Market-window days from 3:45 p.m. Eastern, once per day, for users with holdings, options or cash. |
 
-The scheduler's market-window helper checks weekday/time, **not a full exchange holiday/early-close calendar**. Restarts, backend suspension, provider limits and failures affect timing. Requests can also generate/cache results on demand; these are not precise execution-time promises.
+Holidays and early closes come from that calendar file, so it needs a yearly update. Restarts, backend suspension, provider limits and failures affect timing. Requests can also generate/cache results on demand; these are not precise execution-time promises.
 
 Daily briefing uses up to 25 alphabetically sorted tracked tickers, shows the five largest absolute percentage movers, upcoming seven-day earnings, and up to two headlines for each of the top three movers. AI can summarize those facts; without AI it emits a rule-based text recap. It is not an exhaustive briefing for accounts exceeding that ticker cap.
 

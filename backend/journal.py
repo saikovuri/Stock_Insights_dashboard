@@ -10,6 +10,39 @@ log = logging.getLogger(__name__)
 
 WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
+# Mirrors REVIEW_TAGS in frontend/src/components/Journal.jsx; True marks a good habit.
+REVIEW_TAG_LABELS = {
+    "fomo": ("FOMO entry", False), "chased": ("Chased the price", False), "oversized": ("Position too big", False),
+    "moved_stop": ("Moved my stop", False), "early_exit": ("Exited too early", False), "late_exit": ("Held too long", False),
+    "ignored_earnings": ("Ignored earnings", False), "revenge": ("Revenge trade", False),
+    "patient_entry": ("Patient entry", True), "sized_right": ("Sized right", True),
+    "cut_loss_fast": ("Cut loss quickly", True), "let_winner_run": ("Let the winner run", True),
+}
+
+
+def trade_net(trade: dict) -> float:
+    net = trade.get("net_pnl")
+    return float(net if net is not None else trade.get("pnl") or 0)
+
+
+def review_lessons(trades: list[dict]) -> list[dict]:
+    """Net result per plan answer and habit tag over reviewed closed trades, worst first."""
+    groups = defaultdict(list)
+    for trade in trades:
+        review = trade.get("review") or {}
+        if review.get("followed_plan") is not None:
+            groups["plan:yes" if review["followed_plan"] else "plan:no"].append(trade_net(trade))
+        for tag in review.get("tags") or []:
+            groups[f"tag:{tag}"].append(trade_net(trade))
+    out = []
+    for key, values in groups.items():
+        kind, name = key.split(":", 1)
+        label, good = (("Followed my plan", True) if name == "yes" else ("Broke my plan", False)) if kind == "plan" \
+            else REVIEW_TAG_LABELS.get(name, (name, None))
+        out.append({"key": key, "label": label, "good": good, "trades": len(values), "net": round(sum(values), 2),
+                    "win_rate": round(sum(1 for value in values if value > 0) / len(values) * 100)})
+    return sorted(out, key=lambda group: group["net"])
+
 
 def _d(s):
     try:

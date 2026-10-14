@@ -227,6 +227,24 @@ def _week_change(ticker: str) -> float | None:
     return float(close.iloc[-1] / close.iloc[-6] - 1) if len(close) >= 6 else None
 
 
+def _journal_week(user_id: int, today) -> dict | None:
+    """This week's closed trades, how many still lack a review, and the costliest habit tag so far."""
+    from database import get_closed_options, get_closed_trades
+    from journal import review_lessons, trade_net
+    trades = get_closed_options(user_id) + get_closed_trades(user_id)
+    monday = (today - timedelta(days=today.weekday())).isoformat()
+    week = [t for t in trades if monday <= str(t.get("closed_at") or "")[:10] <= today.isoformat()]
+    habits = [g for g in review_lessons(trades) if g["key"].startswith("tag:") and g["good"] is False and g["net"] < 0]
+    if not week and not habits:
+        return None
+    return {
+        "closed_this_week": len(week), "net_this_week": round(sum(trade_net(t) for t in week), 2),
+        "unreviewed_this_week": sum(1 for t in week if t.get("ledger_event_id") and not t.get("review")),
+        "broke_plan_this_week": sum(1 for t in week if (t.get("review") or {}).get("followed_plan") is False),
+        "costliest_habit": {k: habits[0][k] for k in ("label", "trades", "net")} if habits else None,
+    }
+
+
 def build_weekly_review(user_id: int, tickers: set[str]) -> dict:
     from database import get_user_holdings, kv_get, list_theses
     from macro import economic_calendar
@@ -273,21 +291,28 @@ def build_weekly_review(user_id: int, tickers: set[str]) -> dict:
         macro = []
     theses = [{"ticker": t["ticker"], "status": (t.get("last_check") or {}).get("status")} for t in list_theses(user_id)]
     insiders = [c for c in insider_buying(30)["clusters"] if c["symbol"] in tickers]
+    try:
+        journal = _journal_week(user_id, today)
+    except Exception as e:
+        log.warning("Weekly journal recap failed: %s", e)
+        journal = None
     data = {
         "as_of": datetime.now(ET).isoformat(), "next_week_start": start.isoformat(), "next_week_end": end.isoformat(),
         "portfolio_week_dollars": round(dollars, 2),
         "portfolio_week_pct": round(dollars / start_value * 100, 2) if start_value else None,
         "best": moves[:3], "worst": moves[-3:][::-1] if len(moves) > 3 else [],
         "setups": setups[:8], "earnings_next_week": earnings, "macro_next_week": macro[:6],
-        "theses": theses, "insider_clusters": [c["symbol"] for c in insiders],
+        "theses": theses, "insider_clusters": [c["symbol"] for c in insiders], "journal": journal,
     }
     body = None
     if llm.ai_enabled():
         system = ("You write a short weekly review for an individual investor. Use ONLY the data given; no invented "
                   "facts. Plain text, no markdown headers, short bullet-style lines are fine.")
-        user = (f"Data: {data}\n\nWrite at most 170 words: 1) how their portfolio did this week and the standout "
+        user = (f"Data: {data}\n\nWrite at most 190 words: 1) how their portfolio did this week and the standout "
                 "winners/losers, 2) what's coming next week (their earnings, macro events), 3) any new setups or "
-                "insider buying in their stocks, 4) theses that need attention. End with 'Not financial advice.'")
+                "insider buying in their stocks, 4) theses that need attention, 5) if journal data is present, "
+                "their closed trades this week, reviews still to write and their costliest self-reported habit. "
+                "End with 'Not financial advice.'")
         try:
             body = (llm.chat([{"role": "system", "content": system}, {"role": "user", "content": user}],
                              temperature=0.3, max_tokens=1500).content or "").strip() or None
@@ -304,6 +329,14 @@ def build_weekly_review(user_id: int, tickers: set[str]) -> dict:
             lines.append("Macro: " + "; ".join(macro[:4]))
         if setups:
             lines.append("Setups: " + ", ".join(f"{s['ticker']} ({'/'.join(s['setups'])})" for s in setups[:5]))
+        if journal and journal["closed_this_week"]:
+            line = f"Journal: {journal['closed_this_week']} trade(s) closed this week, net ${journal['net_this_week']:+,.2f}"
+            if journal["unreviewed_this_week"]:
+                line += f"; {journal['unreviewed_this_week']} still need a review"
+            lines.append(line)
+        if journal and journal["costliest_habit"]:
+            habit = journal["costliest_habit"]
+            lines.append(f"Costliest habit so far: {habit['label']} ({habit['trades']} trade(s), ${habit['net']:+,.2f})")
         body = "\n".join(lines) or "No data this week."
     return {"body": body, "data": data}
 

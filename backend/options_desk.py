@@ -541,19 +541,25 @@ def options_coach(user_id: int) -> dict:
         return {"ai": False, "summary": "Close at least 5 option trades to get a review.", "strengths": [], "leaks": [], "rules": []}
     if not llm.ai_enabled():
         return {"ai": False, "summary": "AI review needs an AI key on the server.", "strengths": [], "leaks": [], "rules": []}
-    recent = [{k: c.get(k) for k in ("ticker", "position", "option_type", "strike", "expiry", "opened_at", "open_premium",
-                                       "close_premium", "contracts", "pnl", "fees", "net_pnl")} for c in get_closed_options(user_id)[:40]]
+    closed = get_closed_options(user_id)
+    recent = [{**{k: c.get(k) for k in ("ticker", "position", "option_type", "strike", "expiry", "opened_at", "open_premium",
+                                         "close_premium", "contracts", "pnl", "fees", "net_pnl")},
+               **({"review": {k: c["review"].get(k) for k in ("exit_reason", "target_capture_pct", "followed_plan", "tags")}}
+                  if c.get("review") else {})} for c in closed[:40]]
+    from journal import review_lessons
+    lessons = [{k: g[k] for k in ("label", "trades", "net", "win_rate")} for g in review_lessons(closed)]
     system = ("You are an options trading coach. Base every observation on the statistics and trades given and quote the "
               "numbers. Be direct and practical. Output JSON only.")
     user = f"""Stats and breakdowns use net P&L after recorded fees. Recent trades include gross pnl and net_pnl.
 Stats: {s}
 Breakdowns (strategy, days to expiry when opened, held to expiry vs closed early, ticker): {report['breakdowns']}
-Recent closed option trades: {recent}
+Self-reported trade reviews (net P&L by whether the trader followed their plan and by habit tag; empty if none): {lessons}
+Recent closed option trades (review is the trader's own after-the-fact note, when recorded): {recent}
 
 Return JSON:
 {{"summary": "2-3 sentence honest assessment",
  "strengths": ["1-3 things that work, with numbers"],
- "leaks": ["2-4 specific patterns costing money, with numbers (e.g. 0DTE losses, holding to expiry, one ticker)"],
+ "leaks": ["2-4 specific patterns costing money, with numbers (e.g. 0DTE losses, holding to expiry, one ticker, a costly habit tag)"],
  "rules": ["2-4 concrete rules to adopt"]}}"""
     raw = llm.chat_json(system, user, temperature=0.3, max_tokens=1600)
 
