@@ -74,6 +74,12 @@ def _cross_date(fast, slow, lookback: int, direction: str):
     return recent[recent].index[-1] if recent.any() else None
 
 
+def alert_title(alert_type: str) -> str:
+    """'MACD_BEARISH' -> 'MACD Bearish', 'NEAR_52W_HIGH' -> 'Near 52W High', 'BELOW_200D' -> 'Below 200D'."""
+    return " ".join(w if w in {"MACD", "RSI"} or any(c.isdigit() for c in w) else w.capitalize()
+                    for w in alert_type.upper().split("_"))
+
+
 def technical_events(name: str, df) -> list[dict]:
     """Recent crossover events from daily bars with indicators (see stock_data.compute_indicators)."""
     import pandas as pd

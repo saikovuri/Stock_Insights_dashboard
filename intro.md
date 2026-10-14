@@ -1165,7 +1165,7 @@ These check the current condition, not necessarily a newly observed crossing. If
 
 ### Notification Bell and Push
 
-The bell displays saved notifications/unread state, polls approximately every two minutes, and includes push settings. Optional ntfy delivery uses a user-configured topic; a random topic can be generated. Treat the topic as sensitive: someone with access to it may see messages depending on the server's access controls. There is no guarantee of instantaneous delivery, and push delivery is not brokerage order execution.
+The bell displays saved notifications/unread state, polls approximately every two minutes, and includes push settings. On phones the panel opens full-width just below the header and scrolls within the screen. Alert titles read like "ORCL: MACD Bearish" or "AAPL: Near 52W High". Optional ntfy delivery uses a user-configured topic; a random topic can be generated. Treat the topic as sensitive: someone with access to it may see messages depending on the server's access controls. There is no guarantee of instantaneous delivery, and push delivery is not brokerage order execution.
 
 ### Background Schedule
 

@@ -708,6 +708,23 @@ test('header controls and main tabs fit the viewport with a consistent layout', 
   await page.locator('.app-header').screenshot({ path: testInfo.outputPath('header.png') });
 });
 
+test('notification panel stays inside the screen', async ({ page }, testInfo) => {
+  await page.route('**/api/notifications', route => route.fulfill({ json: { unread: 1, items: [
+    { id: 1, kind: 'alert', title: 'ORCL: MACD Bearish', body: 'Oracle Corp: MACD crossed below its signal line on Oct 14',
+      created_at: '2026-10-14T13:45:51+00:00' }] } }));
+  await page.route('**/api/notifications/read', route => route.fulfill({ json: { ok: true } }));
+  await page.goto('/#dashboard');
+  await page.getByRole('button', { name: /🔔/ }).click();
+  const panel = page.locator('.notif-panel');
+  await expect(panel.getByText('ORCL: MACD Bearish')).toBeVisible();
+  const box = await panel.boundingBox();
+  const { width, height } = page.viewportSize();
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(width + 1);
+  expect(box.y + box.height).toBeLessThanOrEqual(height + 1);
+  await panel.screenshot({ path: testInfo.outputPath('notifications.png') });
+});
+
 test('sub-tab strips hide the scrollbar and reveal overflowing tabs', async ({ page }, testInfo) => {
   const mobile = testInfo.project.name === 'mobile';
   if (!mobile) await page.setViewportSize({ width: 1024, height: 800 });

@@ -18,6 +18,7 @@ export default function NotificationBell() {
   const [showSettings, setShowSettings] = useState(false);
   const [topic, setTopic] = useState('');
   const [msg, setMsg] = useState(null);
+  const [panelTop, setPanelTop] = useState(null);
   const ref = useRef(null);
 
   const load = useCallback(async () => {
@@ -42,6 +43,7 @@ export default function NotificationBell() {
 
   const toggle = async () => {
     const next = !open;
+    if (next && ref.current) setPanelTop(Math.round(ref.current.getBoundingClientRect().bottom + 8));
     setOpen(next);
     if (next && unread > 0) {
       setUnread(0);
@@ -75,7 +77,7 @@ export default function NotificationBell() {
         🔔{unread > 0 && <span className="notif-count">{unread > 9 ? '9+' : unread}</span>}
       </button>
       {open && (
-        <div className="notif-panel">
+        <div className="notif-panel" style={panelTop != null ? { '--notif-top': `${panelTop}px` } : undefined}>
           <div className="notif-panel-header">
             <strong>Notifications</strong>
             <button className="btn-secondary btn-sm" onClick={openSettings}>⚙️ Push</button>

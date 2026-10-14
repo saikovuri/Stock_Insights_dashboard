@@ -34,6 +34,13 @@ class MarketDisplayTests(unittest.TestCase):
         self.assertIn("new 52-week high", high["message"])
         self.assertEqual(high["value"], 0)
 
+    def test_alert_titles_keep_acronyms(self):
+        self.assertEqual(alerts.alert_title("MACD_BEARISH"), "MACD Bearish")
+        self.assertEqual(alerts.alert_title("NEAR_52W_HIGH"), "Near 52W High")
+        self.assertEqual(alerts.alert_title("BELOW_200D"), "Below 200D")
+        self.assertEqual(alerts.alert_title("RSI_OVERSOLD"), "RSI Oversold")
+        self.assertEqual(alerts.alert_title("PRICE_CHANGE"), "Price Change")
+
     def test_future_calendar_events_do_not_show_actual_values(self):
         today = date.today()
         future = today + timedelta(days=1)

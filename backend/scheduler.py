@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 import llm
-from alerts import check_alerts, technical_events
+from alerts import alert_title, check_alerts, technical_events
 from config import ALERT_SCAN_MINUTES, BRIEFING_HOUR_ET, NTFY_SERVER
 from database import (
     add_notification, delete_notification, get_notification, get_all_user_tickers,
@@ -72,7 +72,7 @@ def scan_alerts() -> int:
             pass
 
         for a in alerts:
-            title = f"{ticker}: {a['type'].replace('_', ' ').title()}"
+            title = f"{ticker}: {alert_title(a['type'])}"
             # Crossovers carry their own date so they notify once, not every day they stay "recent"
             key = f"{a.get('date', today)}:{ticker}:{a['type']}"
             for uid in users:
