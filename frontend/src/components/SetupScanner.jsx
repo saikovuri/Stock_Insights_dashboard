@@ -4,6 +4,8 @@ import Tip from './Tip';
 import { usePortfolioFit, FitBadge } from './PortfolioFit';
 
 const FIT_ROWS = 25;
+const SORTS = [['rs_rating', 'RS rating'], ['change_pct', 'Today'], ['r1m', '1 month'], ['r3m', '3 months'], ['rsi', 'RSI'],
+  ['rvol', 'Relative volume'], ['pct_from_high', 'From 52W high'], ['price', 'Price'], ['symbol', 'Ticker']];
 
 const TAG_CLS = { breakout: 'signal-bullish', pullback: 'signal-bullish', golden_cross: 'signal-bullish', squeeze: '', oversold: 'signal-bearish',
   reversal: '', reclaim: 'signal-bullish' };
@@ -183,7 +185,7 @@ export default function SetupScanner({ onSelect }) {
             signal (not again within 10 days). This is a backtest, not a guarantee.
           </p>
           <div className="table-scroll">
-            <table className="market-table">
+            <table className="market-table track-record-table">
               <thead>
                 <tr>
                   <th>Setup</th><th>Signals</th><th title="Share of signals up after 20 trading days">Win rate 20d</th>
@@ -201,14 +203,14 @@ export default function SetupScanner({ onSelect }) {
                     return (
                       <tr key={k} onClick={() => setSetup(k)} title={data.setup_labels[k]}>
                         <td><span className={`signal-chip ${TAG_CLS[k]}`}>{SHORT[k]}</span></td>
-                        <td>{s.signals}</td>
-                        <td className={s.win_20d >= 55 ? 'positive' : s.win_20d < 45 ? 'negative' : ''}>{s.win_20d != null ? `${s.win_20d}%` : '—'}</td>
-                        <td className={c(s.avg_5d)}>{p(s.avg_5d)}</td>
-                        <td className={c(s.avg_10d)}>{p(s.avg_10d)}</td>
-                        <td className={c(s.avg_20d)}>{p(s.avg_20d)}</td>
-                        <td className={c(s.median_20d)}>{p(s.median_20d)}</td>
-                        <td>{s.hit5_20d != null ? `${s.hit5_20d}%` : '—'}</td>
-                        <td className={c(s.excess_20d)}><strong>{p(s.excess_20d)}</strong></td>
+                        <td data-label="Signals">{s.signals}</td>
+                        <td data-label="Win 20d" className={s.win_20d >= 55 ? 'positive' : s.win_20d < 45 ? 'negative' : ''}>{s.win_20d != null ? `${s.win_20d}%` : '—'}</td>
+                        <td data-label="Avg 5d" className={c(s.avg_5d)}>{p(s.avg_5d)}</td>
+                        <td data-label="Avg 10d" className={c(s.avg_10d)}>{p(s.avg_10d)}</td>
+                        <td data-label="Avg 20d" className={c(s.avg_20d)}>{p(s.avg_20d)}</td>
+                        <td data-label="Median 20d" className={c(s.median_20d)}>{p(s.median_20d)}</td>
+                        <td data-label="Hit +5%">{s.hit5_20d != null ? `${s.hit5_20d}%` : '—'}</td>
+                        <td data-label="vs SPY" className={c(s.excess_20d)}><strong>{p(s.excess_20d)}</strong></td>
                       </tr>
                     );
                   })}
@@ -235,6 +237,14 @@ export default function SetupScanner({ onSelect }) {
 
       <div className="card">
         <p className="market-sub">{rows.length} stocks{rows.length === 150 ? ' (showing first 150)' : ''} · click a row to analyze</p>
+        <div className="scanner-sort">
+          <label className="market-sub" htmlFor="scanner-sort">Sort by</label>
+          <select id="scanner-sort" className="candle-select" value={sort.key} onChange={e => setSort(s => ({ ...s, key: e.target.value }))}>
+            {SORTS.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+          </select>
+          <button type="button" className="btn-secondary btn-sm" onClick={() => setSort(s => ({ ...s, dir: -s.dir }))}
+            aria-label={sort.dir < 0 ? 'Highest first' : 'Lowest first'}>{sort.dir < 0 ? '▼ High first' : '▲ Low first'}</button>
+        </div>
         <div className="table-scroll">
           <table className="market-table scanner-table">
             <thead>
@@ -258,16 +268,16 @@ export default function SetupScanner({ onSelect }) {
                 <tr key={r.symbol} onClick={() => onSelect(r.symbol)}>
                   <td><strong>{r.symbol}</strong><div className="market-sub">{r.name}</div></td>
                   <td><span className={`rs-badge ${rsClass(r.rs_rating)}`}>{r.rs_rating}</span></td>
-                  <td>${r.price}</td>
-                  <td className={r.change_pct >= 0 ? 'positive' : 'negative'}>{r.change_pct > 0 ? '+' : ''}{r.change_pct}%</td>
-                  <td className={r.r1m >= 0 ? 'positive' : 'negative'}>{r.r1m != null ? `${r.r1m}%` : '—'}</td>
-                  <td className={r.r3m >= 0 ? 'positive' : 'negative'}>{r.r3m != null ? `${r.r3m}%` : '—'}</td>
-                  <td>{r.rsi}</td>
-                  <td className={r.rvol >= 1.5 ? 'positive' : ''}>{r.rvol != null ? `${r.rvol}×` : '—'}</td>
-                  <td>{r.pct_from_high}%</td>
-                  <td>{r.setups.map(s => <span key={s} className={`signal-chip ${TAG_CLS[s]}`}>{SHORT[s]}</span>)}</td>
-                  <td className="market-sub">${r.stop} / ${r.target}</td>
-                  {Object.keys(fits).length > 0 && <td><FitBadge fit={fits[r.symbol]} /></td>}
+                  <td data-label="Price">${r.price}</td>
+                  <td data-label="Today" className={r.change_pct >= 0 ? 'positive' : 'negative'}>{r.change_pct > 0 ? '+' : ''}{r.change_pct}%</td>
+                  <td data-label="1M" className={r.r1m >= 0 ? 'positive' : 'negative'}>{r.r1m != null ? `${r.r1m}%` : '—'}</td>
+                  <td data-label="3M" className={r.r3m >= 0 ? 'positive' : 'negative'}>{r.r3m != null ? `${r.r3m}%` : '—'}</td>
+                  <td data-label="RSI">{r.rsi}</td>
+                  <td data-label="Rel vol" className={r.rvol >= 1.5 ? 'positive' : ''}>{r.rvol != null ? `${r.rvol}×` : '—'}</td>
+                  <td data-label="From high">{r.pct_from_high}%</td>
+                  <td className="scanner-setups">{r.setups.map(s => <span key={s} className={`signal-chip ${TAG_CLS[s]}`}>{SHORT[s]}</span>)}</td>
+                  <td data-label="Stop / Target" className="market-sub scanner-stop">${r.stop} / ${r.target}</td>
+                  {Object.keys(fits).length > 0 && <td className="scanner-fit"><FitBadge fit={fits[r.symbol]} /></td>}
                 </tr>
               ))}
             </tbody>

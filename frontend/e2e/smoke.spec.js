@@ -725,6 +725,41 @@ test('notification panel stays inside the screen', async ({ page }, testInfo) =>
   await panel.screenshot({ path: testInfo.outputPath('notifications.png') });
 });
 
+test('setup scanner and track record fit the screen as cards on phones', async ({ page }, testInfo) => {
+  const row = (symbol, name, setups) => ({ symbol, name, sector: 'Technology', rs_rating: 98, price: 987.99, change_pct: -0.75,
+    r1m: 18.3, r3m: 40.1, rsi: 61, rvol: 1.2, pct_from_high: -2.1, setups, stop: 950.12, target: 1063.75, trend: 'uptrend' });
+  const record = { signals: 358, win_20d: 53, avg_5d: 0.18, avg_10d: 0.25, avg_20d: 0.9, median_20d: 0.4, hit5_20d: 21, excess_20d: -0.3 };
+  await page.route('**/api/scanner', route => route.fulfill({ json: {
+    status: 'ready', updated_at: '2026-10-13T21:30:00Z', point_in_time: null,
+    setup_labels: { golden_cross: 'Golden cross', reversal: 'Reversal candle', reclaim: 'Reclaim 21/50' },
+    track_record: { golden_cross: record, reversal: { ...record, signals: 1068 }, reclaim: { ...record, signals: 349 } },
+    sectors: [{ sector: 'Technology', rs_rating: 78, r1m: 4.2 }],
+    rows: [row('LITE', 'Lumentum', ['golden_cross', 'reclaim']), row('DELL', 'Dell Technologies', ['reversal'])],
+  } }));
+  await page.goto('/#ideas');
+  await page.getByRole('navigation', { name: 'Ideas views' }).getByRole('button', { name: /Setups/ }).click();
+  await expect(page.getByRole('heading', { name: /Setup track record/ })).toBeVisible();
+  const width = page.viewportSize().width;
+  const chips = await page.locator('.track-record-table .signal-chip').evaluateAll(elements => elements.map(element => {
+    const box = element.getBoundingClientRect();
+    return { right: box.right, oneLine: box.height < 40 };
+  }));
+  expect(chips.every(chip => chip.oneLine && chip.right <= width + 1)).toBe(true);
+  if (testInfo.project.name === 'mobile') {
+    await expect(page.locator('.track-record-table thead')).toBeHidden();
+    const cells = await page.locator('.scanner-table td, .track-record-table td').evaluateAll(elements =>
+      elements.map(element => element.getBoundingClientRect().right));
+    expect(Math.max(...cells)).toBeLessThanOrEqual(width + 1);
+    await page.getByLabel('Sort by').selectOption('symbol');
+    await page.getByRole('button', { name: 'Highest first' }).click();
+    await expect(page.locator('.scanner-table tbody tr').first()).toContainText('DELL');
+  } else {
+    await expect(page.locator('.scanner-sort')).toBeHidden();
+  }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+  await page.locator('.setup-scanner').screenshot({ path: testInfo.outputPath('setups.png') });
+});
+
 test('sub-tab strips hide the scrollbar and reveal overflowing tabs', async ({ page }, testInfo) => {
   const mobile = testInfo.project.name === 'mobile';
   if (!mobile) await page.setViewportSize({ width: 1024, height: 800 });

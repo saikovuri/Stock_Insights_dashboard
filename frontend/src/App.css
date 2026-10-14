@@ -4534,6 +4534,7 @@ tr.alert-triggered {
 .scanner-filters { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; }
 .scanner-filters label { display: flex; align-items: center; gap: 0.4rem; }
 .scanner-table td .signal-chip { margin-right: 0.25rem; }
+.scanner-sort { display: none; }
 .table-scroll { overflow-x: auto; }
 .rs-badge { display: inline-block; min-width: 2.2rem; text-align: center; font-weight: 700; padding: 0.1rem 0.4rem; border-radius: 6px; font-size: 0.8rem; }
 .rs-big { font-size: 0.95rem; padding: 0.2rem 0.6rem; }
@@ -4638,6 +4639,7 @@ tr.alert-triggered {
 .ai-brief .why-moving-panel { margin: 0 0 0.9rem; }
 .ai-brief-signals { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.25rem 0 0.9rem; }
 .signal-chip {
+  display: inline-block; white-space: nowrap;
   font-size: 0.75rem; padding: 0.2rem 0.6rem; border-radius: 999px;
   border: 1px solid var(--border-light); background: var(--surface); color: var(--text-secondary);
   font-family: inherit;
@@ -5227,6 +5229,30 @@ button.signal-chip { cursor: pointer; }
   .watchlist-table .alert-panel-row { display: block; }
   .watchlist-table .alert-panel-row > td { display: block; }
   .watchlist-table .alert-panel-row > td > * { position: static; width: auto; }
+
+  /* Setup track record and scanner: one card per row; the scanner gets a Sort menu instead of header clicks */
+  .table-scroll:has(> .track-record-table), .table-scroll:has(> .scanner-table) { overflow: visible; }
+  .track-record-table, .scanner-table { display: block; min-width: 0; width: 100%; }
+  .track-record-table thead, .scanner-table thead { display: none; }
+  .track-record-table tbody, .scanner-table tbody { display: flex; flex-direction: column; gap: 0.4rem; }
+  .track-record-table tr, .scanner-table tr {
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.3rem 0.5rem; align-items: start;
+    border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem 0.6rem; background: var(--bg-subtle);
+  }
+  .track-record-table.track-record-table tr > td, .scanner-table.scanner-table tr > td {
+    position: static; box-shadow: none; background: none; border: none; padding: 0; white-space: normal; text-align: left;
+    min-width: 0; font-size: 0.78rem;
+  }
+  .track-record-table tr > td:first-child { grid-column: 1 / -1; }
+  .scanner-table tr > td:first-child { grid-column: span 3; font-size: 0.9rem; }
+  .scanner-table.scanner-table tr > td:nth-child(2) { text-align: right; }
+  .scanner-table tr > td.scanner-setups { grid-column: 1 / -1; }
+  .scanner-table tr > td.scanner-setups:empty { display: none; }
+  .scanner-table tr > td.scanner-stop, .scanner-table tr > td.scanner-fit { grid-column: span 2; }
+  .track-record-table td[data-label]::before, .scanner-table td[data-label]::before {
+    content: attr(data-label); display: block; font-size: 0.6rem; color: var(--text-muted); font-weight: 500;
+  }
+  .scanner-sort { display: flex; align-items: center; gap: 0.4rem; margin: 0.3rem 0 0.5rem; flex-wrap: wrap; }
 
   /* Trade entry forms: three fields per row instead of one per screen line */
   .portfolio-form.labeled-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.4rem 0.5rem; }
