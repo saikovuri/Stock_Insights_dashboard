@@ -761,6 +761,30 @@ test('setup scanner and track record fit the screen as cards on phones', async (
   await page.locator('.setup-scanner').screenshot({ path: testInfo.outputPath('setups.png') });
 });
 
+test('home watchlist shows compact scrollable tiles on phones', async ({ page }, testInfo) => {
+  const tickers = ['NVDA', 'MSFT', 'TSLA', 'AAPL', 'AMZN', 'META'];
+  await page.route('**/api/watchlist', route => route.fulfill({ json: { tickers } }));
+  await page.route('**/api/stock/batch-metrics', route => route.fulfill({ json: { quotes: Object.fromEntries(tickers.map((t, i) =>
+    [t, { price: 100 + i * 37.5, change_pct: i % 2 ? 1.25 : -2.05, name: t }])) } }));
+  await page.route('**/api/stock/batch-sparklines', route => route.fulfill({ json: { sparklines: Object.fromEntries(tickers.map(t =>
+    [t, [1, 3, 2, 4, 3, 5]])) } }));
+  await page.goto('/#dashboard');
+  const rail = page.getByRole('complementary', { name: 'Watchlist' });
+  await expect(rail.getByText('-2.05%').first()).toBeVisible();
+  if (testInfo.project.name === 'mobile') {
+    const tiles = await rail.locator('.rail-ticker').evaluateAll(elements => elements.map(element => {
+      const box = element.getBoundingClientRect();
+      return { left: box.left, right: box.right, height: box.height };
+    }));
+    const width = page.viewportSize().width;
+    expect(tiles.filter(tile => tile.left >= 0 && tile.right <= width).length).toBeGreaterThanOrEqual(3);
+    expect(Math.max(...tiles.map(tile => tile.height))).toBeLessThan(60);
+    expect(await rail.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);
+  }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+  await rail.screenshot({ path: testInfo.outputPath('watchlist-rail.png') });
+});
+
 test('sub-tab strips hide the scrollbar and reveal overflowing tabs', async ({ page }, testInfo) => {
   const mobile = testInfo.project.name === 'mobile';
   if (!mobile) await page.setViewportSize({ width: 1024, height: 800 });

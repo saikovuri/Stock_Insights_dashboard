@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAuth } from '../AuthContext';
 
 import { API_BASE } from '../api/config';
@@ -35,6 +35,7 @@ export default function WatchlistRail({ activeTicker, onSelect, onGoToScreener }
   const [quotes, setQuotes] = useState({});
   const [sparklines, setSparklines] = useState({});
   const [loading, setLoading] = useState(false);
+  const railRef = useRef(null);
 
   // Force re-sort when screener order changes
   const [orderVersion, setOrderVersion] = useState(0);
@@ -119,6 +120,18 @@ export default function WatchlistRail({ activeTicker, onSelect, onGoToScreener }
       .catch(() => {});
   }, [tickers.join(',')]);
 
+  // Phones show the rail as a sideways row: keep the open stock's tile in view
+  useEffect(() => {
+    const rail = railRef.current;
+    const tile = rail?.querySelector('.rail-ticker-active');
+    if (!tile || rail.scrollWidth <= rail.clientWidth) return;
+    const box = tile.getBoundingClientRect();
+    const view = rail.getBoundingClientRect();
+    if (box.left < view.left || box.right > view.right - 24) {
+      rail.scrollBy?.({ left: box.left - view.left - 8, behavior: 'smooth' });
+    }
+  }, [activeTicker, tickers.length]);
+
   if (!tickers.length) {
     return (
       <aside className="watchlist-rail watchlist-rail-empty">
@@ -132,7 +145,7 @@ export default function WatchlistRail({ activeTicker, onSelect, onGoToScreener }
   }
 
   return (
-    <aside className="watchlist-rail">
+    <aside className="watchlist-rail" aria-label="Watchlist" ref={railRef}>
       <div className="rail-header">
         <span>Watchlist</span>
         <span className="rail-count">{tickers.length}</span>
@@ -149,6 +162,7 @@ export default function WatchlistRail({ activeTicker, onSelect, onGoToScreener }
               key={t}
               className={`rail-ticker ${isActive ? 'rail-ticker-active' : ''}`}
               onClick={() => onSelect(t)}
+              aria-current={isActive ? 'true' : undefined}
             >
               <div className="rail-ticker-symbol">{t}</div>
               {sparklines[t]?.length > 1 && (

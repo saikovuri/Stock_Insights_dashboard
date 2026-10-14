@@ -302,53 +302,57 @@ body {
     position: static;
     flex-direction: row;
     flex-wrap: nowrap;
-    align-items: center;
+    align-items: stretch;
     max-height: none;
     max-width: 100vw;
     width: 100%;
-    overflow-x: scroll;
+    overflow-x: auto;
     overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
-    gap: 0.15rem;
-    padding: 0.25rem 0.35rem;
+    scroll-snap-type: x proximity;
+    gap: 0.35rem;
+    padding: 0.35rem 1.5rem 0.35rem 0.35rem;
     box-sizing: border-box;
+    /* Fade the right edge so it's clear the row scrolls; end padding keeps the last tile clear of it */
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 1.5rem), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 1.5rem), transparent);
   }
   .watchlist-rail::-webkit-scrollbar { display: none; }
-  .rail-header {
-    writing-mode: horizontal-tb;
-    border-bottom: none;
-    border-right: 1px solid var(--border);
-    padding-bottom: 0;
-    padding-right: 0.35rem;
-    margin-right: 0.1rem;
-    white-space: nowrap;
-    flex-direction: column;
-    gap: 0.05rem;
-    flex-shrink: 0;
-  }
+  .rail-header { display: none; }
   .rail-list {
     display: contents;
   }
   .rail-list::-webkit-scrollbar { display: none; }
+  /* Compact two-row tile: symbol + change on top, price + sparkline below */
   .rail-ticker {
+    display: grid;
+    grid-template-columns: auto auto;
+    grid-template-areas: "sym chg" "price spark";
+    align-items: center;
+    column-gap: 0.45rem;
+    row-gap: 0.15rem;
     white-space: nowrap;
     width: auto;
     min-width: max-content;
     flex-shrink: 0;
-    padding: 0.18rem 0.3rem;
-    gap: 0.2rem;
+    padding: 0.35rem 0.5rem;
+    border-color: var(--border);
+    background: var(--bg-subtle);
+    scroll-snap-align: start;
   }
-  .rail-ticker-symbol { font-size: 0.72rem; }
-  .rail-ticker-data { flex-direction: row; gap: 0.18rem; align-items: center; }
-  .rail-price { font-size: 0.65rem; }
-  .rail-change { font-size: 0.58rem; }
+  .rail-ticker-symbol { grid-area: sym; font-size: 0.8rem; }
+  .rail-ticker-data { display: contents; }
+  .rail-price, .rail-price-loading { grid-area: price; font-size: 0.72rem; }
+  .rail-change { grid-area: chg; justify-self: end; font-size: 0.66rem; }
+  .rail-sparkline { grid-area: spark; justify-self: end; width: 40px; height: 16px; margin: 0; }
   .rail-add-btn {
     min-width: max-content;
     width: auto;
-    padding: 0.18rem 0.45rem;
+    padding: 0.2rem 0.6rem;
     flex-shrink: 0;
-    font-size: 0.65rem;
+    font-size: 0.72rem;
+    scroll-snap-align: end;
   }
   /* On mobile, show rail above content (order) */
   .dashboard-layout {
