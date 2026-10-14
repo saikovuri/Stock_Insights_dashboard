@@ -16,7 +16,7 @@ import Accounting from './components/Accounting';
 import WheelIdeas, { wheelFreshness } from './components/WheelIdeas';
 import { AssignmentShare, isPostEarnings, limitLadder } from './components/TradeSizing';
 import PreTradeChecklist from './components/PreTradeChecklist';
-import Journal, { recordedTradeMetrics, recordedOptionStats, groupedOptionStats, edgeHighlights, howClosed } from './components/Journal';
+import Journal, { recordedTradeMetrics, recordedOptionStats, groupedOptionStats, edgeHighlights, howClosed, tradesCsv } from './components/Journal';
 import SearchBar from './components/SearchBar';
 import { NavHistory, CorporateActions } from './components/Accounts';
 import { ImportCsv } from './components/PortfolioInsights';
@@ -38,6 +38,7 @@ import TabStrip from './components/TabStrip';
 beforeEach(() => {
   localStorage.clear(); sessionStorage.clear();
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value() { this.open = true; } });
+  vi.spyOn(stockApi, 'fetchTradePlans').mockResolvedValue({ items: [] });
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
@@ -177,6 +178,40 @@ test('journal review records plan and habit tags, nudges unreviewed trades and s
   fireEvent.click(within(dialog).getByRole('button', { name: 'Save review' }));
   await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({
     kind: 'review', event_id: 8, followed_plan: true, tags: ['patient_entry', 'early_exit'] })));
+});
+
+test('journal review compares the trade with the saved pre-trade plan and exports CSV safely', async () => {
+  vi.spyOn(auth, 'useAuth').mockReturnValue({ user: { id: 1 } });
+  vi.spyOn(stockApi, 'fetchClosedTrades').mockResolvedValue({ trades: [{ id: 4, ticker: 'KO', shares: 10, buy_price: 60, sell_price: 62,
+    pnl: 20, pnl_pct: 3.3, closed_at: '2025-09-12', notes: '=HYPERLINK("x")' }] });
+  const trade = { id: 1, ledger_event_id: 7, ticker: 'AAPL', position: 'long', option_type: 'call', strike: 200, expiry: '2025-10-17',
+    open_premium: 3, close_premium: 1, contracts: 2, pnl: -400, net_pnl: -402, fees: 2, opened_at: '2025-09-01', closed_at: '2025-09-20',
+    review: { followed_plan: false, tags: ['moved_stop'], review_note: 'He said "hold"' } };
+  vi.spyOn(stockApi, 'fetchClosedOptions').mockResolvedValue({ trades: [trade] });
+  const plan = { id: 9, ticker: 'AAPL', thesis: 'Breakout', horizon: '1–7 days', structure: 'Long call', max_loss: 300, max_loss_pct: 1,
+    exit_up: 'Half at +50%', exit_down: 'Cut at -40%', invalidation: 'Below 190', created_at: '2025-08-30T15:00:00Z' };
+  stockApi.fetchTradePlans.mockResolvedValue({ items: [{ ...plan, id: 8, created_at: '2025-07-01T15:00:00Z' }, plan] });
+  const created = vi.fn(() => 'blob:x');
+  Object.assign(URL, { createObjectURL: created, revokeObjectURL: () => {} });
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  render(<Journal />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Review AAPL trade 1' }));
+  const section = await screen.findByRole('region', { name: 'Your saved plan' });
+  expect(within(section).getByText('Cut at -40%')).toBeTruthy();
+  expect(within(section).getByText('✗ Lost $402, more than your planned max loss of $300')).toBeTruthy();
+  expect(within(section).getByText('✗ Held 19 days; you planned 1–7 days')).toBeTruthy();
+  expect(stockApi.fetchTradePlans).toHaveBeenCalledWith('AAPL');
+  fireEvent.click(within(screen.getByRole('dialog', { name: 'Review AAPL closed trade' })).getByRole('button', { name: 'Close' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Export 2 trades to CSV' }));
+  expect(created).toHaveBeenCalledWith(expect.any(Blob));
+  expect(click).toHaveBeenCalled();
+  const [header, first, second] = tradesCsv([{ ...trade, quantity: 2 },
+    { id: 4, ticker: 'KO', shares: 10, quantity: 10, buy_price: 60, sell_price: 62, pnl: 20, closed_at: '2025-09-12', notes: '=HYPERLINK("x")' }]).split('\r\n');
+  expect(header.startsWith('"Type","Ticker","Side"')).toBe(true);
+  expect(first).toContain('"AAPL","long call",200,"2025-10-17",2,"Default","2025-09-01","2025-09-20",3,1,-400,2,-402');
+  expect(first).toContain('"No","Moved my stop","He said ""hold"""');
+  expect(second).toContain('"Stock","KO","stock"');
+  expect(second).toContain(`"'=HYPERLINK(""x"")"`);
 });
 
 test('journal long option review has no capture target and can clear exit reason', async () => {
@@ -690,6 +725,26 @@ function fillTradeChecklist() {
     fireEvent.change(screen.getByLabelText(label), { target: { value } });
   }
 }
+
+test('planning checklist saves a valid plan for signed-in users and lists saved plans', async () => {
+  const save = vi.spyOn(stockApi, 'saveTradePlan').mockResolvedValue({ id: 3, ticker: 'AAPL' });
+  stockApi.fetchTradePlans.mockResolvedValueOnce({ items: [] })
+    .mockResolvedValueOnce({ items: [{ id: 3, ticker: 'AAPL', structure: 'Long call', max_loss: 100, created_at: '2026-10-01T12:00:00+00:00' }] });
+  const remove = vi.spyOn(stockApi, 'deleteTradePlan').mockResolvedValue({ ok: true });
+  render(<PreTradeChecklist canSave />);
+  expect(screen.getByRole('button', { name: 'Save plan' }).disabled).toBe(true);
+  fillTradeChecklist();
+  fireEvent.change(screen.getByLabelText('Ticker'), { target: { value: 'aapl ' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save plan' }));
+  await screen.findByText(/Plan saved for AAPL/);
+  expect(save).toHaveBeenCalledWith(expect.objectContaining({ ticker: 'AAPL', max_loss: 100, max_loss_pct: 1, thesis: 'Review after earnings' }));
+  fireEvent.click(await screen.findByText('Saved plans (1)'));
+  fireEvent.click(screen.getByRole('button', { name: /Delete AAPL plan/ }));
+  await waitFor(() => expect(remove).toHaveBeenCalledWith(3));
+  cleanup();
+  render(<PreTradeChecklist />);
+  expect(screen.queryByRole('button', { name: 'Save plan' })).toBeNull();
+});
 
 test('planning checklist reports completion, never trade approval, and clears stale results', () => {
   render(<PreTradeChecklist />);

@@ -148,11 +148,17 @@ def main():
     assert not database.delete_closed_option(other, updated["id"])
     assert database.delete_closed_option(user, updated["id"])
     assert accounting.report(user)["fees"] == 0
+    import trade_plans
+    plan = trade_plans.save_plan(user, {"ticker": "AAPL", "thesis": "PG check", "max_loss": 100})
+    assert [p["id"] for p in trade_plans.list_plans(user, "AAPL")] == [plan["id"]]
+    assert not trade_plans.delete_plan(other, plan["id"]) and trade_plans.delete_plan(user, plan["id"])
     conn = database.get_db()
     try:
         cursor = conn.cursor()
         cursor.execute("SELECT relrowsecurity FROM pg_class WHERE oid='public.idea_log'::regclass")
         assert cursor.fetchone()[0], "Startup left idea_log exposed without RLS"
+        cursor.execute("SELECT relrowsecurity FROM pg_class WHERE oid='public.trade_plans'::regclass")
+        assert cursor.fetchone()[0], "Startup left trade_plans exposed without RLS"
         for statement in ("UPDATE accounting_events SET operation='changed'", "DELETE FROM accounting_events", "TRUNCATE accounting_events"):
             try:
                 cursor.execute(statement)

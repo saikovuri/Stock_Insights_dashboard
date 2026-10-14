@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { deleteTradePlan, fetchTradePlans, saveTradePlan } from '../api/stockApi';
 
 const FIELDS = [
   { id: 'ticker', label: 'Ticker', type: 'text', placeholder: 'AAPL' },
@@ -16,13 +17,34 @@ const FIELDS = [
 
 const REQUIRED = FIELDS.map(f => f.id);
 
-export default function PreTradeChecklist() {
+const planDate = value => new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+
+function SavedPlans({ plans, onDelete }) {
+  const [busy, setBusy] = useState(null);
+  if (!plans.length) return null;
+  return <details className="saved-plans">
+    <summary>Saved plans ({plans.length})</summary>
+    <ul>{plans.slice(0, 20).map(plan => <li key={plan.id}>
+      <span><strong>{plan.ticker}</strong> · {planDate(plan.created_at)} · {plan.structure} · max loss ${Number(plan.max_loss).toLocaleString()}</span>
+      <button type="button" className="btn-icon" aria-label={`Delete ${plan.ticker} plan from ${planDate(plan.created_at)}`} disabled={busy === plan.id}
+        onClick={async () => { setBusy(plan.id); try { await onDelete(plan.id); } finally { setBusy(null); } }}>🗑</button>
+    </li>)}</ul>
+  </details>;
+}
+
+export default function PreTradeChecklist({ canSave = false }) {
   const [vals, setVals] = useState({});
   const [submitted, setSubmitted] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState(null);
+  const [plans, setPlans] = useState([]);
+  const loadPlans = useCallback(() => fetchTradePlans().then(data => setPlans(data.items || [])).catch(() => {}), []);
+  useEffect(() => { if (canSave) loadPlans(); }, [canSave, loadPlans]);
 
   const set = (id, v) => {
     setVals(prev => ({ ...prev, [id]: v }));
     setSubmitted(false);
+    setSaveMsg(null);
   };
 
   const missing = useMemo(
@@ -45,7 +67,23 @@ export default function PreTradeChecklist() {
   const reset = () => {
     setVals({});
     setSubmitted(false);
+    setSaveMsg(null);
   };
+
+  const savePlan = async () => {
+    setSaving(true); setSaveMsg(null);
+    const plan = Object.fromEntries(REQUIRED.map(id => [id, String(vals[id]).trim()]));
+    try {
+      const saved = await saveTradePlan({ ...plan, ticker: plan.ticker.toUpperCase(), max_loss: loss, max_loss_pct: lossPct });
+      setSaveMsg({ ok: true, text: `Plan saved for ${saved.ticker}. When you review a closed ${saved.ticker} trade, it will be compared with this plan.` });
+      loadPlans();
+    } catch (failure) {
+      setSaveMsg({ ok: false, text: failure.message });
+    } finally {
+      setSaving(false);
+    }
+  };
+  const canStore = missing.length === 0 && validRisk && validTicker;
 
   return (
     <div className="tool-card">
@@ -63,6 +101,7 @@ export default function PreTradeChecklist() {
                 id={`plan-${f.id}`}
                 className="tool-input"
                 rows={2}
+                maxLength={500}
                 placeholder={f.placeholder}
                 value={vals[f.id] || ''}
                 onChange={e => set(f.id, e.target.value)}
@@ -137,8 +176,15 @@ export default function PreTradeChecklist() {
 
       <div className="checklist-actions">
         <button className="btn-primary btn-sm" onClick={() => setSubmitted(true)}>Review checklist</button>
+        {canSave && <button className="btn-secondary btn-sm" disabled={!canStore || saving} onClick={savePlan}
+          title={canStore ? 'Keep this plan so your trade review can compare against it' : 'Fill every field with valid values to save'}>
+          {saving ? 'Saving…' : 'Save plan'}</button>}
         <button className="btn-secondary btn-sm" onClick={reset}>Reset</button>
       </div>
+      {saveMsg && <p className={saveMsg.ok ? 'positive' : 'error-text'} role={saveMsg.ok ? 'status' : 'alert'}>{saveMsg.text}</p>}
+      {canSave && <SavedPlans plans={plans} onDelete={async id => {
+        try { await deleteTradePlan(id); loadPlans(); } catch (failure) { setSaveMsg({ ok: false, text: failure.message }); }
+      }} />}
     </div>
   );
 }

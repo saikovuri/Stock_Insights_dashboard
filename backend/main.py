@@ -11,7 +11,7 @@ import math
 import re
 from typing import Literal
 from pydantic import Field
-from portfolio_models import AccountingEntryRequest, HoldingRequest, HoldingUpdateRequest, OptionRequest, OptionUpdateRequest, ClosedOptionRequest, LifecycleRequest, ACCOUNT_PATTERN
+from portfolio_models import AccountingEntryRequest, HoldingRequest, HoldingUpdateRequest, OptionRequest, OptionUpdateRequest, ClosedOptionRequest, LifecycleRequest, TradePlanRequest, ACCOUNT_PATTERN
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from api_common import limiter, get_current_user, valid_ticker as _valid_ticker, upstream_error as _upstream_error
@@ -1577,6 +1577,30 @@ def journal_update(entry_id: int, req: JournalEntry, user: dict = Depends(get_cu
 def journal_delete(entry_id: int, user: dict = Depends(get_current_user)):
     if not delete_journal(int(user["user_id"]), entry_id):
         raise HTTPException(status_code=404, detail="Trade not found")
+    return {"ok": True}
+
+
+@app.get("/api/journal/plans")
+def journal_plans(user: dict = Depends(get_current_user), ticker: Optional[str] = None):
+    import trade_plans
+    return {"items": trade_plans.list_plans(int(user["user_id"]), _valid_ticker(ticker) if ticker else None)}
+
+
+@app.post("/api/journal/plans")
+@limiter.limit("20/minute")
+def journal_plan_add(request: Request, req: TradePlanRequest, user: dict = Depends(get_current_user)):
+    import trade_plans
+    try:
+        return trade_plans.save_plan(int(user["user_id"]), req.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/api/journal/plans/{plan_id}")
+def journal_plan_delete(plan_id: int, user: dict = Depends(get_current_user)):
+    import trade_plans
+    if not trade_plans.delete_plan(int(user["user_id"]), plan_id):
+        raise HTTPException(status_code=404, detail="Plan not found")
     return {"ok": True}
 
 

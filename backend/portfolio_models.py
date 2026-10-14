@@ -5,9 +5,30 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 ACCOUNT_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9 ._&'()-]{0,39}$"
-# Trade-review habit tags; the frontend labels them (Journal.jsx REVIEW_TAGS)
+# Trade-review habit tags; labels live in journal.py REVIEW_TAG_LABELS and Journal.jsx REVIEW_TAGS
 ReviewTag = Literal["fomo", "chased", "oversized", "moved_stop", "early_exit", "late_exit", "ignored_earnings", "revenge",
                     "patient_entry", "sized_right", "cut_loss_fast", "let_winner_run"]
+
+
+class TradePlanRequest(BaseModel):
+    """A completed Pre-Trade Checklist; choice fields hold the checklist's option labels."""
+    model_config = ConfigDict(allow_inf_nan=False, extra="forbid", str_strip_whitespace=True)
+    ticker: str = Field(pattern=r"^[A-Z^][A-Z0-9.^=-]{0,14}$")
+    thesis: str = Field(min_length=1, max_length=500)
+    horizon: str = Field(min_length=1, max_length=40)
+    iv_check: str = Field(min_length=1, max_length=60)
+    earnings: str = Field(min_length=1, max_length=60)
+    structure: str = Field(min_length=1, max_length=40)
+    max_loss: float = Field(gt=0, le=1_000_000_000)
+    max_loss_pct: float = Field(gt=0, le=100)
+    exit_up: str = Field(min_length=1, max_length=500)
+    exit_down: str = Field(min_length=1, max_length=500)
+    invalidation: str = Field(min_length=1, max_length=500)
+
+    @field_validator("ticker", mode="before")
+    @classmethod
+    def upper_ticker(cls, value):
+        return value.strip().upper() if isinstance(value, str) else value
 
 
 class HoldingRequest(BaseModel):

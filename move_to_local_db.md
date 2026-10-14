@@ -406,7 +406,7 @@ sudo systemctl start stock-insights
 
 As B8 and B9.
 
-**Moving back from SQLite to Postgres later:** there's no ready-made script for that direction. Use the in-app transfer (Holdings → Data tools → **Export data to another login**, then **Import data from another login** on the Postgres-backed server with the same `JWT_SECRET`). It carries holdings, options, closed trades, transactions, journal and watchlist only; everything else (price alerts, trading rules, account cash and ledger entries, theses, watchlist lists and groups, buy zones, notification history) has to be re-entered by hand. This is the main reason to prefer Option B.
+**Moving back from SQLite to Postgres later:** there's no ready-made script for that direction. Use the in-app transfer (Holdings → Data tools → **Export data to another login**, then **Import data from another login** on the Postgres-backed server with the same `JWT_SECRET`). It carries holdings, options, closed trades, transactions, journal and watchlist only; everything else (price alerts, trading rules, account cash and ledger entries, theses, watchlist lists and groups, buy zones, saved trade plans, notification history) has to be re-entered by hand. This is the main reason to prefer Option B.
 
 ---
 

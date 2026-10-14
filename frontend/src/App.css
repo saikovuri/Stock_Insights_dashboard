@@ -4894,6 +4894,16 @@ button.signal-chip { cursor: pointer; }
 .review-tag-list .signal-chip { font-size: 0.65rem; padding: 0.05rem 0.4rem; }
 .review-nudge { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; padding: 0.5rem 0.7rem; margin: 0.5rem 0;
   border: 1px dashed var(--accent); border-radius: 8px; font-size: 0.85rem; background: var(--accent-soft); }
+.review-plan { border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem 0.8rem; margin: 0 0 0.75rem; font-size: 0.85rem; }
+.review-plan h4 { margin: 0 0 0.4rem; }
+.review-plan dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.2rem 0.75rem; margin: 0; }
+.review-plan dt { color: var(--text-muted); }
+.review-plan dd { margin: 0; overflow-wrap: anywhere; }
+.review-plan-checks { list-style: none; padding: 0; margin: 0.5rem 0 0; display: grid; gap: 0.2rem; }
+.saved-plans { margin-top: 0.75rem; font-size: 0.85rem; }
+.saved-plans ul { list-style: none; padding: 0; margin: 0.4rem 0 0; display: grid; gap: 0.25rem; }
+.saved-plans li { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+@media (max-width: 600px) { .review-plan dl { grid-template-columns: 1fr; } .review-plan dd { margin-bottom: 0.3rem; } }
 .trade-history-toolbar input[type="search"] { width: 11rem; max-width: 100%; }
 .trade-history-kinds { display: flex; gap: 0.3rem; }
 .trade-history-table td { vertical-align: top; padding-top: 0.6rem; padding-bottom: 0.6rem; }

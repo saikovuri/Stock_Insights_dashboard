@@ -440,6 +440,28 @@ class FeatureTests(unittest.TestCase):
             self.client.put("/api/watchlist/buy-zones/KO", json={"price": None})
         self.assertEqual(buy_zones.get_zones(uid), {"NVDA": 170})
 
+    def test_trade_plans_are_saved_per_user_listed_by_ticker_and_deleted(self):
+        uid, other = new_user(), new_user()
+        plan = dict(ticker=" aapl ", thesis="Breakout over 200", horizon="1–4 weeks", iv_check="Mid", earnings="No",
+                    structure="Long call", max_loss=300, max_loss_pct=1.5, exit_up="Sell half at +50%",
+                    exit_down="Cut at -40%", invalidation="Closes below 190")
+        with self.as_user(uid):
+            for bad in ({"max_loss_pct": 101}, {"max_loss": 0}, {"thesis": " "}, {"ticker": "not a ticker"}, {"extra": 1}):
+                self.assertEqual(self.client.post("/api/journal/plans", json={**plan, **bad}).status_code, 422, bad)
+            saved = self.client.post("/api/journal/plans", json=plan).json()
+            self.client.post("/api/journal/plans", json={**plan, "ticker": "MSFT"})
+            self.assertEqual((saved["ticker"], saved["max_loss"]), ("AAPL", 300))
+            items = self.client.get("/api/journal/plans", params={"ticker": "aapl"}).json()["items"]
+            self.assertEqual([(p["id"], p["exit_down"]) for p in items], [(saved["id"], "Cut at -40%")])
+            self.assertEqual(len(self.client.get("/api/journal/plans").json()["items"]), 2)
+        with self.as_user(other):
+            self.assertEqual(self.client.get("/api/journal/plans").json()["items"], [])
+            self.assertEqual(self.client.delete(f"/api/journal/plans/{saved['id']}").status_code, 404)
+        with self.as_user(uid):
+            self.assertEqual(self.client.delete(f"/api/journal/plans/{saved['id']}").status_code, 200)
+            self.assertEqual([p["ticker"] for p in self.client.get("/api/journal/plans").json()["items"]], ["MSFT"])
+        self.assertEqual(self.client.get("/api/journal/plans").status_code, 401)
+
     def test_portfolio_fit_scores_correlation_sector_size_and_cash(self):
         import numpy as np
         import pandas as pd

@@ -485,6 +485,9 @@ export const addJournalEntry = (e) => sendJson(`${BASE}/journal`, 'POST', e, 'Fa
 export const updateJournalEntry = (id, e) => sendJson(`${BASE}/journal/${id}`, 'PUT', e, 'Failed to update trade');
 export const deleteJournalEntry = (id) => sendJson(`${BASE}/journal/${id}`, 'DELETE', null, 'Failed to delete trade');
 export const fetchJournalCoach = () => getJson(`${BASE}/journal/coach`, 'Failed to load coaching', true);
+export const fetchTradePlans = (ticker = '') => getJson(`${BASE}/journal/plans${ticker ? `?ticker=${encodeURIComponent(ticker)}` : ''}`, 'Failed to load saved plans', true);
+export const saveTradePlan = (plan) => sendJson(`${BASE}/journal/plans`, 'POST', plan, 'Failed to save plan');
+export const deleteTradePlan = (id) => sendJson(`${BASE}/journal/plans/${id}`, 'DELETE', null, 'Failed to delete plan');
 
 // ── Options flow, macro, smart money ─────────────────────────────
 export const fetchOptionsFlow = (t) => getJson(`${BASE}/stock/${t}/flow`, 'Failed to load options flow');

@@ -1005,6 +1005,8 @@ The table has one row per closing record with seven columns:
 
 Missing values show a muted dash; hover it for the reason. Filter by ticker or by All / Options / Stocks / **Needs review (N)** (reviewable records with no review yet); the table shows 25 trades at a time, with **Show more** for the rest. Statistics and groupings above the table always cover every recorded trade, not just the filtered rows. On phones each trade becomes a card instead of a sideways-scrolling row.
 
+**⬇ Export CSV** in the toolbar downloads every trade matching the current ticker/type filter (not just the 25 shown) as `stockpilot-trades-YYYY-MM-DD.csv`. Columns: type, ticker, side, strike, expiry, quantity, account, opened and closed dates, open and close price/premium, gross P&L, recorded fees, net P&L, exit reason, followed plan, habit tags, review note and trade notes. Text that starts with `=`, `+`, `-` or `@` gets a leading `'` so spreadsheets don't run it as a formula. It is a copy of what StockPilot recorded, not a broker tax form (1099-B); wash-sale adjustments and unrecorded costs are not included. The file is built in the browser and saved through the browser's download; the Android/iOS app shells may not support that download.
+
 | Recorded metric | Rule |
 | --- | --- |
 | Short-option premium captured | `(opening premium - closing premium) / opening premium * 100`, before fees. $2 opened and $0.50 closed is 75%; $3 closed is -50%. |
@@ -1032,6 +1034,13 @@ Bucketed groupings keep their natural order. The rest sort by net P&L, or newest
 **Review** in the last column opens a nonfinancial review dialog for an owned closed stock or option record with a ledger reference. Choose profit target, stop/risk limit, expiry, assignment, roll, discretionary exit, other, or leave the reason unrecorded. Short options additionally accept an optional capture target. **Did you follow your plan?** accepts Yes, No or unrecorded. Up to 6 habit tags can be toggled: mistakes (FOMO entry, Chased the price, Position too big, Moved my stop, Exited too early, Held too long, Ignored earnings, Revenge trade) and good habits (Patient entry, Sized right, Cut loss quickly, Let the winner run). The server rejects plan answers or tags on non-review entries, unknown tags and duplicates. Review notes are limited to 500 characters. Targets and exit reasons are self-reported after the trade; they are not verified pre-trade plans and do not execute any trade workflow.
 
 Saving appends an audited review and records the server timestamp, without changing fills, fees or P&L. The latest active review is shown; revisions remain in Account ledger and can be reversed there. Clearing a field saves it as unrecorded. Unchanged retries reuse the same request key. Close/Escape discards the unsaved review draft; dismissal is disabled during save. Notes expose the latest review and its recorded-at timestamp.
+
+**Your plan** appears at the top of the review dialog when you saved a Pre-Trade Checklist plan (see below) for the same ticker on the day the trade opened or up to 30 days before (the close date is used when the opening date is unknown); the newest such plan is used. It shows the thesis, structure, horizon, max loss, both exit plans and the invalidation, then compares:
+- **Loss limit:** a net loss (gross when no net is recorded) larger than the planned max loss is flagged ✗; a smaller loss, or a gain, is shown ✓ with the planned max.
+- **Holding period:** days held against the planned horizon (0, 7, 28 or 92 days for the first four choices; "> 3 months" is not checked).
+- **Structure:** only for a planned long call/put, flagged when the recorded option is a different side or type.
+
+The match is by ticker and date only, so a plan for a different trade in the same ticker can match. Plans are self-reported and the comparison does not change the review, P&L or the "Did you follow your plan?" answer. Without a matching plan the dialog says so.
 
 When reviewable records have no review, a nudge above the table counts them and offers **Review {ticker} ({date})** for the most recent one.
 
@@ -1097,6 +1106,8 @@ The UI withholds "Checklist complete" when a field is blank, ticker format is in
 
 This is a form-completion and heuristic check. It validates numeric ranges and symbol format but does **not** verify that a ticker exists, fetch and verify the entered earnings/IV answers, or reconcile the account percentage to actual buying power. "Checklist complete" means the self-reported answers meet those rules, not that a trade qualifies, is suitable, risk-free or authorized. The result explicitly leaves market data and account risk unverified. The form does not submit an order.
 
+**Save plan** (signed-in users) stores the answers once every field is filled with a valid ticker and risk values; warnings such as risk above 2% do not block saving and are not stored. Text answers are limited to 500 characters, and a login can keep up to 1,000 plans. Saved plans are listed newest first under **Saved plans** (up to 20 shown) with a delete button. They are used only by the Journal review comparison above; they are not orders, alerts or proof the plan was followed. Saved plans are not included in **Export data to another login**.
+
 ### Position Size Calculator
 
 This is a **long-stock allocation calculator**, not a fixed-risk stop-distance sizing engine:
@@ -1110,7 +1121,7 @@ This is a **long-stock allocation calculator**, not a fixed-risk stop-distance s
 
 The stop estimates loss **after allocation**; moving it does not resize shares to a fixed risk percentage. A price gap can exceed the stop scenario. No position or order is created by calculating.
 
-Sources: [frontend/src/components/Journal.jsx](frontend/src/components/Journal.jsx), [frontend/src/components/WheelCycles.jsx](frontend/src/components/WheelCycles.jsx), [backend/journal.py](backend/journal.py), [backend/accounting.py](backend/accounting.py), [backend/portfolio_models.py](backend/portfolio_models.py), [frontend/src/components/PreTradeChecklist.jsx](frontend/src/components/PreTradeChecklist.jsx), [frontend/src/components/PositionCalculator.jsx](frontend/src/components/PositionCalculator.jsx).
+Sources: [frontend/src/components/Journal.jsx](frontend/src/components/Journal.jsx), [frontend/src/components/WheelCycles.jsx](frontend/src/components/WheelCycles.jsx), [backend/journal.py](backend/journal.py), [backend/trade_plans.py](backend/trade_plans.py), [backend/accounting.py](backend/accounting.py), [backend/portfolio_models.py](backend/portfolio_models.py), [frontend/src/components/PreTradeChecklist.jsx](frontend/src/components/PreTradeChecklist.jsx), [frontend/src/components/PositionCalculator.jsx](frontend/src/components/PositionCalculator.jsx).
 
 ## Chart and Panel Controls
 
@@ -1331,7 +1342,7 @@ WHERE oid = 'public.idea_log'::regclass;
 
 Expect `true`, `false`, `false`, then rerun Supabase's Security Advisor and check the backend's options-track-record view. The transaction preserves records and blocks public-role table access even if legacy RLS policies remain. If the backend uses a non-owner role without `BYPASSRLS`, configure a narrowly scoped backend policy before enabling RLS rather than granting access to browser roles. The broader [Supabase RLS script](deploy/supabase_rls.sql) covers the other named StockPilot tables; verify their status separately. A warning alone does not establish that data was accessed: inspect available API/database logs to assess past exposure. Local tests do not verify production grants, policies, or historical access.
 
-The `account_cash`, `nav_snapshots`, `applied_splits`, `watchlist_lists`, `watchlist_groups` and `applied_actions` tables are created with RLS enabled and public-role grants revoked at PostgreSQL startup, and are included in the RLS script.
+The `account_cash`, `nav_snapshots`, `applied_splits`, `watchlist_lists`, `watchlist_groups`, `applied_actions`, `user_rules`, `buy_zones` and `trade_plans` tables are created with RLS enabled and public-role grants revoked at PostgreSQL startup, and are included in the RLS script.
 
 ### Route Notes
 

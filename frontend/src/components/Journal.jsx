@@ -10,7 +10,7 @@ import TabStrip from './TabStrip';
 import PnlCalendar from './PnlCalendar';
 import {
   fetchJournal, addJournalEntry, updateJournalEntry, deleteJournalEntry, fetchJournalCoach, fetchClosedTrades, fetchClosedOptions, logClosedOption, updateClosedOption, deleteClosedOption,
-  recordAccountingEntry,
+  recordAccountingEntry, fetchTradePlans,
 } from '../api/stockApi';
 
 const SETUP_TAGS = ['Breakout', 'Pullback', 'Gap and go', 'Opening range', 'Reversal', 'Earnings', 'Trend follow', 'Squeeze', 'Long-term buy'];
@@ -101,6 +101,75 @@ export function recordedTradeMetrics(trade) {
     target, targetGap: target == null || capture == null ? null : capture - target,
     daysHeld: calendarDays(trade.opened_at || trade.acquired_at, trade.closed_at),
     dteAtClose: option ? calendarDays(trade.closed_at, trade.expiry) : null };
+}
+
+export const PLAN_WINDOW_DAYS = 30;
+const HORIZON_DAYS = { 'Same day (0DTE)': 0, '1–7 days': 7, '1–4 weeks': 28, '1–3 months': 92 };
+const localDay = value => {
+  const day = new Date(value);
+  return Number.isNaN(day.getTime()) ? '' : `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+};
+
+/** Newest saved plan for the ticker made on, or up to PLAN_WINDOW_DAYS before, the day the trade opened (closed if unknown). */
+export function matchPlan(plans, trade) {
+  const anchor = String(trade.opened_at || trade.acquired_at || trade.closed_at || '').slice(0, 10);
+  return plans.filter(plan => plan.ticker === trade.ticker)
+    .sort((first, second) => String(second.created_at).localeCompare(String(first.created_at)))
+    .find(plan => { const gap = calendarDays(localDay(plan.created_at), anchor); return gap != null && gap <= PLAN_WINDOW_DAYS; }) || null;
+}
+
+/** Plain comparisons of a closed trade against its saved plan: loss limit, holding period and structure. */
+export function planChecks(plan, trade) {
+  const checks = [];
+  const net = finiteNumber(trade.net_pnl) ? Number(trade.net_pnl) : Number(trade.pnl);
+  const maxLoss = Number(plan.max_loss);
+  if (Number.isFinite(net) && net < 0) checks.push(-net > maxLoss
+    ? { ok: false, text: `Lost ${money(-net)}, more than your planned max loss of ${money(maxLoss)}` }
+    : { ok: true, text: `Loss of ${money(-net)} stayed within your planned max of ${money(maxLoss)}` });
+  else if (Number.isFinite(net)) checks.push({ ok: true, text: `Closed at ${money(net)}; your planned max loss was ${money(maxLoss)}` });
+  const { daysHeld, option } = recordedTradeMetrics(trade);
+  const limit = HORIZON_DAYS[plan.horizon];
+  if (daysHeld != null && limit != null) checks.push(daysHeld > limit
+    ? { ok: false, text: `Held ${daysHeld} days; you planned ${plan.horizon}` }
+    : { ok: true, text: `Held ${daysHeld} days, within your planned ${plan.horizon}` });
+  const actual = option ? `${trade.position} ${trade.option_type}` : null;
+  if (actual && ['Long call', 'Long put'].includes(plan.structure) && plan.structure.toLowerCase() !== actual)
+    checks.push({ ok: false, text: `Planned a ${plan.structure.toLowerCase()}; this trade was a ${actual}` });
+  return checks;
+}
+
+const CSV_COLUMNS = [
+  ['Type', row => recordedTradeMetrics(row).option ? 'Option' : 'Stock'], ['Ticker', row => row.ticker],
+  ['Side', row => recordedTradeMetrics(row).option ? `${row.position} ${row.option_type}` : 'stock'],
+  ['Strike', row => row.strike], ['Expiry', row => row.expiry], ['Quantity', row => row.quantity],
+  ['Account', row => row.account || 'Default'],
+  ['Opened', row => String(row.opened_at || row.acquired_at || '').slice(0, 10)], ['Closed', row => String(row.closed_at || '').slice(0, 10)],
+  ['Open price', row => row.open_premium ?? row.buy_price], ['Close price', row => row.close_premium ?? row.sell_price],
+  ['Gross P&L', row => row.pnl], ['Fees', row => row.fees], ['Net P&L', row => row.net_pnl],
+  ['Exit reason', row => EXIT_REASONS[row.review?.exit_reason] || ''],
+  ['Followed plan', row => row.review?.followed_plan == null ? '' : row.review.followed_plan ? 'Yes' : 'No'],
+  ['Habit tags', row => (row.review?.tags || []).map(tag => REVIEW_TAGS[tag]?.[0] || tag).join('; ')],
+  ['Review note', row => row.review?.review_note], ['Notes', row => row.notes],
+];
+
+function csvCell(value) {
+  if (value == null || value === '') return '';
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : '';
+  // A leading = + - @ would run as a formula in Excel/Sheets
+  const text = /^[=+\-@\t\r]/.test(String(value)) ? `'${value}` : String(value);
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+export const tradesCsv = rows => [CSV_COLUMNS.map(([name]) => csvCell(name)).join(','),
+  ...rows.map(row => CSV_COLUMNS.map(([, get]) => csvCell(get(row))).join(','))].join('\r\n');
+
+function downloadCsv(rows) {
+  const url = URL.createObjectURL(new Blob(['\ufeff', tradesCsv(rows)], { type: 'text/csv;charset=utf-8' }));
+  const link = Object.assign(document.createElement('a'), { href: url, download: `stockpilot-trades-${today()}.csv` });
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 export function recordedOptionStats(rows) {
@@ -216,7 +285,7 @@ function Breakdown({ title, rows }) {
   );
 }
 
-function PlanTrade() {
+function PlanTrade({ canSave = false }) {
   const dialog = useRef(null);
   return (
     <>
@@ -230,7 +299,7 @@ function PlanTrade() {
           <button className="btn-secondary btn-sm" onClick={() => dialog.current.close()}>Close</button>
         </div>
         <div className="tools-grid">
-          <PreTradeChecklist />
+          <PreTradeChecklist canSave={canSave} />
           <PositionCalculator />
         </div>
       </dialog>
@@ -249,8 +318,15 @@ function TradeReview({ trade, onClose, onSaved }) {
   const [tags, setTags] = useState(trade.review?.tags || []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [savedPlan, setSavedPlan] = useState(undefined);
   const metrics = recordedTradeMetrics(trade);
   useEffect(() => { dialog.current.showModal(); }, []);
+  useEffect(() => {
+    let active = true;
+    fetchTradePlans(trade.ticker).then(data => { if (active) setSavedPlan(matchPlan(data.items || [], trade)); })
+      .catch(() => { if (active) setSavedPlan(null); });
+    return () => { active = false; };
+  }, [trade]);
   const valid = target === '' || (Number.isFinite(Number(target)) && Number(target) >= 0 && Number(target) <= 100);
   const submit = async event => {
     event.preventDefault();
@@ -270,6 +346,19 @@ function TradeReview({ trade, onClose, onSaved }) {
     onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}>
     <div className="journal-plan-header"><h3 id="trade-review-title">Review {trade.ticker} closed trade</h3>
       <button className="btn-secondary btn-sm" disabled={busy} onClick={onClose}>Close</button></div>
+    {savedPlan ? <section className="review-plan" aria-label="Your saved plan">
+      <h4>Your plan <span className="market-sub">saved {shortDate(localDay(savedPlan.created_at)) || 'earlier'}</span></h4>
+      <dl>
+        <dt>Thesis</dt><dd>{savedPlan.thesis}</dd>
+        <dt>Structure</dt><dd>{savedPlan.structure} · {savedPlan.horizon} · max loss {money(Number(savedPlan.max_loss))} ({savedPlan.max_loss_pct}% of account)</dd>
+        <dt>If right</dt><dd>{savedPlan.exit_up}</dd>
+        <dt>If wrong</dt><dd>{savedPlan.exit_down}</dd>
+        <dt>Invalidation</dt><dd>{savedPlan.invalidation}</dd>
+      </dl>
+      <ul className="review-plan-checks">{planChecks(savedPlan, trade).map(check =>
+        <li key={check.text} className={check.ok ? 'positive' : 'negative'}>{check.ok ? '✓' : '✗'} {check.text}</li>)}</ul>
+    </section> : savedPlan === null && <p className="market-sub">No saved plan for {trade.ticker} from the {PLAN_WINDOW_DAYS} days before this trade opened.
+      Next time, use 📝 Plan a trade → Save plan before you enter.</p>}
     <form onSubmit={submit} className="closed-option-form" aria-label="Trade review">
       <fieldset disabled={busy}>
         <label>Exit reason<select className="tool-input" value={reason} onChange={event => setReason(event.target.value)}>
@@ -360,6 +449,8 @@ function RecordedHistory({ optionsOnly = false, version = 0, onEdit, onDelete, b
             onClick={() => { setKind(value); setLimit(PAGE); }}>{label}</button>)}
       </div>}
       <span className="market-sub">{filtered.length === rows.length ? `${rows.length} trades` : `${filtered.length} of ${rows.length} trades`}</span>
+      {filtered.length > 0 && <button type="button" className="btn-secondary btn-sm" aria-label={`Export ${filtered.length} trades to CSV`}
+        title="Download the trades matching this filter as a spreadsheet file" onClick={() => downloadCsv(filtered)}>⬇ Export CSV</button>}
     </div>
     {!filtered.length ? <p className="empty-state">No recorded trades match this filter.</p> : <>
     <div className="table-scroll"><table className="market-table trade-history-table" aria-label="Recorded trades">
@@ -531,7 +622,7 @@ function ClosedOptionJournal() {
 export default function Journal(props) {
   const { user } = useAuth();
   return <div className="journal-workspace" key={user?.id ?? user?.username ?? 'guest'}>
-    <header className="journal-plan-header"><h2>Journal</h2><PlanTrade /></header>
+    <header className="journal-plan-header"><h2>Journal</h2><PlanTrade canSave={Boolean(user)} /></header>
     <JournalViews {...props} />
   </div>;
 }
