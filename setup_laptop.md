@@ -8,7 +8,7 @@ bash <(curl -fsSL "https://raw.githubusercontent.com/saikovuri/Stock_Insights_da
 
 The manual steps below explain what it does, and cover Cloudflare Tunnel, battery limits and the parts the script leaves to you.
 
-This guide moves the backend from the Oracle VM to a laptop at home. The frontend stays on Vercel and the database stays on Supabase; only the API server moves. The laptop runs exactly what the Oracle VM runs today: one uvicorn process with the built-in scheduler (alerts, wheel refresh, scans).
+This guide sets up the backend on a laptop at home (it replaced an Oracle Cloud VM, retired on 2026-10-13). The frontend stays on Vercel and the database stays on Supabase; only the API server runs on the laptop: one uvicorn process with the built-in scheduler (alerts, wheel refresh, scans).
 
 Two ways to make the laptop reachable from the internet, without opening ports on your router. Pick **one**:
 
@@ -32,16 +32,9 @@ You need:
 - the laptop: 64-bit, at least 2 GB RAM (4 GB+ is comfortable), 20 GB free disk, its charger;
 - a USB stick of 4 GB or more (it will be wiped);
 - a network cable for the first setup (Wi-Fi can be set up afterwards);
-- your main Windows computer with the SSH key that reaches the Oracle VM (`~/.ssh/stockpilot_deploy`).
+- your main computer, to SSH in from (optional; the laptop's own keyboard and screen also work).
 
-**Save the production settings file now.** It holds the database password, `JWT_SECRET` (keeps everyone logged in and keeps transfer files valid), API keys and `REGISTRATION_CODE`. **(Windows):**
-
-```powershell
-scp -i $HOME\.ssh\stockpilot_deploy -o UserKnownHostsFile=$HOME\.ssh\stockpilot_known_hosts `
-  ubuntu@157.151.152.97:stock-insights/backend/.env $HOME\stockpilot-prod.env
-```
-
-Also store its contents in your password manager. You'll copy this file to the laptop in step 5.4.
+**Have the production settings file ready.** It holds the database password, `JWT_SECRET` (keeps everyone logged in and keeps transfer files valid), API keys and `REGISTRATION_CODE`. Keep it in your password manager; if the current server still runs, copy it from there (`cat ~/stock-insights/backend/.env` on that machine). You'll put it on the new machine in step 5.4.
 
 ---
 
@@ -121,7 +114,7 @@ The last command should log in **without** asking for the laptop password. From 
 ```bash
 sudo apt update && sudo apt -y full-upgrade
 sudo apt -y install git curl ufw unattended-upgrades
-sudo timedatectl set-timezone Etc/UTC     # same as the Oracle VM; the scheduler converts to New York time itself
+sudo timedatectl set-timezone Etc/UTC     # the scheduler converts to New York time itself
 ```
 
 Automatic security updates, with a reboot (only when an update needs one) at 08:30 UTC, which is before the US pre-market:
@@ -244,7 +237,7 @@ df -h /                                          # disk space
 
 ## 5. Install the backend
 
-These mirror sections 4–7 of `deploy/oracle-setup.sh`, without Caddy and without the Oracle firewall changes (the tunnel replaces both).
+These are what `deploy/laptop-setup.sh` does in its steps 6–10; the tunnel takes the place of a web server such as Caddy.
 
 ### 5.1 Code
 
@@ -284,7 +277,7 @@ sudo visudo -c        # must say "parsed OK"
 scp -i $HOME\.ssh\stockpilot_laptop $HOME\stockpilot-prod.env sai@192.168.1.42:stock-insights/backend/.env
 ```
 
-**(laptop)** lock it down and **turn the scheduler off while testing**, so the laptop and the Oracle VM don't both send alerts:
+**(laptop)** lock it down. If another server is still serving production, also **turn the scheduler off while testing**, so they don't both send alerts:
 
 ```bash
 chmod 600 ~/stock-insights/backend/.env
@@ -384,7 +377,7 @@ To turn the public address off later: `sudo tailscale funnel reset`.
 What Funnel does and doesn't expose:
 - Only what you pass to `tailscale funnel` (the API on `127.0.0.1:8000`) is public. Check with `tailscale funnel status`; never funnel other ports. SSH, PostgreSQL (if you add it) and everything else stay private.
 - No router ports are opened and your home IP isn't shown to visitors; they see Tailscale's relay. HTTPS is terminated on the laptop, so the relay passes encrypted traffic it can't read.
-- The `*.ts.net` name appears in public certificate logs, so bots will find and probe it, just as they do the Oracle address today. The app's logins, `REGISTRATION_CODE` and rate limits are what protect it.
+- The `*.ts.net` name appears in public certificate logs, so bots will find and probe it, as they do any public server. The app's logins, `REGISTRATION_CODE` and rate limits are what protect it.
 
 The one new risk compared with a cloud VM: the server now sits **inside your home network**. If someone ever broke into the app, they'd be on a machine next to your other devices. Reduce that:
 1. **Put the laptop on your router's guest network** (or an isolated VLAN) so it can reach the internet but not your other devices. Use a cable to a guest LAN port if your router has one; otherwise guest Wi-Fi.
@@ -482,7 +475,7 @@ curl.exe https://api.example.com/api/health
 
 ---
 
-## 7. Automatic deploys (replaces the GitHub → Oracle SSH deploy)
+## 7. Automatic deploys (pull-based)
 
 GitHub can't SSH into a laptop behind your router, so the laptop checks GitHub every 5 minutes instead. It deploys a new commit only after **all GitHub checks for that commit have passed**, which is the same rule as today. It restarts the server only when `backend/` or `deploy/` changed.
 
@@ -566,33 +559,27 @@ A commit whose checks failed is never deployed; the next passing commit is. The 
 
 ---
 
-## 8. Switch production to the laptop
+## 8. Switch production to the new machine
 
-Do these in order. Below, `NEW_URL` is your address from 6A or 6B, e.g. `https://stockpilot.tail1234ab.ts.net` or `https://api.example.com` (no trailing slash, no `/api`).
+Done once on 2026-10-13 (Oracle VM → this laptop). Use these steps again if you ever move to another machine. Below, `NEW_URL` is the new address from 6A or 6B, e.g. `https://stockpilot.tail1234ab.ts.net` or `https://api.example.com` (no trailing slash, no `/api`), and "old server" is the machine currently serving.
 
-1. **Let the browser call the new address.** In the repo, edit [vercel.json](vercel.json): in the `Content-Security-Policy` value, add `NEW_URL` to `connect-src`, next to `https://157-151-152-97.sslip.io` (keep both during the switch). Commit and push; Vercel redeploys on its own.
-2. **Point the frontend at the laptop.** Vercel → the project → **Settings → Environment Variables** → set `VITE_API_URL` = `NEW_URL` (Production) → **Deployments** → latest → **⋯ → Redeploy**.
-3. **Stop the Oracle backend** so only one scheduler runs. **(Windows):**
-
-   ```powershell
-   ssh -i $HOME\.ssh\stockpilot_deploy -o UserKnownHostsFile=$HOME\.ssh\stockpilot_known_hosts ubuntu@157.151.152.97 "sudo systemctl disable --now stock-insights"
-   ```
-
-4. **Turn the laptop's scheduler on. (laptop):**
+1. **Let the browser call the new address.** In the repo, edit [vercel.json](vercel.json): in the `Content-Security-Policy` value, add `NEW_URL` to `connect-src`, next to the current address (keep both during the switch). Commit and push; Vercel redeploys on its own.
+2. **Point the frontend at the new machine.** Vercel → the project → **Settings → Environment Variables** → set `VITE_API_URL` = `NEW_URL` (Production) → **Deployments** → latest → **⋯ → Redeploy**.
+3. **Stop the old server** so only one scheduler runs. On it: `sudo systemctl disable --now stock-insights` (and `sudo tailscale funnel reset` if it used Funnel).
+4. **Turn the new machine's scheduler on:** `bash laptop-setup.sh cutover` (the command from the top of this guide with ` cutover` added), or by hand:
 
    ```bash
    sed -i '/^SCHEDULER_ENABLED=0$/d' ~/stock-insights/backend/.env
    sudo systemctl restart stock-insights
    ```
 
-5. **Stop GitHub from deploying to Oracle.** GitHub → repo → **Settings → Secrets and variables → Actions** → delete `OCI_HOST` (the deploy step then skips and reports success, which section 7 relies on). You can delete `OCI_SSH_KEY` and `OCI_KNOWN_HOSTS` too.
-6. **Test:** open the Vercel site, sign in (existing logins keep working because `JWT_SECRET` is the same), open Portfolio, Ideas and a stock page. Check the laptop logs while you click: `sudo journalctl -u stock-insights -f`.
-7. **Phone apps (if you use them):** change the native fallback URL in [frontend/src/api/config.js](frontend/src/api/config.js) to `NEW_URL`, push, then rebuild and reinstall them (setup.md section 5.5).
-8. **After a week without problems:** remove `https://157-151-152-97.sslip.io` from `vercel.json`, update the addresses in setup.md, and terminate the Oracle instance **and its boot volume** in the Oracle console (Compute → Instances → stockpilot → **Terminate**, tick "Permanently delete the attached boot volume"). Do this before Oct 30 if your Oracle account is Pay As You Go, so nothing reaches your card.
+5. **Test:** open the Vercel site, sign in (existing logins keep working because `JWT_SECRET` is the same), open Portfolio, Ideas and a stock page. Check the logs while you click: `sudo journalctl -u stock-insights -f`.
+6. **Phone apps (if you use them):** change the native fallback URL in [frontend/src/api/config.js](frontend/src/api/config.js) to `NEW_URL`, push, then rebuild and reinstall them (setup.md section 5.5).
+7. **After a few days without problems:** remove the old address from `vercel.json`, update the addresses in setup.md and intro.md, and wipe or retire the old machine.
 
-**Going back** (while the Oracle VM still exists): set `VITE_API_URL` back to `https://157-151-152-97.sslip.io` and redeploy Vercel, put `SCHEDULER_ENABLED=0` on the laptop and restart it, then `sudo systemctl enable --now stock-insights` on the Oracle VM.
+**Going back** (while the old server still exists): set `VITE_API_URL` back to the old address and redeploy Vercel, put `SCHEDULER_ENABLED=0` on the new machine and restart it, then `sudo systemctl enable --now stock-insights` on the old one.
 
-**Rate limits:** the server limits requests per visitor IP. Cloudflare passes the visitor's IP through, so limits stay per visitor. With Tailscale Funnel, check the log lines from step 6: if every request shows `127.0.0.1` instead of real addresses, all visitors share one limit. That's fine for personal use.
+**Rate limits:** the server limits requests per visitor IP. Cloudflare passes the visitor's IP through, so limits stay per visitor. With Tailscale Funnel, check the log lines from step 5: if every request shows `127.0.0.1` instead of real addresses, all visitors share one limit. That's fine for personal use.
 
 ---
 
@@ -633,8 +620,8 @@ sudo reboot                                     # everything comes back by itsel
 | Cloudflare error 1033 | `cloudflared` isn't running: `sudo systemctl restart cloudflared`, `cloudflared tunnel info stockpilot`. |
 | Cloudflare error 524 | A request took over 100 seconds (usually the first big scan). Retry after a minute. |
 | Cloudflare 403 with an HTML page | Bot Fight Mode is on; turn it off (6B.5). |
-| Alerts or notifications arrive twice | Both the Oracle VM and the laptop run the scheduler. Stop one (section 8, step 3). |
-| New commits aren't deployed | `journalctl -u stock-insights-autoupdate -n 30`. "still running": wait for CI. "failed": fix CI (GitHub → Actions). An Oracle deploy failure here means `OCI_HOST` still exists. |
+| Alerts or notifications arrive twice | Two servers run the scheduler against the same database. Stop one (section 8, step 3). |
+| New commits aren't deployed | `journalctl -u stock-insights-autoupdate -n 30`. "still running": wait for CI. "failed": fix CI (GitHub → Actions). |
 | Laptop went to sleep | Redo section 3.1; check `systemctl status sleep.target` says "masked". |
 | Laptop stays off after a power cut | Enable the BIOS power-on-AC setting (3.2). |
 | `sudo: a password is required` in auto-deploy logs | Redo 5.3; the sudoers line must match the commands exactly. |

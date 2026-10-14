@@ -1,7 +1,7 @@
 #!/bin/bash
 # StockPilot backend on an always-on Ubuntu 24.04 laptop (Desktop or Server), published with Tailscale Funnel.
 #   bash laptop-setup.sh            set up or re-check everything; safe to re-run
-#   bash laptop-setup.sh cutover    after the Oracle backend is stopped: scheduler on, setup sudo rule removed
+#   bash laptop-setup.sh cutover    after the old server is stopped: scheduler on, setup sudo rule removed
 # Guide: setup_laptop.md
 set -euo pipefail
 

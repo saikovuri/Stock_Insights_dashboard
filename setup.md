@@ -19,7 +19,7 @@ None of these items are in GitHub. Keep them somewhere safe, such as a password 
 | SSH access to the production laptop | Key `~/.ssh/stockpilot_laptop` on this machine. The laptop (`sai-kovouri@192.168.87.20`) only accepts SSH from its home network (or through Tailscale if you add your PC to the tailnet). | You can also just use the laptop's own keyboard and screen. |
 | The production `backend/.env` on the laptop, including `DATABASE_URL` | `~/stock-insights/backend/.env` on the laptop | On the laptop: `cat ~/stock-insights/backend/.env`, and store the output in your password manager. A rebuild needs it (`deploy/laptop-setup.sh` asks for it). |
 | `BACKUP_PASSPHRASE` | A GitHub secret (set 2026-10-12; first backup succeeded that day), and your password manager | Without it the weekly database backups cannot be decrypted. |
-| Logins for GitHub, Vercel, Supabase, Oracle Cloud, Groq, Google AI Studio, Finnhub, Twelve Data, Sentry (if used), ntfy topic | Your accounts | Every service is on a free tier, but you must be able to sign in to each one. |
+| Logins for GitHub, Vercel, Supabase, Tailscale, Groq, Google AI Studio, Finnhub, Twelve Data, Sentry (if used), ntfy topic | Your accounts | Every service is on a free tier, but you must be able to sign in to each one. |
 
 Finally, run `git status` and push anything that isn't pushed yet.
 
@@ -43,7 +43,7 @@ flowchart LR
 | Frontend | https://stock-insights-dashboard.vercel.app (Vercel) | http://localhost:5173 (Vite; `/api` is forwarded to port 8000) |
 | Backend | https://stockpilot.tail112222.ts.net (home laptop `sai-kovouri-dell`, Ubuntu Desktop 24.04, published with Tailscale Funnel, systemd service `stock-insights`; moved from the Oracle VM on 2026-10-13, see [setup_laptop.md](setup_laptop.md)) | http://localhost:8000 (uvicorn) |
 | Database | Supabase PostgreSQL (`DATABASE_URL`) | SQLite file `backend/stockinsights.db`, used when `DATABASE_URL` is empty |
-| CI/CD | `.github/workflows/ci.yml` (tests), `db-backup.yml` (weekly encrypted backup); the laptop deploys itself (section 5.1). `deploy-oci.yml` (old Oracle deploy) now skips because `OCI_HOST` is deleted. | `scripts/check.ps1` runs the same checks |
+| CI/CD | `.github/workflows/ci.yml` (tests), `db-backup.yml` (weekly encrypted backup); the laptop deploys itself (section 5.1). | `scripts/check.ps1` runs the same checks |
 
 Versions: **Python 3.13** (`backend/.python-version` says 3.13.14), **Node 22**, React 19, Vite 6, Capacitor 8.
 
@@ -191,7 +191,6 @@ GitHub repository secrets (Settings → Secrets and variables → Actions):
 
 | Secret | Used by |
 | --- | --- |
-| `OCI_SSH_KEY`, `OCI_KNOWN_HOSTS` | Old Oracle deploy; unused since 2026-10-13 (`OCI_HOST` deleted, so `deploy-oci.yml` skips). Delete them when the Oracle instance is terminated. |
 | `DATABASE_URL` | Weekly backup. Supabase **session-mode** URI, port 5432. |
 | `BACKUP_PASSPHRASE` | Weekly backup encryption. |
 
@@ -226,7 +225,7 @@ bash <(curl -fsSL "https://raw.githubusercontent.com/saikovuri/Stock_Insights_da
 
 It's safe to re-run. It stops once to ask for `backend/.env` (paste your saved copy), and once for the Tailscale sign-in. If the old server is still running, add `SCHEDULER_ENABLED=0` to the new `.env`, stop the old service, then run the same command with ` cutover` at the end. If the public address changes, update Vercel `VITE_API_URL` (then Redeploy), `connect-src` in [vercel.json](vercel.json) and the fallback in [frontend/src/api/config.js](frontend/src/api/config.js). Details and troubleshooting: [setup_laptop.md](setup_laptop.md).
 
-**Old Oracle VM:** shut down on 2026-10-13, not yet terminated, so it can be started again from the Oracle console for a rollback. To roll back: start the instance, `sudo systemctl enable --now stock-insights` on it, stop the laptop service, and set `VITE_API_URL` back to `https://157-151-152-97.sslip.io` (still allowed in `vercel.json`). Once you're sure, terminate the instance **and its boot volume** in the Oracle console, remove the sslip address from `vercel.json`, and delete the `OCI_*` secrets. Its setup script, [deploy/oracle-setup.sh](deploy/oracle-setup.sh), no longer runs as-is (Caddy's apt repository returns 402; see section 6).
+**History:** until 2026-10-13 the backend ran on an Oracle Cloud Always Free VM behind Caddy, deployed over SSH by GitHub Actions. That VM, its deploy workflow, setup scripts and GitHub secrets have been removed; they're in git history if ever needed.
 
 Alternative host: [render.yaml](render.yaml) describes the same backend for Render.com. Render's free tier sleeps when idle, which pauses the scheduler.
 
@@ -275,8 +274,7 @@ The bundled app calls the URL in `VITE_API_URL`, or the fallback in `src/api/con
 | A PostgreSQL query works locally but fails on the server | Use `database.PH` for SQL placeholders (`?` in SQLite, `%s` in PostgreSQL); see `database._run`. |
 | Option quote "unavailable" for a position | The data provider has no quote. The stress test won't guess a price; use **Run without it** (the result is then marked as leaving it out), close or edit the position, or wait for a quote. |
 | Quotes are slow or rate-limited | Finnhub's free tier allows about 60 calls/minute. Lower the number of watchlist and holding tickers, or set `FINNHUB_RATE_PER_MIN`. |
-| `apt update` on the Oracle VM fails with `402 Payment Required` for `dl.cloudsmith.io` (seen 2026-10-10) | Caddy's package repository refuses downloads, so `deploy/oracle-setup.sh` would stop at step 1 on a rebuild. Caddy already installed keeps working. For a rebuild, install Caddy another way (see caddyserver.com/docs/install) and remove `/etc/apt/sources.list.d/caddy-stable.list`, or move to the laptop ([setup_laptop.md](setup_laptop.md)), which doesn't use Caddy. |
-| Lost SSH key | Oracle cannot re-download it. Create a new pair (`ssh-keygen -t ed25519 -f ~/.ssh/stockpilot_new`), then add the `.pub` line to `~/.ssh/authorized_keys` on the VM. Without any working key: Oracle Cloud console → the instance → **Console connection** (or **Run command**, if the Oracle Cloud Agent plugin is enabled) to append it, or rebuild the VM (section 5.3). Also update the `OCI_SSH_KEY` secret in GitHub (Settings → Secrets → Actions) if you replace the deploy key, so CI deploys keep working. |
+| Lost SSH key | Not a blocker: use the laptop's own keyboard and screen. To add a new key from another computer on the home network: `ssh-keygen -t ed25519 -f ~/.ssh/stockpilot_new`, then append the `.pub` line to `~/.ssh/authorized_keys` on the laptop. |
 
 ---
 

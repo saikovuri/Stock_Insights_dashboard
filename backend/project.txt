@@ -172,4 +172,4 @@ Backend: FastAPI + yfinance + OpenAI + Supabase (PostgreSQL)
 Frontend: React + Vite + Recharts
 Security: JWT auth, refresh token rotation, rate limiting (slowapi), security headers (HSTS, X-Frame-Options, CSP-adjacent), ticker input validation, CORS
 Caching: 60s TTL in-memory metrics cache (backend), sessionStorage stale-while-revalidate (frontend)
-Deployment: Render (backend), Vercel (frontend), Oracle Cloud deploy scripts
+Deployment: home laptop via Tailscale Funnel (backend), Vercel (frontend)

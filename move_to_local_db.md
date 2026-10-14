@@ -43,7 +43,7 @@ If you move to the laptop, pick **B** over C: it's the same engine as today, so 
 
 1. **Read the whole option first.** Plan for about 15 minutes of downtime.
 2. **Fresh backup.** GitHub → repo → **Actions → Database backup → Run workflow**. When it finishes, download the artifact from that run and keep it with the `BACKUP_PASSPHRASE` (password manager). This is your way back if anything goes wrong.
-3. **Know where the server runs** (Oracle VM or the laptop from [setup_laptop.md](setup_laptop.md)). Commands marked **(server)** run there.
+3. **Know where the server runs** (the home laptop from [setup_laptop.md](setup_laptop.md)). Commands marked **(server)** run there.
 4. **Have the Postgres 17 tools** wherever you run `pg_dump`/`psql`. On Ubuntu 24.04 (the laptop):
 
    ```bash
@@ -53,7 +53,7 @@ If you move to the laptop, pick **B** over C: it's the same engine as today, so 
    pg_dump --version                                                   # must say 17.x
    ```
 
-   Use version 17 (or newer) tools: older `pg_dump` refuses to dump a 17 server. The repository script only supports current Ubuntu releases (it failed on the Oracle VM's Ubuntu 20.04).
+   Use version 17 (or newer) tools: older `pg_dump` refuses to dump a 17 server. The repository script only supports current Ubuntu releases (it failed on Ubuntu 20.04).
 5. **Freeze writes.** The scheduler writes notifications and idea logs every few minutes; a copy taken while it runs misses the newest rows. Stop the server right before dumping, and start it again only after switching `DATABASE_URL`. **(server):**
 
    ```bash
