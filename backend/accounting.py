@@ -137,7 +137,8 @@ def record_entry(user_id, request):
                        (user_id, request.idempotency_key))
         existing = database._fetchone(cursor)
         if existing:
-            previous = {"exit_reason": None, "target_capture_pct": None, "account": None, **json.loads(existing["after_json"])}
+            previous = {"exit_reason": None, "target_capture_pct": None, "account": None, "followed_plan": None, "tags": None,
+                        **json.loads(existing["after_json"])}
             if previous != payload:
                 raise ValueError("Request key already used for a different entry")
             return {"id": existing["id"]}
@@ -255,6 +256,7 @@ def report(user_id):
                     "review_id": entry["id"], "exit_reason": entry.get("exit_reason"),
                     "target_capture_pct": float(entry["target_capture_pct"]) if entry.get("target_capture_pct") is not None else None,
                     "review_note": entry["note"], "review_recorded_at": events[entry["id"]]["recorded_at"],
+                    "followed_plan": entry.get("followed_plan"), "tags": entry.get("tags") or [],
                 }
     fees = {}
     for entry in manual:

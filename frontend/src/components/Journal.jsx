@@ -27,6 +27,43 @@ const percent = value => value == null ? 'Unavailable' : `${value.toFixed(1)}%`;
 const pnlClass = value => value > 0 ? 'positive' : value < 0 ? 'negative' : '';
 const EXIT_REASONS = { profit_target: 'Profit target', stop: 'Stop / risk limit', expiry: 'Expiry', assignment: 'Assignment',
   roll: 'Roll', discretionary: 'Discretionary exit', other: 'Other' };
+// Keys must match ReviewTag in backend/portfolio_models.py; `good` marks habits to repeat
+export const REVIEW_TAGS = {
+  fomo: ['FOMO entry'], chased: ['Chased the price'], oversized: ['Position too big'], moved_stop: ['Moved my stop'],
+  early_exit: ['Exited too early'], late_exit: ['Held too long'], ignored_earnings: ['Ignored earnings'], revenge: ['Revenge trade'],
+  patient_entry: ['Patient entry', true], sized_right: ['Sized right', true], cut_loss_fast: ['Cut loss quickly', true],
+  let_winner_run: ['Let the winner run', true],
+};
+const tradeNet = row => (finiteNumber(row.net_pnl) ? Number(row.net_pnl) : Number(row.pnl) || 0);
+
+/** P&L by review tag and by whether the plan was followed (reviewed trades only). */
+export function reviewLessons(rows) {
+  const groups = new Map();
+  const add = (key, row) => groups.set(key, [...(groups.get(key) || []), tradeNet(row)]);
+  rows.filter(row => row.review).forEach(row => {
+    (row.review.tags || []).forEach(tag => add(`tag:${tag}`, row));
+    if (row.review.followed_plan != null) add(`plan:${row.review.followed_plan ? 'yes' : 'no'}`, row);
+  });
+  const summary = (key, values) => ({ key, count: values.length, net: values.reduce((sum, value) => sum + value, 0),
+    winRate: values.filter(value => value > 0).length / values.length * 100 });
+  const all = [...groups.entries()].map(([key, values]) => summary(key, values));
+  return { plan: ['yes', 'no'].map(answer => all.find(group => group.key === `plan:${answer}`)).filter(Boolean),
+    tags: all.filter(group => group.key.startsWith('tag:')).map(group => ({ ...group, tag: group.key.slice(4) }))
+      .sort((first, second) => first.net - second.net) };
+}
+
+function ReviewLessons({ rows }) {
+  const { plan, tags } = reviewLessons(rows);
+  if (!plan.length && !tags.length) return null;
+  const line = (label, group, good) => <li key={group.key}><strong className={good === true ? 'positive' : good === false ? 'negative' : ''}>{label}</strong>{' '}
+    {group.count} trade{group.count === 1 ? '' : 's'} · <span className={pnlClass(group.net)}>{money(group.net)}</span> net · {percent(group.winRate)} winners</li>;
+  return <div className="edge-report" aria-label="Lessons from your reviews">
+    <h4>Lessons from your reviews</h4>
+    {plan.length > 0 && <ul>{plan.map(group => line(group.key === 'plan:yes' ? 'Followed my plan' : 'Broke my plan', group, group.key === 'plan:yes'))}</ul>}
+    {tags.length > 0 && <ul>{tags.map(group => line(REVIEW_TAGS[group.tag]?.[0] || group.tag, group, REVIEW_TAGS[group.tag]?.[1] === true ? true : false))}</ul>}
+    <p className="market-sub">From the plan answer and tags in your trade reviews (net of recorded fees). A trade counts once per tag. Small samples mislead.</p>
+  </div>;
+}
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const PAGE = 25;
 
@@ -208,6 +245,8 @@ function TradeReview({ trade, onClose, onSaved }) {
   const [reason, setReason] = useState(trade.review?.exit_reason || '');
   const [target, setTarget] = useState(trade.review?.target_capture_pct ?? '');
   const [note, setNote] = useState(trade.review?.review_note || '');
+  const [plan, setPlan] = useState(trade.review?.followed_plan == null ? '' : trade.review.followed_plan ? 'yes' : 'no');
+  const [tags, setTags] = useState(trade.review?.tags || []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const metrics = recordedTradeMetrics(trade);
@@ -217,7 +256,8 @@ function TradeReview({ trade, onClose, onSaved }) {
     event.preventDefault();
     if (pending.current || !valid) return;
     const body = { kind: 'review', event_id: trade.ledger_event_id, exit_reason: reason || null,
-      target_capture_pct: metrics.option && trade.position === 'short' && target !== '' ? Number(target) : null, note };
+      target_capture_pct: metrics.option && trade.position === 'short' && target !== '' ? Number(target) : null, note,
+      followed_plan: plan === '' ? null : plan === 'yes', tags: tags.length ? tags : null };
     const signature = JSON.stringify(body);
     if (attempt.current?.signature !== signature) attempt.current = { signature,
       payload: { ...body, occurred_at: new Date().toISOString(), idempotency_key: crypto.randomUUID() } };
@@ -237,6 +277,17 @@ function TradeReview({ trade, onClose, onSaved }) {
         </select></label>
         {metrics.option && trade.position === 'short' && <label>Target capture (%)<input className="tool-input" type="number"
           min="0" max="100" step="0.01" value={target} onChange={event => setTarget(event.target.value)} /></label>}
+        <label>Did you follow your plan?<select className="tool-input" value={plan} onChange={event => setPlan(event.target.value)}>
+          <option value="">Not recorded</option><option value="yes">Yes</option><option value="no">No</option></select></label>
+        <fieldset className="closed-option-wide review-tags">
+          <legend>What happened? <span className="market-sub">(up to 6)</span></legend>
+          {Object.entries(REVIEW_TAGS).map(([key, [label, good]]) => {
+            const on = tags.includes(key);
+            return <button key={key} type="button" aria-pressed={on} disabled={!on && tags.length >= 6}
+              className={`signal-chip ${on ? (good ? 'signal-bullish' : 'signal-bearish') : ''}`}
+              onClick={() => setTags(list => on ? list.filter(tag => tag !== key) : [...list, key])}>{label}</button>;
+          })}
+        </fieldset>
         <div className="closed-option-wide closed-option-notes-field"><label htmlFor="trade-review-note">Review notes</label>
           <textarea id="trade-review-note" className="tool-input" maxLength={500} rows={3} value={note} onChange={event => setNote(event.target.value)} /></div>
         {metrics.option && <p className="closed-option-wide">Actual {metrics.label.toLowerCase()}: {percent(metrics.capture)} before fees.</p>}
@@ -275,7 +326,8 @@ function RecordedHistory({ optionsOnly = false, version = 0, onEdit, onDelete, b
   const grossTotal = rows.reduce((total, row) => total + row.pnl, 0);
   const stats = recordedOptionStats(rows);
   const search = query.trim().toUpperCase();
-  const filtered = rows.filter(row => (kind === 'all' || (kind === 'options') === row.key.startsWith('option:'))
+  const unreviewed = rows.filter(row => !row.review && row.ledger_event_id);
+  const filtered = rows.filter(row => (kind === 'all' || (kind === 'unreviewed' ? !row.review && row.ledger_event_id : (kind === 'options') === row.key.startsWith('option:')))
     && (!search || row.ticker.toUpperCase().includes(search)));
   const visible = filtered.slice(0, limit);
   return <section className="portfolio-section">
@@ -294,11 +346,16 @@ function RecordedHistory({ optionsOnly = false, version = 0, onEdit, onDelete, b
     <p className="market-sub">Capture and return percentages are before fees and measure the option only, not return on collateral or a full wheel cycle.
       Net statistics include recorded fees only; each closing record counts once, including partial closes. Past averages are not forecasts.</p>
     <GroupedOptionStats rows={rows} />
+    <ReviewLessons rows={rows} />
+    {unreviewed.length > 0 && <p className="review-nudge" role="status">
+      📝 {unreviewed.length} closed trade{unreviewed.length === 1 ? ' has' : 's have'} no review yet. A one-minute review (plan followed? what happened?) builds your Lessons list.
+      {' '}<button type="button" className="btn-secondary btn-sm" disabled={busy} onClick={() => { setSaved(null); setReviewTrade(unreviewed[0]); }}>
+        Review {unreviewed[0].ticker} ({shortDate(unreviewed[0].closed_at) || 'latest'})</button></p>}
     <div className="trade-history-toolbar">
       <input className="tool-input" type="search" aria-label="Filter by ticker" placeholder="Filter by ticker" maxLength={12}
         value={query} onChange={event => { setQuery(event.target.value); setLimit(PAGE); }} />
       {!optionsOnly && <div className="trade-history-kinds" role="group" aria-label="Trade type">
-        {[['all', 'All'], ['options', 'Options'], ['stocks', 'Stocks']].map(([value, label]) =>
+        {[['all', 'All'], ['options', 'Options'], ['stocks', 'Stocks'], ['unreviewed', `Needs review (${unreviewed.length})`]].map(([value, label]) =>
           <button key={value} type="button" className={`watchlist-tab${kind === value ? ' active' : ''}`} aria-pressed={kind === value}
             onClick={() => { setKind(value); setLimit(PAGE); }}>{label}</button>)}
       </div>}
@@ -333,7 +390,10 @@ function RecordedHistory({ optionsOnly = false, version = 0, onEdit, onDelete, b
             </div>
             : stockReturn != null ? <><span className={pnlClass(stockReturn)}>{stockReturn.toFixed(1)}%</span> <small>return</small></>
               : <Missing reason={metrics.option ? 'Premiums unavailable' : 'Return unavailable'} />}</td>
-          <td data-label="Exit reason">{EXIT_REASONS[row.review?.exit_reason] || <Missing reason="Exit reason not recorded" />}</td>
+          <td data-label="Exit reason">{EXIT_REASONS[row.review?.exit_reason] || <Missing reason="Exit reason not recorded" />}
+            {row.review?.followed_plan != null && <span className="trade-sub">{row.review.followed_plan ? '✓ Followed plan' : '✗ Broke plan'}</span>}
+            {row.review?.tags?.length > 0 && <span className="review-tag-list">{row.review.tags.map(tag =>
+              <span key={tag} className={`signal-chip ${REVIEW_TAGS[tag]?.[1] ? 'signal-bullish' : 'signal-bearish'}`}>{REVIEW_TAGS[tag]?.[0] || tag}</span>)}</span>}</td>
           <td className="trade-pnl">{row.net_pnl != null
             ? <><strong className={pnlClass(row.net_pnl)}>{money(row.net_pnl)}</strong><span className="trade-sub">Gross {money(row.pnl)} · fees {money(row.fees)}</span></>
             : <><strong className={pnlClass(row.pnl)}>{money(row.pnl)}</strong><span className="trade-sub">Gross · no fees recorded</span></>}</td>

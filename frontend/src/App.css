@@ -4887,6 +4887,13 @@ button.signal-chip { cursor: pointer; }
 
 /* ── Journal trade history ── */
 .trade-history-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; margin: 0.75rem 0 0.5rem; }
+.review-tags { display: flex; flex-wrap: wrap; gap: 0.35rem; border: none; padding: 0; margin: 0; }
+.review-tags legend { font-size: 0.8rem; margin-bottom: 0.35rem; padding: 0; }
+.review-tags .signal-chip[aria-pressed="false"] { opacity: 0.75; }
+.review-tag-list { display: flex; flex-wrap: wrap; gap: 0.2rem; margin-top: 0.2rem; }
+.review-tag-list .signal-chip { font-size: 0.65rem; padding: 0.05rem 0.4rem; }
+.review-nudge { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; padding: 0.5rem 0.7rem; margin: 0.5rem 0;
+  border: 1px dashed var(--accent); border-radius: 8px; font-size: 0.85rem; background: var(--accent-soft); }
 .trade-history-toolbar input[type="search"] { width: 11rem; max-width: 100%; }
 .trade-history-kinds { display: flex; gap: 0.3rem; }
 .trade-history-table td { vertical-align: top; padding-top: 0.6rem; padding-bottom: 0.6rem; }

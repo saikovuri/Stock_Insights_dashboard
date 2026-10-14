@@ -151,6 +151,34 @@ test('journal review saves retrospective targets without changing fills and retr
   expect(screen.getByLabelText('Review notes').value).toBe('Closed early');
 });
 
+test('journal review records plan and habit tags, nudges unreviewed trades and shows lessons', async () => {
+  vi.spyOn(auth, 'useAuth').mockReturnValue({ user: { id: 1 } });
+  vi.spyOn(stockApi, 'fetchClosedTrades').mockResolvedValue({ trades: [] });
+  const base = { position: 'short', option_type: 'put', open_premium: 2, close_premium: 1, contracts: 1, strike: 100, fees: 0,
+    opened_at: '2025-09-01', expiry: '2025-09-19' };
+  const reviewed = { ...base, id: 1, ledger_event_id: 7, ticker: 'KO', pnl: -300, net_pnl: -300, closed_at: '2025-09-05',
+    review: { review_id: 3, followed_plan: false, tags: ['fomo'], review_note: '' } };
+  const pending = { ...base, id: 2, ledger_event_id: 8, ticker: 'AAPL', pnl: 100, net_pnl: 100, closed_at: '2025-09-10' };
+  vi.spyOn(stockApi, 'fetchClosedOptions').mockResolvedValue({ trades: [reviewed, pending] });
+  const save = vi.spyOn(stockApi, 'recordAccountingEntry').mockResolvedValue({ id: 9 });
+  render(<Journal />);
+  const lessons = await screen.findByLabelText('Lessons from your reviews');
+  expect(within(lessons).getByText('Broke my plan')).toBeTruthy();
+  expect(within(lessons).getByText('FOMO entry')).toBeTruthy();
+  expect(within(screen.getByRole('table', { name: 'Recorded trades' })).getByText('✗ Broke plan')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Needs review (1)' }));
+  expect(within(screen.getByRole('table', { name: 'Recorded trades' })).queryByText('KO')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: /Review AAPL \(Sep 10/ }));
+  const dialog = screen.getByRole('dialog', { name: 'Review AAPL closed trade' });
+  fireEvent.change(within(dialog).getByLabelText('Did you follow your plan?'), { target: { value: 'yes' } });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Patient entry' }));
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Exited too early' }));
+  expect(within(dialog).getByRole('button', { name: 'Patient entry' }).getAttribute('aria-pressed')).toBe('true');
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Save review' }));
+  await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({
+    kind: 'review', event_id: 8, followed_plan: true, tags: ['patient_entry', 'early_exit'] })));
+});
+
 test('journal long option review has no capture target and can clear exit reason', async () => {
   vi.spyOn(auth, 'useAuth').mockReturnValue({ user: { id: 1 } });
   vi.spyOn(stockApi, 'fetchClosedTrades').mockResolvedValue({ trades: [] });

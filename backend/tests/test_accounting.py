@@ -674,6 +674,21 @@ class ManualAccountingTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.entry("review", event_id=event_id, exit_reason="other")
 
+    def test_journal_review_records_plan_and_habit_tags(self):
+        trade = self.closed_option()
+        self.entry("review", event_id=trade["ledger_event_id"], exit_reason="discretionary", followed_plan=False,
+                   tags=["fomo", "early_exit"], note="Jumped in")
+        review = database.get_closed_options(self.user)[0]["review"]
+        self.assertEqual((review["followed_plan"], review["tags"]), (False, ["fomo", "early_exit"]))
+        for changes in ({"tags": ["guessed"]}, {"tags": ["fomo", "fomo"]}, {"tags": ["fomo"] * 7}):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                self.entry("review", event_id=trade["ledger_event_id"], **changes)
+        with self.assertRaises(ValueError):
+            self.entry("fee", amount=1, tags=["fomo"])
+        self.entry("review", event_id=trade["ledger_event_id"], exit_reason="stop")
+        review = database.get_closed_options(self.user)[0]["review"]
+        self.assertEqual((review["followed_plan"], review["tags"]), (None, []))
+
     def test_journal_review_rejects_capture_target_on_long_option(self):
         trade = self.closed_option(position="long")
         with self.assertRaisesRegex(ValueError, "short options"):

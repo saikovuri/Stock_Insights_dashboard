@@ -5,6 +5,9 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 ACCOUNT_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9 ._&'()-]{0,39}$"
+# Trade-review habit tags; the frontend labels them (Journal.jsx REVIEW_TAGS)
+ReviewTag = Literal["fomo", "chased", "oversized", "moved_stop", "early_exit", "late_exit", "ignored_earnings", "revenge",
+                    "patient_entry", "sized_right", "cut_loss_fast", "let_winner_run"]
 
 
 class HoldingRequest(BaseModel):
@@ -103,14 +106,19 @@ class AccountingEntryRequest(BaseModel):
     idempotency_key: str = Field(min_length=8, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
     exit_reason: Literal["profit_target", "stop", "expiry", "assignment", "roll", "discretionary", "other"] | None = None
     target_capture_pct: Decimal | None = Field(default=None, ge=0, le=100, max_digits=5, decimal_places=2)
+    followed_plan: bool | None = None
+    tags: list[ReviewTag] | None = Field(default=None, max_length=6)
     account: str | None = Field(default=None, pattern=ACCOUNT_PATTERN)
 
     @model_validator(mode="after")
     def review_fields(self):
         if self.account is not None and self.kind not in ("deposit", "withdrawal"):
             raise ValueError("Only deposits and withdrawals are assigned to an account")
-        if self.kind != "review" and (self.exit_reason is not None or self.target_capture_pct is not None):
+        if self.kind != "review" and (self.exit_reason is not None or self.target_capture_pct is not None
+                                      or self.followed_plan is not None or self.tags):
             raise ValueError("Review fields require a review entry")
+        if self.tags is not None and len(set(self.tags)) != len(self.tags):
+            raise ValueError("Each review tag can be used once")
         if self.kind == "review" and (self.event_id is None or self.amount != 0):
             raise ValueError("A review requires a trade event and no cash amount")
         return self

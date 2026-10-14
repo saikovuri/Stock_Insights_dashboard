@@ -876,7 +876,7 @@ This view is **not a reconstructed Wheel-cycle ledger**. It deliberately omits a
 | Occurred-at | Real timestamp, converted to UTC; future/invalid timestamps are rejected by validation. This differs from when the server recorded the event. |
 | Fee reference | Optionally link a fee to a supported owned ledger event. Fees are not invented for historical fills. |
 | Cycle allocation | Explicitly link shares/contracts from a source event to a named strategy/Wheel cycle. Ownership and remaining allocatable quantity are checked; the same quantity cannot be allocated repeatedly. |
-| Trade review | Journal saves exit reasons, retrospective short-option capture targets and review notes as nonfinancial, reversible manual events. Latest active review wins; prior revisions remain audited. |
+| Trade review | Journal saves exit reasons, retrospective short-option capture targets, a followed-my-plan answer, up to 6 habit tags and review notes as nonfinancial, reversible manual events. Latest active review wins; prior revisions remain audited. |
 | Corrections | Reverse supported manual entries by appending a reversal. Do not edit or delete the immutable audit trail. |
 | US informational tax lots | Basis, proceeds, allocated recorded fees and gain for recorded closed lots. FIFO ticker sales and specific-lot sales retain provenance where recorded; legacy unknown acquisitions remain flagged. |
 | Time-weighted return | Requires opening/ending total-account valuations and accurate NAV immediately before external flows. Missing necessary boundaries keep TWR unavailable. |
@@ -997,11 +997,11 @@ The table has one row per closing record with seven columns:
 - **Dates:** opened → closed, with days held and DTE left at the close underneath.
 - **Premium / price:** opening → closing premium for options, or buy → sell price for stocks.
 - **Captured / return:** for options, a progress bar; when a short option has a review target, a marker on the bar shows the target, with the gap in percentage points underneath. For stocks, the recorded return.
-- **Exit reason**
+- **Exit reason:** plus "✓ Followed plan" / "✗ Broke plan" and habit-tag chips when the review recorded them.
 - **Net P&L:** net, with gross and recorded fees underneath. Rows without a recorded net show gross only.
 - **Actions:** Review, plus edit, delete and Notes where available.
 
-Missing values show a muted dash; hover it for the reason. Filter by ticker or by All / Options / Stocks; the table shows 25 trades at a time, with **Show more** for the rest. Statistics and groupings above the table always cover every recorded trade, not just the filtered rows. On phones each trade becomes a card instead of a sideways-scrolling row.
+Missing values show a muted dash; hover it for the reason. Filter by ticker or by All / Options / Stocks / **Needs review (N)** (reviewable records with no review yet); the table shows 25 trades at a time, with **Show more** for the rest. Statistics and groupings above the table always cover every recorded trade, not just the filtered rows. On phones each trade becomes a card instead of a sideways-scrolling row.
 
 | Recorded metric | Rule |
 | --- | --- |
@@ -1027,9 +1027,13 @@ The recorded-option summary shows sample count, net P&L, net expectancy per clos
 
 Bucketed groupings keep their natural order. The rest sort by net P&L, or newest month first. Groups with fewer than 10 closes are flagged as too small to show a reliable edge. Manual stock-journal entries keep their separate per-setup breakdown.
 
-**Review** in the last column opens a nonfinancial review dialog for an owned closed stock or option record with a ledger reference. Choose profit target, stop/risk limit, expiry, assignment, roll, discretionary exit, other, or leave the reason unrecorded. Short options additionally accept an optional capture target. Review notes are limited to 500 characters. Targets and exit reasons are self-reported after the trade; they are not verified pre-trade plans and do not execute any trade workflow.
+**Review** in the last column opens a nonfinancial review dialog for an owned closed stock or option record with a ledger reference. Choose profit target, stop/risk limit, expiry, assignment, roll, discretionary exit, other, or leave the reason unrecorded. Short options additionally accept an optional capture target. **Did you follow your plan?** accepts Yes, No or unrecorded. Up to 6 habit tags can be toggled: mistakes (FOMO entry, Chased the price, Position too big, Moved my stop, Exited too early, Held too long, Ignored earnings, Revenge trade) and good habits (Patient entry, Sized right, Cut loss quickly, Let the winner run). The server rejects plan answers or tags on non-review entries, unknown tags and duplicates. Review notes are limited to 500 characters. Targets and exit reasons are self-reported after the trade; they are not verified pre-trade plans and do not execute any trade workflow.
 
 Saving appends an audited review and records the server timestamp, without changing fills, fees or P&L. The latest active review is shown; revisions remain in Account ledger and can be reversed there. Clearing a field saves it as unrecorded. Unchanged retries reuse the same request key. Close/Escape discards the unsaved review draft; dismissal is disabled during save. Notes expose the latest review and its recorded-at timestamp.
+
+When reviewable records have no review, a nudge above the table counts them and offers **Review {ticker} ({date})** for the most recent one.
+
+**Lessons from your reviews** (above the table, once any review has a plan answer or tag) lists trade count, net P&L (recorded fees deducted where known, gross otherwise) and positive-result win rate for Followed my plan vs Broke my plan, and for each habit tag, sorted from worst to best net. It covers every reviewed record regardless of the table filters. A trade counts once per tag, so tag lines overlap. Answers are self-reported after the trade, and small samples mislead.
 
 **Daily realized P&L** (below the table) is a month calendar.
 - Each day sums the closing records dated that day, net of recorded fees where known and gross otherwise. A day appears in green or red, more intense the larger it is relative to the month's biggest day. Days without closes are blank.
