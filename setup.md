@@ -16,8 +16,8 @@ None of these items are in GitHub. Keep them somewhere safe, such as a password 
 | --- | --- | --- |
 | Every value in `backend/.env` (`JWT_SECRET`, `GROQ_API_KEY`, `GEMINI_API_KEY`, `FINNHUB_API_KEY`, `TWELVEDATA_API_KEY`, `SEC_USER_AGENT`, `CORS_ORIGINS`, ...) | `backend/.env` on this machine | Without these the app has no AI or real-time data. Keep the **same `JWT_SECRET`** if you want old account-transfer files to import. |
 | Your local data | `backend/stockinsights.db` (SQLite). The E*TRADE imports you tested locally live here, **not** in production. | Run `.venv\Scripts\python.exe backend\backup_sqlite.py` and copy the file from `backups\`. Or use **Portfolio → Holdings → Data tools → Export data to another login** to get a JSON file. |
-| SSH private key for the Oracle VM | `~/.ssh/stockpilot_deploy` (plus `~/.ssh/stockpilot_known_hosts`) on this machine. Log in with `ssh -i ~/.ssh/stockpilot_deploy -o UserKnownHostsFile=~/.ssh/stockpilot_known_hosts ubuntu@157.151.152.97` | Needed to log in to the production server. Oracle does not keep private keys and GitHub never shows secrets again. If it is lost, see section 6 (Lost SSH key). |
-| The production `backend/.env` on the VM, including `DATABASE_URL` | `~/stock-insights/backend/.env` on the VM | Run `ssh ubuntu@157.151.152.97 "cat ~/stock-insights/backend/.env"` and store the output safely. |
+| SSH access to the production laptop | Key `~/.ssh/stockpilot_laptop` on this machine. The laptop (`sai-kovouri@192.168.87.20`) only accepts SSH from its home network (or through Tailscale if you add your PC to the tailnet). | You can also just use the laptop's own keyboard and screen. |
+| The production `backend/.env` on the laptop, including `DATABASE_URL` | `~/stock-insights/backend/.env` on the laptop | On the laptop: `cat ~/stock-insights/backend/.env`, and store the output in your password manager. A rebuild needs it (`deploy/laptop-setup.sh` asks for it). |
 | `BACKUP_PASSPHRASE` | A GitHub secret (set 2026-10-12; first backup succeeded that day), and your password manager | Without it the weekly database backups cannot be decrypted. |
 | Logins for GitHub, Vercel, Supabase, Oracle Cloud, Groq, Google AI Studio, Finnhub, Twelve Data, Sentry (if used), ntfy topic | Your accounts | Every service is on a free tier, but you must be able to sign in to each one. |
 
@@ -30,20 +30,20 @@ Finally, run `git status` and push anything that isn't pushed yet.
 ```mermaid
 flowchart LR
   U[Browser / Android / iOS app] -->|HTTPS| V[Vercel: React frontend]
-  U -->|HTTPS /api| C[Caddy on Oracle VM]
-  C --> B[FastAPI backend, uvicorn, 1 worker]
+  U -->|HTTPS /api| F[Tailscale Funnel]
+  F --> B[FastAPI backend on the home laptop, uvicorn, 1 worker]
   B --> DB[(Supabase PostgreSQL)]
   B --> P[Finnhub, Yahoo, CBOE, SEC, Groq/Gemini, ntfy]
-  GH[GitHub master branch] -->|CI passes, then SSH| C
+  B -->|every 5 min: pull commits that passed CI| GH[GitHub master branch]
   GH -->|Vercel Git integration| V
 ```
 
 | Piece | Production | Local development |
 | --- | --- | --- |
 | Frontend | https://stock-insights-dashboard.vercel.app (Vercel) | http://localhost:5173 (Vite; `/api` is forwarded to port 8000) |
-| Backend | https://157-151-152-97.sslip.io (Oracle Cloud Always Free ARM VM, Ubuntu 20.04 (checked 2026-10-10; standard support ended April 2025), Caddy for HTTPS, systemd service `stock-insights`) | http://localhost:8000 (uvicorn) |
+| Backend | https://stockpilot.tail112222.ts.net (home laptop `sai-kovouri-dell`, Ubuntu Desktop 24.04, published with Tailscale Funnel, systemd service `stock-insights`; moved from the Oracle VM on 2026-10-13, see [setup_laptop.md](setup_laptop.md)) | http://localhost:8000 (uvicorn) |
 | Database | Supabase PostgreSQL (`DATABASE_URL`) | SQLite file `backend/stockinsights.db`, used when `DATABASE_URL` is empty |
-| CI/CD | `.github/workflows/ci.yml` (tests), `deploy-oci.yml` (backend deploy), `db-backup.yml` (weekly encrypted backup) | `scripts/check.ps1` runs the same checks |
+| CI/CD | `.github/workflows/ci.yml` (tests), `db-backup.yml` (weekly encrypted backup); the laptop deploys itself (section 5.1). `deploy-oci.yml` (old Oracle deploy) now skips because `OCI_HOST` is deleted. | `scripts/check.ps1` runs the same checks |
 
 Versions: **Python 3.13** (`backend/.python-version` says 3.13.14), **Node 22**, React 19, Vite 6, Capacitor 8.
 
@@ -105,7 +105,7 @@ Frontend build variables (set in Vercel, or in a `frontend/.env.local` file):
 
 | Variable | What it does |
 | --- | --- |
-| `VITE_API_URL` | Backend origin without `/api`, e.g. `https://157-151-152-97.sslip.io`. Leave it empty locally (Vite forwards `/api`). The native mobile app falls back to the address hard-coded in `frontend/src/api/config.js`. |
+| `VITE_API_URL` | Backend origin without `/api`: `https://stockpilot.tail112222.ts.net`. Leave it empty locally (Vite forwards `/api`). The native mobile app falls back to the address hard-coded in `frontend/src/api/config.js`. |
 | `VITE_SENTRY_DSN` | Optional frontend error tracking. |
 
 ### 3.4 Run it
@@ -179,20 +179,19 @@ What the tests do:
 ### 5.1 How a change reaches production
 
 1. Commit and `git push origin master`.
-2. **Backend:** `deploy-oci.yml` runs the full CI. If CI passes, it SSHes into the VM and runs `deploy/update.sh` (`git pull`, install packages, restart the service, health check). This runs only when files under `backend/` or `deploy/` changed.
+2. **Backend:** GitHub runs CI (`ci.yml`). Every 5 minutes the laptop's `stock-insights-autoupdate.timer` checks GitHub; once **all** checks on the newest master commit have passed, it runs `deploy/update.sh` (`git pull`, install packages, restart, health check). Commits that don't touch `backend/` or `deploy/` are pulled without a restart. A commit with failing checks is never deployed.
 3. **Frontend:** Vercel builds `frontend/` on each push to master. It uses `vercel.json` for the build command and the security headers.
 4. Check the result:
    - GitHub → Actions tab;
-   - `curl https://157-151-152-97.sslip.io/api/health`;
+   - `curl https://stockpilot.tail112222.ts.net/api/health`;
+   - on the laptop: `journalctl -u stock-insights-autoupdate -n 20`;
    - open the Vercel URL.
 
 GitHub repository secrets (Settings → Secrets and variables → Actions):
 
 | Secret | Used by |
 | --- | --- |
-| `OCI_HOST` | Deploy. The VM's public IP (157.151.152.97). If it is empty, the deploy step is skipped. |
-| `OCI_SSH_KEY` | Deploy. A private key whose public half is in the VM's `~/.ssh/authorized_keys`. |
-| `OCI_KNOWN_HOSTS` | Deploy. Output of `ssh-keyscan 157.151.152.97`. |
+| `OCI_SSH_KEY`, `OCI_KNOWN_HOSTS` | Old Oracle deploy; unused since 2026-10-13 (`OCI_HOST` deleted, so `deploy-oci.yml` skips). Delete them when the Oracle instance is terminated. |
 | `DATABASE_URL` | Weekly backup. Supabase **session-mode** URI, port 5432. |
 | `BACKUP_PASSPHRASE` | Weekly backup encryption. |
 
@@ -200,48 +199,34 @@ Vercel project environment variables: `VITE_API_URL` and, optionally, `VITE_SENT
 
 ### 5.2 Run the server by hand
 
+On the laptop (its own terminal, or `ssh -i ~/.ssh/stockpilot_laptop sai-kovouri@192.168.87.20` from the home network):
+
 ```bash
-ssh ubuntu@157.151.152.97
 sudo systemctl status stock-insights          # is it running?
 sudo journalctl -u stock-insights -f          # live logs
 sudo systemctl restart stock-insights         # restart
-bash ~/stock-insights/deploy/update.sh        # pull + restart (what CI does)
+bash ~/stock-insights/deploy/update.sh        # pull + restart now, without waiting for the timer
+journalctl -u stock-insights-autoupdate -n 30 # what the auto-deploy did
 nano ~/stock-insights/backend/.env            # change settings, then restart
-sudo journalctl -u caddy -n 50                # HTTPS / certificate problems
+sudo tailscale funnel status                  # public address on?
 ```
 
 Health checks:
 - `/health` only shows that the process is alive.
 - `/api/health` also checks the database (it returns 503 if the database is down).
-- `python backend/release_check.py --base-url https://157-151-152-97.sslip.io` runs read-only provider checks.
+- `python backend/release_check.py --base-url https://stockpilot.tail112222.ts.net` runs read-only provider checks.
 
 ### 5.3 Rebuild the backend server from scratch
 
-Use this if the VM is lost or you move to a new one.
+Use this if the laptop dies or you move to another machine. On any Ubuntu 24.04 machine (Desktop or Server), as your normal user:
 
-1. **Create the VM.** Oracle Cloud → Create instance:
-   - shape VM.Standard.A1.Flex (2 OCPU / 12 GB is free);
-   - image Ubuntu 24.04 aarch64;
-   - add your SSH public key.
-   - Optional: paste `deploy/oci-cloud-init.sh` into *Advanced → cloud-init*.
-2. **Open the ports.** In the VCN security list, allow inbound TCP 80 and 443.
-3. **Start the setup.** SSH in and run:
-   `curl -fsSL https://raw.githubusercontent.com/saikovuri/Stock_Insights_dashboard/master/deploy/oracle-setup.sh -o setup.sh && bash setup.sh`
-4. **Fill in the settings.** The first run creates `~/stock-insights/backend/.env` and stops. Fill it in (`DATABASE_URL` and `JWT_SECRET` are required), then run the script again. It sets up:
-   - Python 3.13 (through uv);
-   - the systemd service;
-   - Caddy with free HTTPS on `<ip-with-dashes>.sslip.io`, or on your domain if you pass it as an argument.
-5. **If the IP or hostname changed, update all of these** (otherwise the browser blocks the API):
-   - Vercel `VITE_API_URL`;
-   - `connect-src` in [vercel.json](vercel.json) (the Content-Security-Policy header);
-   - the native fallback URL in [frontend/src/api/config.js](frontend/src/api/config.js);
-   - GitHub secrets `OCI_HOST` and `OCI_KNOWN_HOSTS`.
-6. **Push.** Commit and push the file changes, then redeploy Vercel.
+```bash
+bash <(curl -fsSL "https://raw.githubusercontent.com/saikovuri/Stock_Insights_dashboard/master/deploy/laptop-setup.sh?$(date +%s)")
+```
 
-Lost your SSH key?
-1. In the Oracle console, open the instance → **Console connection**, or use Cloud Shell.
-2. Add a new public key to `~/.ssh/authorized_keys`.
-3. Update the `OCI_SSH_KEY` secret.
+It's safe to re-run. It stops once to ask for `backend/.env` (paste your saved copy), and once for the Tailscale sign-in. If the old server is still running, add `SCHEDULER_ENABLED=0` to the new `.env`, stop the old service, then run the same command with ` cutover` at the end. If the public address changes, update Vercel `VITE_API_URL` (then Redeploy), `connect-src` in [vercel.json](vercel.json) and the fallback in [frontend/src/api/config.js](frontend/src/api/config.js). Details and troubleshooting: [setup_laptop.md](setup_laptop.md).
+
+**Old Oracle VM:** shut down on 2026-10-13, not yet terminated, so it can be started again from the Oracle console for a rollback. To roll back: start the instance, `sudo systemctl enable --now stock-insights` on it, stop the laptop service, and set `VITE_API_URL` back to `https://157-151-152-97.sslip.io` (still allowed in `vercel.json`). Once you're sure, terminate the instance **and its boot volume** in the Oracle console, remove the sslip address from `vercel.json`, and delete the `OCI_*` secrets. Its setup script, [deploy/oracle-setup.sh](deploy/oracle-setup.sh), no longer runs as-is (Caddy's apt repository returns 402; see section 6).
 
 Alternative host: [render.yaml](render.yaml) describes the same backend for Render.com. Render's free tier sleeps when idle, which pauses the scheduler.
 

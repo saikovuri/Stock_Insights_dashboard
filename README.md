@@ -114,7 +114,7 @@ backend/
   scheduler.py         Background alerts + daily briefing
   database.py          SQLite (local) / Postgres (Supabase)
 frontend/              React app (web + Capacitor Android/iOS)
-deploy/                Oracle VM setup, Supabase RLS, manual backup script
+deploy/                Home-laptop setup (laptop-setup.sh), old Oracle VM setup, Supabase RLS, backup and database-move scripts
 ```
 
 ## Operations

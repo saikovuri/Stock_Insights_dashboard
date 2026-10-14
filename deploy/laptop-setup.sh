@@ -9,8 +9,6 @@ REPO_URL="https://github.com/saikovuri/Stock_Insights_dashboard.git"
 APP_DIR="$HOME/stock-insights"
 ENV_FILE="$APP_DIR/backend/.env"
 SERVICE="stock-insights"
-ORACLE="ubuntu@157.151.152.97"
-ORACLE_HOSTKEY="157.151.152.97 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILnMUynHb67tEzytcReNrEdvD8zMLVqJ69T5IbeNlMFB"
 APT="sudo DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 -y -q"
 
 step() { printf '\n=== %s ===\n' "$*"; }
@@ -29,7 +27,7 @@ if [ "${1:-}" = "cutover" ]; then
   if healthy; then echo "API + database OK, scheduler ON"; else sudo journalctl -u "$SERVICE" -n 40 --no-pager; exit 1; fi
   sudo rm -f /etc/sudoers.d/90-stockpilot-setup
   echo "Temporary setup sudo rule removed; sudo asks for your password again."
-  echo "Send Copilot: CUTOVER DONE"
+  echo "Cutover done: this machine now runs the scheduler."
   exit 0
 fi
 
@@ -111,32 +109,16 @@ sudo visudo -cq
 
 step "9. Production settings (backend/.env)"
 if [ ! -s "$ENV_FILE" ]; then
-  KEY="$HOME/.ssh/stockpilot_oracle"
-  KNOWN="$HOME/.ssh/stockpilot_oracle_known_hosts"
-  mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
-  [ -f "$KEY" ] || ssh-keygen -q -t ed25519 -N "" -f "$KEY" -C "stockpilot-laptop"
-  echo "$ORACLE_HOSTKEY" > "$KNOWN"
-  TMP=$(mktemp) && chmod 600 "$TMP"
-  # The Oracle VM only lets this key read the settings file (forced command)
-  if ssh -i "$KEY" -o BatchMode=yes -o ConnectTimeout=20 -o UserKnownHostsFile="$KNOWN" -o StrictHostKeyChecking=yes \
-       "$ORACLE" read-env > "$TMP" 2> /dev/null < /dev/null \
-     && grep -q '^DATABASE_URL=.' "$TMP" && grep -q '^JWT_SECRET=.' "$TMP"; then
-    install -m 600 "$TMP" "$ENV_FILE"
-    rm -f "$TMP"
-    [ -z "$(tail -c1 "$ENV_FILE")" ] || echo >> "$ENV_FILE"
-    echo "SCHEDULER_ENABLED=0" >> "$ENV_FILE"
-    echo "Copied from the Oracle VM; scheduler stays OFF until cutover"
-  else
-    rm -f "$TMP"
-    echo
-    echo ">>> NEXT: send Copilot this whole line, then run the same command again:"
-    echo
-    cat "$KEY.pub"
-    echo
-    exit 0
-  fi
+  echo
+  echo ">>> NEXT: create $ENV_FILE from your saved copy (password manager), then run this command again:"
+  echo "      nano $ENV_FILE        # paste, Ctrl+O, Enter, Ctrl+X"
+  echo "    If another StockPilot server is still running, also add the line SCHEDULER_ENABLED=0,"
+  echo "    stop the other server after this finishes, then run this script with: cutover"
+  exit 0
 fi
 chmod 600 "$ENV_FILE"
+grep -q '^DATABASE_URL=.' "$ENV_FILE" && grep -q '^JWT_SECRET=.' "$ENV_FILE" \
+  || { echo "$ENV_FILE needs DATABASE_URL and JWT_SECRET"; exit 1; }
 grep -q '^SCHEDULER_ENABLED=0$' "$ENV_FILE" && echo "Scheduler: OFF (until cutover)" || echo "Scheduler: ON"
 
 step "10. Backend service"
@@ -243,4 +225,4 @@ grep -q '^SCHEDULER_ENABLED=0$' "$ENV_FILE" && echo "Scheduler: OFF until cutove
 echo "Public:   $PUBLIC"
 echo
 echo "1. In the Tailscale admin console (login.tailscale.com/admin/machines): stockpilot -> ... -> Disable key expiry."
-echo "2. Send Copilot this line:  PUBLIC=$PUBLIC"
+echo "2. If this address is new: set Vercel VITE_API_URL=$PUBLIC (then Redeploy) and add it to connect-src in vercel.json."

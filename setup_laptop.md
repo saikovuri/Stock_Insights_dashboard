@@ -1,5 +1,13 @@
 # Run the StockPilot backend on an old laptop (Ubuntu 24.04, always on)
 
+**Status (2026-10-13):** production runs this way, on Ubuntu Desktop 24.04 with Tailscale Funnel at `https://stockpilot.tail112222.ts.net`. It was set up with [deploy/laptop-setup.sh](deploy/laptop-setup.sh), which automates sections 2.2–2.5, 3.1, 5 (except copying `.env`), 6A and 7 of this guide for the Funnel option. Run it as your normal user:
+
+```bash
+bash <(curl -fsSL "https://raw.githubusercontent.com/saikovuri/Stock_Insights_dashboard/master/deploy/laptop-setup.sh?$(date +%s)")
+```
+
+The manual steps below explain what it does, and cover Cloudflare Tunnel, battery limits and the parts the script leaves to you.
+
 This guide moves the backend from the Oracle VM to a laptop at home. The frontend stays on Vercel and the database stays on Supabase; only the API server moves. The laptop runs exactly what the Oracle VM runs today: one uvicorn process with the built-in scheduler (alerts, wheel refresh, scans).
 
 Two ways to make the laptop reachable from the internet, without opening ports on your router. Pick **one**:
