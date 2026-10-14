@@ -216,6 +216,8 @@ Test: close the lid, wait a minute, and check the laptop still answers `ssh`.
 
 The battery covers short cuts. For longer ones, reboot into the BIOS/UEFI setup (usually **F2**, **F1**, **Del** or **F10** at power-on) and look for **"AC Power Recovery"**, **"Power On with AC Attach"**, **"Wake on AC"** or **"Auto Power On"**, and enable it. Not every laptop has it; without it, press the power button after a long outage.
 
+Done on the StockPilot laptop (Dell Inspiron, 2016): **F2** at the Dell logo → **Power Management → AC Behavior → Wake on AC**, then **Apply** → **Exit**.
+
 ### 3.3 Protect the battery (if supported)
 
 Charging to 100% around the clock can swell an old battery. Many Lenovo, Dell, ASUS and some HP laptops support a charge limit. **(laptop):**
