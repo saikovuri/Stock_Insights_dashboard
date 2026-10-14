@@ -107,18 +107,18 @@ function WheelPlan({ onSelect, shortDated }) {
             <div><span>~ per month</span><strong className="positive">{money(plan.monthly_income)}</strong></div>
             <div><span>Annualized on cash used</span><strong>{plan.annualized_pct}%</strong></div>
           </div>
-          <table className="market-table">
+          <table className="market-table phone-cards">
             <thead><tr><th>Stock</th><th>Sell put</th><th>Contracts</th><th>Cash</th><th>Premium</th><th>Cushion</th></tr></thead>
             <tbody>
               {plan.picks.map(p => (
                 <tr key={p.ticker}>
                   <td><button className="link-btn" onClick={() => onSelect(p.ticker)}><strong>{p.ticker}</strong></button>
                     <div className="market-sub">{p.sector}</div></td>
-                  <td>${p.strike} · {fmtDate(p.expiry)} <span className="market-sub">Δ {p.delta}</span></td>
-                  <td>{p.contracts}</td>
-                  <td>{money(p.capital)}</td>
-                  <td className="positive">{money(p.income)}</td>
-                  <td>{p.cushion_pct}%</td>
+                  <td data-label="Sell put" className="card-wide">${p.strike} · {fmtDate(p.expiry)} <span className="market-sub">Δ {p.delta}</span></td>
+                  <td data-label="Contracts">{p.contracts}</td>
+                  <td data-label="Cash">{money(p.capital)}</td>
+                  <td data-label="Premium" className="positive">{money(p.income)}</td>
+                  <td data-label="Cushion">{p.cushion_pct}%</td>
                 </tr>
               ))}
             </tbody>

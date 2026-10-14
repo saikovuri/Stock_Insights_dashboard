@@ -33,6 +33,7 @@ import { lastLookChanges } from './components/SinceLastLook';
 import Alerts from './components/Alerts';
 import PortfolioDoctor from './components/PortfolioDoctor';
 import { UnusualOptions } from './components/Ideas';
+import TabStrip from './components/TabStrip';
 
 beforeEach(() => {
   localStorage.clear(); sessionStorage.clear();
@@ -1437,6 +1438,16 @@ test('next steps follow the account, link repairs and dismiss non-urgent items f
   fireEvent.click(screen.getByRole('button', { name: 'Show 1 dismissed suggestion' }));
   fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
   expect(JSON.parse(localStorage.getItem('next_steps_dismissed'))).toEqual({});
+});
+
+test('sub-tab labels keep the emoji with the first word without losing spaces', () => {
+  render(<TabStrip label="Views"><button className="sub-tab">⚡ In play</button><button className="sub-tab">🎯 Setups</button></TabStrip>);
+  const tab = screen.getByRole('button', { name: '⚡ In play' });
+  // A single inline child: separate flex items would drop the space after "In" on phones
+  expect(tab.children).toHaveLength(1);
+  expect(tab.firstElementChild.textContent).toBe('⚡ In play');
+  expect(tab.querySelector('.nowrap').textContent).toBe('⚡ In');
+  expect(screen.getByRole('button', { name: '🎯 Setups' }).className).toContain('nowrap');
 });
 
 test('unusual options switch between near-term, monthly and LEAPS expirations', async () => {

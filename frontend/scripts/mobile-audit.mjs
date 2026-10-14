@@ -46,6 +46,24 @@ async function report(name) {
     }
     return { page: document.documentElement.scrollWidth > width + 1, sample: [...new Set(bad)].slice(0, 8) };
   });
+  // Content hidden off to the side inside scroll boxes, and chips/badges split over two lines
+  const hidden = await page.evaluate(() => {
+    const scrollers = [];
+    for (const el of document.querySelectorAll('body *')) {
+      const style = getComputedStyle(el);
+      if (!/(auto|scroll)/.test(style.overflowX) || el.clientWidth === 0) continue;
+      if (el.scrollWidth <= el.clientWidth + 4 || el.closest('.tab-strip, .watchlist-rail, nav')) continue;
+      const heads = [...el.querySelectorAll('th')].slice(0, 4).map(th => th.textContent.trim().slice(0, 14)).join('/');
+      scrollers.push(`${el.tagName.toLowerCase()}.${String(el.className).split(' ')[0]} ${el.scrollWidth}>${el.clientWidth} [${heads}]`);
+    }
+    const wrapped = [];
+    for (const el of document.querySelectorAll('[class*=chip], [class*=badge], [class*=pill], .tag')) {
+      const r = el.getBoundingClientRect();
+      const line = parseFloat(getComputedStyle(el).fontSize) * 1.9;
+      if (r.height > line + 8 && el.textContent.trim().length < 40) wrapped.push(`${String(el.className).split(' ')[0]}:"${el.textContent.trim()}"`);
+    }
+    return { scrollers: [...new Set(scrollers)].slice(0, 8), wrapped: [...new Set(wrapped)].slice(0, 8) };
+  });
   await page.screenshot({ path: `${out}/${name}.png`, fullPage: true });
   const height = await page.evaluate(() => document.documentElement.scrollHeight);
   const view = page.viewportSize().height;
@@ -56,6 +74,8 @@ async function report(name) {
   }
   await page.evaluate(() => window.scrollTo(0, 0));
   console.log(`${name}: pageOverflow=${overflow.page} ${overflow.sample.join(' | ')}`);
+  if (hidden.scrollers.length) console.log(`  sideways: ${hidden.scrollers.join(' | ')}`);
+  if (hidden.wrapped.length) console.log(`  wrapped: ${hidden.wrapped.join(' | ')}`);
 }
 
 const click = async (role, name) => { const l = page.getByRole(role, { name }).first(); if (await l.count()) await l.click(); };
@@ -69,7 +89,17 @@ await click('button', /Analysis/); await page.waitForTimeout(6000); await report
 await click('button', /Fundamentals/); await page.waitForTimeout(5000); await report('04-stock-fundamentals');
 await click('button', /News/); await page.waitForTimeout(5000); await report('05-stock-news');
 await page.goto(`${base}/#ideas`); await page.waitForTimeout(6000); await report('06-ideas');
-await click('button', /Wheel/); await page.waitForTimeout(6000); await report('07-ideas-wheel');
+const ideasTab = async (name, file, wait = 6000) => {
+  await page.getByRole('navigation', { name: 'Ideas views' }).getByRole('button', { name }).click().catch(() => {});
+  await page.waitForTimeout(wait); await report(file);
+};
+await ideasTab(/In play/, '06a-ideas-inplay');
+await ideasTab(/Setups/, '06b-ideas-setups');
+await ideasTab(/Unusual options/, '06c-ideas-unusual', 20000);
+await ideasTab(/Insider buying/, '06d-ideas-insiders', 10000);
+await ideasTab(/Macro calendar/, '06e-ideas-macro');
+await ideasTab(/Options track record/, '06f-ideas-track-record');
+await ideasTab(/Wheel/, '07-ideas-wheel');
 await page.goto(`${base}/#watchlist`); await page.waitForTimeout(8000); await report('08-watchlist');
 await page.goto(`${base}/#portfolio`); await page.waitForTimeout(7000); await report('09-portfolio-holdings');
 await click('button', /^Options/); await page.waitForTimeout(3000); await report('10-portfolio-options');

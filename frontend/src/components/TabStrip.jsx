@@ -7,7 +7,8 @@ const glue = child => {
   const match = typeof text === 'string' && text.match(LEAD);
   if (!match) return child;
   if (!match[2]) return cloneElement(child, { className: `${child.props.className || ''} nowrap` });
-  return cloneElement(child, {}, <><span className="nowrap">{match[1]}</span>{match[2]}</>);
+  // One inline wrapper: as separate flex items the space after the first word would be dropped
+  return cloneElement(child, {}, <span><span className="nowrap">{match[1]}</span>{match[2]}</span>);
 };
 
 /** Sub-tab strip that scrolls sideways when the tabs don't fit, with fade edges and arrow buttons instead of a scrollbar. */

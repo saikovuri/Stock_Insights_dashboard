@@ -101,7 +101,7 @@ export default function InPlay({ onSelect }) {
         </label>
       </div>
       <div className="table-scroll">
-        <table className="market-table inplay-table">
+        <table className="market-table inplay-table phone-cards">
           <thead>
             <tr>
               <th>Stock</th><th>Price</th><th>Change</th><th>Gap <Tip term="gap" /></th>
@@ -113,22 +113,22 @@ export default function InPlay({ onSelect }) {
             {rows.map(r => (
               <tr key={r.symbol} onClick={() => onSelect(r.symbol)}>
                 <td><strong>{r.symbol}</strong><div className="market-sub inplay-name">{r.name}</div></td>
-                <td>${r.price}</td>
-                <td className={cls(r.change_pct)}><strong>{pct(r.change_pct)}</strong></td>
-                <td className={cls(r.gap_pct)}>{pct(r.gap_pct)}</td>
-                <td className="market-sub">
+                <td data-label="Price">${r.price}</td>
+                <td data-label="Change" className={cls(r.change_pct)}><strong>{pct(r.change_pct)}</strong></td>
+                <td data-label="Gap" className={cls(r.gap_pct)}>{pct(r.gap_pct)}</td>
+                <td data-label="Pre / Post" className="market-sub">
                   {r.premarket_pct != null && <span className={cls(r.premarket_pct)}>PM {pct(r.premarket_pct)} </span>}
                   {r.postmarket_pct != null && <span className={cls(r.postmarket_pct)}>AH {pct(r.postmarket_pct)}</span>}
                   {r.premarket_pct == null && r.postmarket_pct == null && '—'}
                 </td>
-                <td className={r.rvol >= bars.hot ? 'positive' : r.rvol >= bars.warm ? 'rvol-warm' : ''}><strong>{r.rvol}×</strong></td>
-                <td>{vol(r.volume)}</td>
-                <td>{cap(r.market_cap)}</td>
-                <td className={r.short_pct >= 15 ? 'negative' : ''}>
+                <td data-label="Rel vol" className={r.rvol >= bars.hot ? 'positive' : r.rvol >= bars.warm ? 'rvol-warm' : ''}><strong>{r.rvol}×</strong></td>
+                <td data-label="Volume">{vol(r.volume)}</td>
+                <td data-label="Mkt cap">{cap(r.market_cap)}</td>
+                <td data-label="Short %" className={r.short_pct >= 15 ? 'negative' : ''}>
                   {r.short_pct != null ? `${r.short_pct}%` : '—'}
                   {r.days_to_cover >= 5 && <span className="market-sub"> ({r.days_to_cover}d)</span>}
                 </td>
-                <td className="inplay-catalyst" onClick={e => e.stopPropagation()}>
+                <td className="inplay-catalyst card-wide" data-label="Catalyst" onClick={e => e.stopPropagation()}>
                   {r.catalyst ? (
                     r.catalyst.url
                       ? <a href={r.catalyst.url} target="_blank" rel="noopener noreferrer" title={r.catalyst.headline}>

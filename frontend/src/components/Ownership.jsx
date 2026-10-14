@@ -70,7 +70,7 @@ export default function Ownership({ ticker }) {
 
       {tab === 'institutional' && institutional_holders?.length > 0 && (
         <div className="financials-table-wrap">
-          <table className="analyst-table">
+          <table className="analyst-table phone-cards">
             <thead>
               <tr><th>Holder</th><th>Shares</th><th>Value</th><th>% Out</th><th>Date Reported</th></tr>
             </thead>
@@ -78,10 +78,10 @@ export default function Ownership({ ticker }) {
               {institutional_holders.map((h, i) => (
                 <tr key={i}>
                   <td>{h.Holder || h.holder || '—'}</td>
-                  <td>{formatNum(h.Shares || h.shares)}</td>
-                  <td>{formatNum(h.Value || h.value)}</td>
-                  <td>{h['% Out'] != null ? `${(h['% Out'] * 100).toFixed(2)}%` : h.pctHeld != null ? `${(h.pctHeld * 100).toFixed(2)}%` : '—'}</td>
-                  <td>{h['Date Reported'] || h.dateReported || '—'}</td>
+                  <td data-label="Shares">{formatNum(h.Shares || h.shares)}</td>
+                  <td data-label="Value">{formatNum(h.Value || h.value)}</td>
+                  <td data-label="% Out">{h['% Out'] != null ? `${(h['% Out'] * 100).toFixed(2)}%` : h.pctHeld != null ? `${(h.pctHeld * 100).toFixed(2)}%` : '—'}</td>
+                  <td data-label="Reported">{h['Date Reported'] || h.dateReported || '—'}</td>
                 </tr>
               ))}
             </tbody>
@@ -91,9 +91,9 @@ export default function Ownership({ ticker }) {
 
       {tab === 'insider' && insider_transactions?.length > 0 && (
         <div className="financials-table-wrap">
-          <table className="analyst-table">
+          <table className="analyst-table phone-cards">
             <thead>
-              <tr><th>Insider</th><th>Relation</th><th>Transaction</th><th>Shares</th><th>Value</th><th>Date</th></tr>
+              <tr><th>Insider</th><th>Transaction</th><th>Shares</th><th>Value</th><th>Date</th></tr>
             </thead>
             <tbody>
               {insider_transactions.map((t, i) => {
@@ -102,12 +102,11 @@ export default function Ownership({ ticker }) {
                 const isSell = /sale|sell|disposition/i.test(txnText);
                 return (
                   <tr key={i}>
-                    <td>{t.Insider || t['Insider Trading'] || t.insider || '—'}</td>
-                    <td>{t.Relationship || t.Position || t.relation || '—'}</td>
-                    <td className={isBuy ? 'positive' : isSell ? 'negative' : ''}>{txnText || '—'}</td>
-                    <td>{formatNum(t.Shares || t.shares || t['Shares Traded'])}</td>
-                    <td>{formatNum(t.Value || t.value || t['Value'])}</td>
-                    <td>{t['Start Date'] || t.startDate || t.Date || t.date || '—'}</td>
+                    <td>{t.Insider || t['Insider Trading'] || t.insider || '—'} <span className="market-sub">{t.Relationship || t.Position || t.relation || ''}</span></td>
+                    <td data-label="Transaction" className={`card-wide ${isBuy ? 'positive' : isSell ? 'negative' : ''}`}>{txnText || '—'}</td>
+                    <td data-label="Shares">{formatNum(t.Shares || t.shares || t['Shares Traded'])}</td>
+                    <td data-label="Value">{formatNum(t.Value || t.value || t['Value'])}</td>
+                    <td data-label="Date">{t['Start Date'] || t.startDate || t.Date || t.date || '—'}</td>
                   </tr>
                 );
               })}

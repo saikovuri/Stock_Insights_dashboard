@@ -83,15 +83,15 @@ export function AccountBar({ account, onChange, version, onCashSaved, compact = 
       {error && <p className="error-text" role="alert">{error}</p>}
       {!data && !error && <div className="skeleton skeleton-line" aria-hidden="true" />}
       {data && (
-        <div className="table-scroll"><table className="market-table account-table">
+        <div className="table-scroll"><table className="market-table account-table phone-cards">
           <thead><tr><th>Account</th><th>Cash</th><th title="Strike × 100 × contracts for open short puts">Put collateral</th><th>Free cash</th><th>Cash updated</th></tr></thead>
           <tbody>{shown.map(a => (
             <tr key={a.name}>
-              <td>{a.name}</td><td>{money(a.cash)}</td><td>{money(a.put_collateral)}</td>
-              <td className={a.free_cash != null && a.free_cash < 0 ? 'negative' : ''}>{a.cash == null
+              <td><strong>{a.name}</strong></td><td data-label="Cash">{money(a.cash)}</td><td data-label="Put collateral">{money(a.put_collateral)}</td>
+              <td data-label="Free cash" className={a.free_cash != null && a.free_cash < 0 ? 'negative' : ''}>{a.cash == null
                 ? <button className="link-btn" onClick={() => onChange(a.name)} title={`Select ${a.name} to enter its cash balance`}>Enter cash</button>
                 : money(a.free_cash)}</td>
-              <td>{a.cash_updated_at ? new Date(a.cash_updated_at).toLocaleString() : '—'}</td>
+              <td data-label="Updated">{a.cash_updated_at ? new Date(a.cash_updated_at).toLocaleString() : '—'}</td>
             </tr>))}
           </tbody>
         </table></div>

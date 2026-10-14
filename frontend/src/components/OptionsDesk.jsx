@@ -255,17 +255,17 @@ export function Ledger({ version }) {
       <div className="doctor-stats"><div><span>Combined stock and option P&L</span><strong className={cls(d.total_pnl)}>{usd(d.total_pnl)}</strong></div></div>
       {d.incomplete && <p className="error-text">Missing quotes: combined P&L is incomplete.</p>}
       {d.capital_requirements?.uncovered_calls > 0 && <p className="error-text">{d.capital_requirements.uncovered_calls} uncovered call contracts: collateral cannot bound this risk.</p>}
-      <table className="market-table">
+      <table className="market-table phone-cards">
         <thead><tr><th>Stock</th><th>Since</th><th>Realized options</th><th>Shares · cost</th><th>Total P&L</th><th>Current capital</th></tr></thead>
         <tbody>
           {d.rows.map(r => (
             <tr key={r.ticker}>
               <td><strong>{r.ticker}</strong><div className="market-sub">{r.cycles} trade{r.cycles !== 1 ? 's' : ''}{r.open_shorts ? `, ${r.open_shorts} open` : ''}</div></td>
-              <td>{fmtDate(r.since)}</td>
-              <td className={cls(r.premium_kept)}>{usd(r.premium_kept)}</td>
-              <td>{r.shares ? <>{r.shares} @ ${r.avg_cost}</> : '—'}</td>
-              <td className={cls(r.total_pnl)}><strong>{usd(r.total_pnl)}</strong></td>
-              <td>{usd(r.capital)}</td>
+              <td data-label="Since">{fmtDate(r.since)}</td>
+              <td data-label="Realized options" className={cls(r.premium_kept)}>{usd(r.premium_kept)}</td>
+              <td data-label="Shares · cost">{r.shares ? <>{r.shares} @ ${r.avg_cost}</> : '—'}</td>
+              <td data-label="Total P&L" className={cls(r.total_pnl)}><strong>{usd(r.total_pnl)}</strong></td>
+              <td data-label="Current capital">{usd(r.capital)}</td>
             </tr>
           ))}
         </tbody>

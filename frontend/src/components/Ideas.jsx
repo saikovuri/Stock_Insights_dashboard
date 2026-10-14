@@ -109,17 +109,17 @@ function InsiderBuying({ onSelect }) {
   if (!data) return <div className="card"><p className="loading-text">Reading 30 days of SEC Form 4 filings…</p></div>;
   const table = (rows, cluster) => (
     <div className="table-scroll">
-      <table className="market-table">
+      <table className="market-table phone-cards">
         <thead><tr><th>Stock</th>{cluster && <th>Insiders</th>}<th>Total bought</th><th>Avg price</th><th>Last buy</th><th>Who</th></tr></thead>
         <tbody>
           {rows.map(g => (
             <tr key={g.symbol} onClick={() => onSelect(g.symbol)}>
               <td><strong>{g.symbol}</strong></td>
-              {cluster && <td><span className="rs-badge rs-strong">{g.insiders}</span></td>}
-              <td className="positive"><strong>{money(g.total_value)}</strong></td>
-              <td>${g.avg_price}</td>
-              <td>{g.last_date}</td>
-              <td className="market-sub">{g.names.join(', ')}</td>
+              {cluster && <td data-label="Insiders"><span className="rs-badge rs-strong">{g.insiders}</span></td>}
+              <td data-label="Total bought" className="positive"><strong>{money(g.total_value)}</strong></td>
+              <td data-label="Avg price">${g.avg_price}</td>
+              <td data-label="Last buy">{g.last_date}</td>
+              <td data-label="Who" className="market-sub card-wide">{g.names.join(', ')}</td>
             </tr>
           ))}
         </tbody>
@@ -165,18 +165,18 @@ function TrackRecord() {
         </p>
       ) : (
         <div className="table-scroll">
-          <table className="market-table">
+          <table className="market-table phone-cards">
             <thead><tr><th>Idea</th><th>Count</th><th>Avg delta</th><th>Profitable</th><th>Kept full premium</th><th>Avg return on risk</th><th>Worst</th></tr></thead>
             <tbody>
               {data.groups.map(g => (
                 <tr key={g.kind + g.label}>
                   <td><strong>{g.name}</strong>{g.label && <span className="market-sub"> · {g.label}</span>}</td>
-                  <td>{g.ideas}</td>
-                  <td>{g.avg_delta}</td>
-                  <td className={g.win_rate >= 60 ? 'positive' : g.win_rate < 45 ? 'negative' : ''}><strong>{g.win_rate}%</strong></td>
-                  <td>{g.expired_worthless_pct != null ? `${g.expired_worthless_pct}%` : '—'}</td>
-                  <td className={g.avg_return_on_risk_pct >= 0 ? 'positive' : 'negative'}>{pct(g.avg_return_on_risk_pct)}</td>
-                  <td className="negative">{pct(g.worst_pct)}</td>
+                  <td data-label="Count">{g.ideas}</td>
+                  <td data-label="Avg delta">{g.avg_delta}</td>
+                  <td data-label="Profitable" className={g.win_rate >= 60 ? 'positive' : g.win_rate < 45 ? 'negative' : ''}><strong>{g.win_rate}%</strong></td>
+                  <td data-label="Kept full premium">{g.expired_worthless_pct != null ? `${g.expired_worthless_pct}%` : '—'}</td>
+                  <td data-label="Avg return on risk" className={g.avg_return_on_risk_pct >= 0 ? 'positive' : 'negative'}>{pct(g.avg_return_on_risk_pct)}</td>
+                  <td data-label="Worst" className="negative">{pct(g.worst_pct)}</td>
                 </tr>
               ))}
             </tbody>

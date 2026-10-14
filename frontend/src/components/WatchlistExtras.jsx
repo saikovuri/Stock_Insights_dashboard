@@ -33,16 +33,16 @@ export function BuyZones({ onSelect }) {
     {!data && !error && <p className="loading-text">Checking prices and put quotes…</p>}
     {data && !data.items.length && <p className="empty-state">No buy zones yet.</p>}
     {data?.items.length > 0 && <>
-      <div className="table-scroll"><table className="market-table" aria-label="Buy zones">
+      <div className="table-scroll"><table className="market-table phone-cards" aria-label="Buy zones">
         <thead><tr><th>Stock</th><th>Buy at</th><th>Price</th><th>Away</th><th>Put to wait (≈35 days)</th><th><span className="sr-only">Actions</span></th></tr></thead>
         <tbody>{data.items.map(row => <tr key={row.ticker} className="no-click">
           <td><button className="link-btn" onClick={() => onSelect?.(row.ticker)}>{row.ticker}</button></td>
-          <td>{usd(row.target)}</td><td>{usd(row.price)}</td>
-          <td>{row.in_zone ? <strong className="positive">In zone</strong> : row.distance_pct != null ? `${row.distance_pct}% above` : '—'}</td>
-          <td>{row.put ? <>Sell ${row.put.strike} put {row.put.expiry} for ~{usd(row.put.premium)}
+          <td data-label="Buy at">{usd(row.target)}</td><td data-label="Price">{usd(row.price)}</td>
+          <td data-label="Away">{row.in_zone ? <strong className="positive">In zone</strong> : row.distance_pct != null ? `${row.distance_pct}% above` : '—'}</td>
+          <td data-label="Put to wait (≈35 days)" className="card-wide">{row.put ? <>Sell ${row.put.strike} put {row.put.expiry} for ~{usd(row.put.premium)}
             <span className="trade-sub">Buy-in {usd(row.put.effective_entry)} if assigned · {usd(row.put.cash_needed)} cash · {row.put.annualized_pct}%/yr · ~{row.put.chance_assigned_pct}% assigned</span></>
             : row.in_zone ? 'At or below your price now' : <span className="market-sub">No liquid put at or below your price</span>}</td>
-          <td><button className="btn-icon" title={`Remove ${row.ticker} buy zone`} aria-label={`Remove ${row.ticker} buy zone`} disabled={busy} onClick={() => save(row.ticker, null)}>✕</button></td>
+          <td className="card-end"><button className="btn-icon" title={`Remove ${row.ticker} buy zone`} aria-label={`Remove ${row.ticker} buy zone`} disabled={busy} onClick={() => save(row.ticker, null)}>✕</button></td>
         </tr>)}</tbody>
       </table></div>
       <p className="market-sub">{data.note} Selling a put obliges you to buy 100 shares per contract at the strike, even if the stock falls far below it.</p>

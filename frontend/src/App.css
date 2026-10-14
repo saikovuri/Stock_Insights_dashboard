@@ -5254,6 +5254,30 @@ button.signal-chip { cursor: pointer; }
   }
   .scanner-sort { display: flex; align-items: center; gap: 0.4rem; margin: 0.3rem 0 0.5rem; flex-wrap: wrap; }
 
+  /* Generic: tables marked .phone-cards become one card per row (first cell is the title, data-label captions the rest) */
+  .table-scroll:has(> .phone-cards), .financials-table-wrap:has(> .phone-cards), .accounting-table:has(> .phone-cards) { overflow: visible; }
+  .phone-cards { display: block; min-width: 0; width: 100%; overflow: visible; }
+  .phone-cards thead { display: none; }
+  .phone-cards tbody { display: flex; flex-direction: column; gap: 0.4rem; }
+  .phone-cards tr {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.3rem 0.6rem; align-items: start;
+    border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem 0.6rem; background: var(--bg-subtle);
+  }
+  .phone-cards.phone-cards.phone-cards tr > td {
+    position: static; box-shadow: none; background: none; border: none; padding: 0; white-space: normal; text-align: left;
+    min-width: 0; max-width: none; font-size: 0.78rem; overflow-wrap: anywhere;
+  }
+  .phone-cards tr > td:first-child, .phone-cards tr > td.card-wide { grid-column: 1 / -1; }
+  .phone-cards tr > td:first-child { font-size: 0.88rem; }
+  .phone-cards tr > td:first-child > div.market-sub { display: inline; margin-left: 0.4rem; }
+  .phone-cards tr > td.card-end { grid-column: -2 / -1; justify-self: end; }
+  .phone-cards td[data-label]::before {
+    content: attr(data-label); display: block; font-size: 0.6rem; color: var(--text-muted); font-weight: 500;
+  }
+  .phone-cards .inplay-name { max-width: none; }
+  .inplay-table.phone-cards tr, .account-table.phone-cards tr { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .phone-cards.phone-cards.phone-cards tr > td.inplay-catalyst { font-size: 0.7rem; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
   /* Trade entry forms: three fields per row instead of one per screen line */
   .portfolio-form.labeled-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.4rem 0.5rem; }
   .portfolio-form.labeled-form > .form-actions, .portfolio-form.labeled-form > .sell-lot-banner { grid-column: 1 / -1; }

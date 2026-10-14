@@ -137,9 +137,9 @@ export default function AnalystRatings({ ticker }) {
       {upgrades_downgrades?.length > 0 && (
         <div className="analyst-upgrades">
           <h4 style={{ margin: '0 0 8px' }}>Recent Upgrades/Downgrades</h4>
-            <table className="analyst-table">
+            <table className="analyst-table phone-cards">
               <thead>
-                <tr><th>Date</th><th>Firm</th><th>Action</th><th>From</th><th>To</th><th>Price Target</th></tr>
+                <tr><th>Firm · date</th><th>Action</th><th>From → To</th><th>Price Target</th></tr>
               </thead>
               <tbody>
                 {upgrades_downgrades.map((u, i) => {
@@ -150,12 +150,10 @@ export default function AnalystRatings({ ticker }) {
                     : '—';
                   return (
                     <tr key={i}>
-                      <td>{u.date}</td>
-                      <td>{u.firm}</td>
-                      <td className={`action-${(ACTIONS[u.action] || [])[1] || u.action?.toLowerCase()}`}>{(ACTIONS[u.action] || [])[0] || u.action}</td>
-                      <td>{u.fromGrade || '—'}</td>
-                      <td>{u.toGrade}</td>
-                      <td>{ptText}</td>
+                      <td><strong>{u.firm}</strong> <span className="market-sub">{u.date}</span></td>
+                      <td data-label="Action" className={`action-${(ACTIONS[u.action] || [])[1] || u.action?.toLowerCase()}`}>{(ACTIONS[u.action] || [])[0] || u.action}</td>
+                      <td data-label="From → To">{u.fromGrade && u.fromGrade !== u.toGrade ? `${u.fromGrade} → ${u.toGrade}` : u.toGrade || '—'}</td>
+                      <td data-label="Price target">{ptText}</td>
                     </tr>
                   );
                 })}

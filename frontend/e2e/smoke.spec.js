@@ -701,6 +701,7 @@ test('header controls and main tabs fit the viewport with a consistent layout', 
   const width = page.viewportSize().width;
   expect(boxes.every(box => box.right <= width + 1 && !box.clipped)).toBe(true);
   expect(new Set(boxes.map(box => box.height)).size).toBe(1);
+  await expect(page.getByRole('navigation', { name: 'Ideas views' }).getByRole('button', { name: /In play/ })).toBeVisible();
   const cells = await page.getByRole('navigation', { name: 'Ideas views' }).getByRole('button')
     .evaluateAll(elements => elements.map(element => element.getBoundingClientRect().right));
   expect(Math.max(...cells)).toBeLessThanOrEqual(width + 1);

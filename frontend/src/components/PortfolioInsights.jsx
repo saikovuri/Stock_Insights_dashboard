@@ -49,14 +49,14 @@ function VsSpy({ version }) {
           </LineChart>
         </ResponsiveContainer>
       )}
-      <table className="market-table">
+      <table className="market-table phone-cards">
         <thead><tr><th>Stock</th><th>Cost</th><th>Value</th><th>Return</th><th>SPY same dates</th><th>vs SPY</th></tr></thead>
         <tbody>
           {d.by_ticker.map(r => (
             <tr key={r.ticker}>
-              <td><strong>{r.ticker}</strong></td><td>{usd(r.cost)}</td><td>{usd(r.value)}</td>
-              <td className={cls(r.return_pct)}>{pct(r.return_pct)}</td><td className={cls(r.spy_return_pct)}>{pct(r.spy_return_pct)}</td>
-              <td className={cls(r.vs_spy)}><strong>{usd(r.vs_spy)}</strong></td>
+              <td><strong>{r.ticker}</strong></td><td data-label="Cost">{usd(r.cost)}</td><td data-label="Value">{usd(r.value)}</td>
+              <td data-label="Return" className={cls(r.return_pct)}>{pct(r.return_pct)}</td><td data-label="SPY same dates" className={cls(r.spy_return_pct)}>{pct(r.spy_return_pct)}</td>
+              <td data-label="vs SPY" className={cls(r.vs_spy)}><strong>{usd(r.vs_spy)}</strong></td>
             </tr>
           ))}
         </tbody>
@@ -124,16 +124,16 @@ function TaxCheck({ version }) {
       {d.lots?.length > 0 && (
         <>
           <h4 className="sub-chart-title">Holding period by lot</h4>
-          <table className="market-table">
+          <table className="market-table phone-cards">
             <thead><tr><th>Stock</th><th>Bought</th><th>Term</th><th>Unrealized</th><th>Note</th></tr></thead>
             <tbody>
               {d.lots.map((l, i) => (
                 <tr key={i}>
                   <td><strong>{l.ticker}</strong> <span className="market-sub">{l.shares} sh</span></td>
-                  <td>{l.acquired} <span className="market-sub">({l.days_held}d)</span></td>
-                  <td>{l.term === 'long' ? 'Long-term' : <>Short-term<div className="market-sub">long-term on {l.long_term_on}</div></>}</td>
-                  <td className={cls(l.gain)}>{usd(l.gain)}</td>
-                  <td className={l.note ? 'rvol-warm' : ''}>{l.note || ''}</td>
+                  <td data-label="Bought">{l.acquired} <span className="market-sub">({l.days_held}d)</span></td>
+                  <td data-label="Term">{l.term === 'long' ? 'Long-term' : <>Short-term<div className="market-sub">long-term on {l.long_term_on}</div></>}</td>
+                  <td data-label="Unrealized" className={cls(l.gain)}>{usd(l.gain)}</td>
+                  <td className={`card-wide ${l.note ? 'rvol-warm' : ''}`}>{l.note || ''}</td>
                 </tr>
               ))}
             </tbody>
