@@ -677,7 +677,7 @@ export default function Portfolio() {
         ) : (
         <div className="holdings-stack">
           <div className="portfolio-form labeled-form">
-            <div className="form-field">
+            <div className="form-field form-field-wide">
               <label htmlFor="opt-action">Action</label>
               <select id="opt-action" value={optForm.action}
                 onChange={(e) => setOptForm({ ...optForm, action: e.target.value,
@@ -893,7 +893,7 @@ export default function Portfolio() {
       )}
       {!isGuest && <section className="data-tools" aria-label="Data tools">
         <h3>Data tools</h3>
-        <details className="portfolio-section" id="import-csv"><summary>Import from broker CSV</summary><ImportCsv account={account} onImported={() => { loadStocks(); loadOptions(); loadClosed(); }} /></details>
+        <details className="card" id="import-csv"><summary>Import from broker CSV</summary><ImportCsv account={account} onImported={() => { loadStocks(); loadOptions(); loadClosed(); }} /></details>
         <CorporateActions version={transferRevision} onApplied={() => { loadStocks(); loadOptions(); }} />
         <AccountTransfer onImported={() => { loadStocks(); loadOptions(); loadClosed(); setTransferRevision(value => value + 1); }} />
       </section>}

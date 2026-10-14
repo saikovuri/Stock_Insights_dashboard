@@ -11,7 +11,14 @@ function useIsMobile(bp = 600) {
   return m;
 }
 
+const compactUsd = v => {
+  const a = Math.abs(v);
+  const s = a >= 1e6 ? `${(a / 1e6).toFixed(a >= 1e7 ? 0 : 1)}M` : a >= 1e3 ? `${Math.round(a / 1e3)}K` : `${Math.round(a)}`;
+  return `${v < 0 ? '-' : ''}$${s}`;
+};
+
 export default function PortfolioChart({ holdings, closedTrades }) {
+  const isMobile = useIsMobile();
   // Build a simple portfolio value timeline from closed trades + current holdings
   const chartData = useMemo(() => {
     if (!holdings?.length && !closedTrades?.trades?.length) return [];
@@ -70,7 +77,6 @@ export default function PortfolioChart({ holdings, closedTrades }) {
   const lastVal = chartData[chartData.length - 1]?.[dataKey] || 0;
   const firstVal = chartData[0]?.[dataKey] || 0;
   const isUp = lastVal >= firstVal;
-  const isMobile = useIsMobile();
 
   return (
     <div className="glass-card portfolio-chart-card">
@@ -84,7 +90,7 @@ export default function PortfolioChart({ holdings, closedTrades }) {
             </linearGradient>
           </defs>
           <XAxis dataKey="date" tick={{ fill: 'var(--chart-text, #b0b8c8)', fontSize: isMobile ? 9 : 10 }} />
-          <YAxis tick={{ fill: 'var(--chart-text, #b0b8c8)', fontSize: isMobile ? 9 : 11 }} tickFormatter={v => `$${v.toLocaleString()}`} width={isMobile ? 50 : 70} />
+          <YAxis tick={{ fill: 'var(--chart-text, #b0b8c8)', fontSize: isMobile ? 9 : 11 }} tickFormatter={compactUsd} width={isMobile ? 42 : 56} />
           <Tooltip
             contentStyle={{ background: 'rgba(30,30,50,0.95)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, color: '#fff' }}
             formatter={(v) => [`$${v.toLocaleString()}`, isSimple ? 'Value' : 'Cumulative P&L']}

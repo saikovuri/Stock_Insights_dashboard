@@ -4588,6 +4588,7 @@ tr.alert-triggered {
 .ivrank-help { margin: 0.5rem 0 0; padding-left: 1.1rem; font-size: 0.8rem; color: var(--text-secondary); display: flex; flex-direction: column; gap: 0.25rem; }
 .income-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.9rem; margin: 0.5rem 0 0.75rem; }
 .income-controls label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.75rem; color: var(--text-muted); }
+.income-controls label.prepost-toggle { flex-direction: row; align-items: center; gap: 0.45rem; }
 .income-controls .tool-input { width: 130px; }
 .income-warning {
   background: rgba(251, 191, 36, 0.1); border-left: 3px solid #fbbf24; padding: 0.5rem 0.75rem;
@@ -4625,7 +4626,7 @@ tr.alert-triggered {
 .tv-chart-wrap { position: relative; width: 100%; margin-top: 0.5rem; }
 .tv-chart { position: absolute; inset: 0; }
 .tv-legend {
-  position: absolute; top: 4px; left: 8px; z-index: 3; pointer-events: none;
+  position: absolute; top: 4px; left: 8px; right: 72px; z-index: 3; pointer-events: none;
   display: flex; flex-wrap: wrap; gap: 0.2rem 0.75rem; font-size: 0.75rem; color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
 }
@@ -4855,8 +4856,11 @@ button.signal-chip { cursor: pointer; }
 
 .key-levels { margin-top: 0.75rem; }
 .key-levels ul { list-style: none; padding: 0; margin: 0.3rem 0 0; display: flex; flex-direction: column; gap: 0.35rem; font-size: 0.88rem; }
-.key-levels li { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; }
-.key-level-btn { margin-left: auto; padding: 0.15rem 0.5rem; font-size: 0.75rem; }
+/* Level text on the left (wraps), Alert button pinned right on the same row */
+.key-levels li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 0.5rem; }
+.key-levels li > .error-text { grid-column: 1 / -1; }
+.key-level-text { min-width: 0; }
+.key-level-btn { padding: 0.15rem 0.5rem; font-size: 0.75rem; white-space: nowrap; }
 
 .journal-plan-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 1rem; }
 .journal-plan-header h2 { margin: 0; font-size: 1.2rem; }
@@ -5272,6 +5276,9 @@ button.signal-chip { cursor: pointer; }
     min-width: 0; max-width: none; font-size: 0.78rem; overflow-wrap: anywhere;
   }
   .phone-cards tr > td:first-child, .phone-cards tr > td.card-wide { grid-column: 1 / -1; }
+  .phone-cards tr > td.card-span-2 { grid-column: span 2; }
+  .desk-head .desk-meta { flex-basis: 100%; }
+  .desk-head .desk-dot { display: none; }
   .phone-cards tr > td:first-child { font-size: 0.88rem; }
   .phone-cards tr > td:first-child > div.market-sub { display: inline; margin-left: 0.4rem; }
   .phone-cards tr > td.card-end { grid-column: -2 / -1; justify-self: end; }
@@ -5279,12 +5286,14 @@ button.signal-chip { cursor: pointer; }
     content: attr(data-label); display: block; font-size: 0.6rem; color: var(--text-muted); font-weight: 500;
   }
   .phone-cards .inplay-name { max-width: none; }
+  .er-table td.er-date { white-space: nowrap; }
   .inplay-table.phone-cards tr, .account-table.phone-cards tr { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .phone-cards.phone-cards.phone-cards tr > td.inplay-catalyst { font-size: 0.7rem; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 
   /* Trade entry forms: three fields per row instead of one per screen line */
   .portfolio-form.labeled-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.4rem 0.5rem; }
   .portfolio-form.labeled-form > .form-actions, .portfolio-form.labeled-form > .sell-lot-banner { grid-column: 1 / -1; }
+  .portfolio-form.labeled-form > .form-field-wide { grid-column: span 2; }
   .labeled-form .form-field label { font-size: 0.66rem; }
 
   /* Holdings rows: P/L on the right, actions always on their own line */

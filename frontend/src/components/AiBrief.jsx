@@ -42,8 +42,10 @@ function KeyLevels({ data }) {
           const dist = ((l.price / price - 1) * 100).toFixed(1);
           return (
             <li key={l.price}>
-              <strong className={l.price >= price ? 'positive' : 'negative'}>${l.price}</strong>
-              <span className="market-sub"> ({dist > 0 ? '+' : ''}{dist}%)</span> {l.label}
+              <span className="key-level-text">
+                <strong className={l.price >= price ? 'positive' : 'negative'}>${l.price}</strong>
+                <span className="market-sub"> ({dist > 0 ? '+' : ''}{dist}%)</span> {l.label}
+              </span>
               <button className="btn-secondary btn-sm key-level-btn" onClick={() => add(l)} disabled={!!state}
                 title={`Alert when price ${l.price >= price ? 'rises above' : 'falls below'} $${l.price}`}>
                 {state === 'done' ? '✓ Alert set' : state === 'saving' ? '…' : state ? '⚠' : '🔔 Alert me'}

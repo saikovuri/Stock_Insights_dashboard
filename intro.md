@@ -330,7 +330,7 @@ The text "premium expensive/cheap" is relative to these heuristics. It is not an
 
 ### Earnings Moves
 
-The earnings panel compares up to 12 historical report reactions with the currently priced ATM straddle for the next event. Before-open and after-close reports use different close-to-close pairs. The next earnings date must be within 45 days to calculate its implied move; the expiry must cover the reaction day. Implied move is `(ATM call midpoint + ATM put midpoint) / spot`, not the same calculation as a one-standard-deviation IV range.
+The earnings panel compares up to 12 historical report reactions with the currently priced ATM straddle for the next event. The table lists the 4 most recent reports, with **Show all N reports** for the rest; the summary line above it always covers every listed report. Before-open and after-close reports use different close-to-close pairs. The next earnings date must be within 45 days to calculate its implied move; the expiry must cover the reaction day. Implied move is `(ATM call midpoint + ATM put midpoint) / spot`, not the same calculation as a one-standard-deviation IV range.
 
 Implied move divided by average absolute historical reaction is called rich at >=1.2, cheap at <=0.85, otherwise fair. Historical implied estimates exist only when the app actually saved a snapshot on the prior calendar day during market hours; missing snapshots are not reconstructed. Small samples and changing event conditions limit this comparison.
 

@@ -58,9 +58,10 @@ export default function EarningsIntel({ ticker }) {
   const { user } = useAuth();
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
+  const [allReports, setAllReports] = useState(false);
 
   useEffect(() => {
-    setData(null); setError(null);
+    setData(null); setError(null); setAllReports(false);
     fetchEarningsIntel(ticker).then(setData).catch(e => setError(e.message));
   }, [ticker]);
 
@@ -92,12 +93,13 @@ export default function EarningsIntel({ ticker }) {
       )}
 
       {data.history.length > 0 && (
+        <>
         <table className="market-table er-table">
           <thead><tr><th>Date</th><th>EPS est → actual</th><th>Surprise</th><th>Next-day move</th></tr></thead>
           <tbody>
-            {data.history.map(h => (
+            {(allReports ? data.history : data.history.slice(0, 4)).map(h => (
               <tr key={h.date}>
-                <td>{fmtDate(h.date)}<div className="market-sub">{h.timing}</div></td>
+                <td className="er-date">{fmtDate(h.date)}<div className="market-sub">{h.timing}</div></td>
                 <td>{h.eps_estimate != null ? `$${h.eps_estimate}` : '—'} → <b>${h.eps_actual}</b></td>
                 <td className={h.surprise_pct > 0 ? 'positive' : h.surprise_pct < 0 ? 'negative' : ''}>{h.surprise_pct != null ? `${h.surprise_pct > 0 ? '+' : ''}${h.surprise_pct}%` : '—'}</td>
                 <td>
@@ -110,6 +112,12 @@ export default function EarningsIntel({ ticker }) {
             ))}
           </tbody>
         </table>
+        {data.history.length > 4 && (
+          <button type="button" className="clamp-toggle" onClick={() => setAllReports(v => !v)}>
+            {allReports ? 'Show fewer ▴' : `Show all ${data.history.length} reports ▾`}
+          </button>
+        )}
+        </>
       )}
 
       {user && <ReleaseSummary ticker={ticker} />}

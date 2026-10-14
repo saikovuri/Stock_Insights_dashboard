@@ -48,8 +48,8 @@ export function Today({ version, onRepair, onAssign }) {
         <div key={p.id} className="desk-item">
           <div className="desk-head">
             <strong>{p.ticker}</strong> {p.position} ${p.strike} {p.type} · {fmtDate(p.expiry)} ({p.dte}d)
-            <span className="market-sub">
-              {' '}· stock ${p.spot}{p.mid != null && ` · mark $${p.mid}`}{p.delta != null && ` · Δ ${p.delta}`}
+            <span className="market-sub desk-meta">
+              <span className="desk-dot">{' '}· </span>stock ${p.spot}{p.mid != null && ` · mark $${p.mid}`}{p.delta != null && ` · Δ ${p.delta}`}
               {p.profit_captured_pct > 0 && ` · ${p.profit_captured_pct}% of max profit`}
             </span>
             {p.pnl != null && <strong className={`desk-pnl ${cls(p.pnl)}`}>{usd(p.pnl)}</strong>}
@@ -81,18 +81,18 @@ export function Earnings({ version }) {
     <>
       {d.unavailable?.length > 0 && <p className="error-text">Earnings dates unavailable: {d.unavailable.join(', ')}. Event risk is not cleared.</p>}
       {d.upcoming.length === 0 ? <p className="empty-state">No known reports in the next 30 days.</p> : (
-        <table className="market-table">
+        <table className="market-table phone-cards">
           <thead><tr><th>Stock</th><th>Reports</th><th>Typical move</th><th>Your exposure</th></tr></thead>
           <tbody>
             {d.upcoming.map(r => (
               <tr key={r.ticker}>
                 <td><strong>{r.ticker}</strong></td>
-                <td>
+                <td data-label="Reports" className="card-span-2">
                   {fmtDate(r.date)}{!r.confirmed && ' (est.)'} <span className="market-sub">in {r.days}d{r.timing ? `, ${r.timing}` : ''}</span>
                   {r.alt && <div className="market-sub">other source: {fmtDate(r.alt)}</div>}
                 </td>
-                <td>{r.avg_move_pct != null ? `±${r.avg_move_pct}%` : '—'}</td>
-                <td>
+                <td data-label="Typical move">{r.avg_move_pct != null ? `±${r.avg_move_pct}%` : '—'}</td>
+                <td data-label="Your exposure" className="card-wide">
                   {r.shares > 0 && <div>{r.shares} shares{r.dollar_move ? ` ≈ ±${usd(r.dollar_move)}` : ''}</div>}
                   {r.options.map(o => (
                     <div key={o.id} className={o.position === 'short' ? 'rvol-warm' : ''}>

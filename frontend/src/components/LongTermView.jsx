@@ -90,7 +90,7 @@ export default function LongTermView({ ticker }) {
         <div className="card">
           <h4 className="sub-chart-title">Revenue, net income & free cash flow ($B)</h4>
           <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={years}>
+            <BarChart data={years} margin={{ top: 5, right: 16, left: -8, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis dataKey="year" {...axis} /><YAxis {...axis} />
               <Tooltip {...tip} /><Legend />
@@ -103,7 +103,7 @@ export default function LongTermView({ ticker }) {
         <div className="card">
           <h4 className="sub-chart-title">Margins & returns (%)</h4>
           <ResponsiveContainer width="100%" height={240}>
-            <LineChart data={years}>
+            <LineChart data={years} margin={{ top: 5, right: 16, left: -8, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis dataKey="year" {...axis} /><YAxis {...axis} />
               <Tooltip {...tip} /><Legend />
@@ -148,7 +148,7 @@ export default function LongTermView({ ticker }) {
           )}
           <h4 className="sub-chart-title">Diluted shares (B) — falling = buybacks</h4>
           <ResponsiveContainer width="100%" height={120}>
-            <LineChart data={years}>
+            <LineChart data={years} margin={{ top: 5, right: 16, left: -8, bottom: 0 }}>
               <XAxis dataKey="year" {...axis} /><YAxis {...axis} domain={['auto', 'auto']} />
               <Tooltip {...tip} />
               <Line dataKey="sharesB" name="Shares (B)" stroke="#ec407a" dot={false} connectNulls />
