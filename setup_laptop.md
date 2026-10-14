@@ -117,15 +117,28 @@ sudo apt -y install git curl ufw unattended-upgrades
 sudo timedatectl set-timezone Etc/UTC     # the scheduler converts to New York time itself
 ```
 
-Automatic security updates, with a reboot (only when an update needs one) at 08:30 UTC, which is before the US pre-market:
+Production uses **manual updates** (chosen 2026-10-13, so the laptop never upgrades or asks to reboot on its own). This turns off automatic upgrades, the daily update checks and snap auto-refresh:
 
 ```bash
-sudo dpkg-reconfigure -plow unattended-upgrades     # answer "Yes"
-sudo tee /etc/apt/apt.conf.d/52stockpilot > /dev/null << 'EOF'
-Unattended-Upgrade::Automatic-Reboot "true";
-Unattended-Upgrade::Automatic-Reboot-Time "08:30";
+sudo systemctl disable --now unattended-upgrades.service apt-daily.timer apt-daily-upgrade.timer
+sudo tee /etc/apt/apt.conf.d/20auto-upgrades > /dev/null << 'EOF'
+APT::Periodic::Update-Package-Lists "0";
+APT::Periodic::Unattended-Upgrade "0";
 EOF
+sudo rm -f /etc/apt/apt.conf.d/52stockpilot
+sudo snap refresh --hold
 ```
+
+The trade-off: security fixes only arrive when you install them. **Once a month, outside market hours (US market hours are 13:30–20:00 UTC):**
+
+```bash
+sudo apt update && sudo apt -y full-upgrade && sudo snap refresh
+[ -f /var/run/reboot-required ] && sudo reboot      # reboots only if an update needs it
+```
+
+Everything (backend, Funnel, auto-deploy) starts again by itself after a reboot.
+
+To go back to automatic security updates instead: `sudo dpkg-reconfigure -plow unattended-upgrades` (answer "Yes") and `sudo systemctl enable --now apt-daily.timer apt-daily-upgrade.timer`.
 
 ### 2.3 Turn off SSH password logins
 
@@ -383,7 +396,7 @@ The one new risk compared with a cloud VM: the server now sits **inside your hom
 1. **Put the laptop on your router's guest network** (or an isolated VLAN) so it can reach the internet but not your other devices. Use a cable to a guest LAN port if your router has one; otherwise guest Wi-Fi.
 2. **Keep the tailnet to the laptop alone**, or know that your default Tailscale access policy lets any of your devices reach any other. If you add your PC (6A.4), the laptop can reach the PC too; skip 6A.4 if you don't need remote SSH.
 3. **Protect the Tailscale account** with two-factor authentication on the Google/Microsoft/GitHub login you used. Whoever controls it controls the tailnet.
-4. Keep automatic security updates on (2.2) and don't run other software on this laptop.
+4. Install updates monthly (2.2) and don't run other software on this laptop.
 
 **If the laptop is stolen or you suspect a break-in:**
 1. Tailscale admin console → Machines → stockpilot → **Remove** (the public address stops working).

@@ -337,7 +337,7 @@ Ordered by value for effort. Each item names where to start.
 6. **Restrict sign-up on the public server** (built; needs one setting).
    - `/api/auth/register` is open while `REGISTRATION_CODE` is unset. Each user sees only their own data, but strangers would use your free API quotas.
    - On the VM: `echo 'REGISTRATION_CODE=<a code you choose>' >> ~/stock-insights/backend/.env`, then `sudo systemctl restart stock-insights`. The sign-up form then asks for the code; give it only to people you invite.
-7. **Housekeeping:** once a month, run `npm outdated` / `pip list --outdated`, upgrade one package at a time, run `scripts/check.ps1`, then push.
+7. **Housekeeping:** once a month, run `npm outdated` / `pip list --outdated`, upgrade one package at a time, run `scripts/check.ps1`, then push. On the laptop, install OS updates by hand (automatic upgrades are off): `sudo apt update && sudo apt -y full-upgrade && sudo snap refresh`, then reboot outside market hours if `/var/run/reboot-required` exists ([setup_laptop.md](setup_laptop.md) 2.2).
 8. **Monitoring:**
     - create free Sentry projects and set `SENTRY_DSN` (VM `.env`) and `VITE_SENTRY_DSN` (Vercel) so production errors reach you by email;
     - set up an ntfy topic in the app for phone alerts.

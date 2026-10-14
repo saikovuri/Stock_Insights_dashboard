@@ -36,15 +36,15 @@ $APT update
 $APT full-upgrade
 $APT install git curl ufw unattended-upgrades openssh-server python3
 
-step "2. Time zone and automatic security updates"
+step "2. Time zone; updates are manual (no automatic upgrades or reboots)"
 sudo timedatectl set-timezone Etc/UTC
-echo 'unattended-upgrades unattended-upgrades/enable_auto_updates boolean true' | sudo debconf-set-selections
-sudo dpkg-reconfigure -f noninteractive unattended-upgrades
-# Reboot only when an update needs it, before the US pre-market
-sudo tee /etc/apt/apt.conf.d/52stockpilot > /dev/null << 'EOF'
-Unattended-Upgrade::Automatic-Reboot "true";
-Unattended-Upgrade::Automatic-Reboot-Time "08:30";
+sudo systemctl disable -q --now unattended-upgrades.service apt-daily.timer apt-daily-upgrade.timer || true
+sudo tee /etc/apt/apt.conf.d/20auto-upgrades > /dev/null << 'EOF'
+APT::Periodic::Update-Package-Lists "0";
+APT::Periodic::Unattended-Upgrade "0";
 EOF
+sudo rm -f /etc/apt/apt.conf.d/52stockpilot
+command -v snap > /dev/null && sudo snap refresh --hold > /dev/null || true
 
 step "3. Never sleep (lid closed, idle)"
 sudo mkdir -p /etc/systemd/logind.conf.d
