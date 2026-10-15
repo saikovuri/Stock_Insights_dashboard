@@ -709,11 +709,15 @@ test('header controls and main tabs fit the viewport with a consistent layout', 
   await page.locator('.app-header').screenshot({ path: testInfo.outputPath('header.png') });
 });
 
-test('notification panel stays inside the screen', async ({ page }, testInfo) => {
+test('notification panel stays inside the screen and dismisses one or all', async ({ page }, testInfo) => {
   await page.route('**/api/notifications', route => route.fulfill({ json: { unread: 1, items: [
+    { id: 2, kind: 'alert', title: 'NVDA: Near 52W Low', body: 'NVIDIA is within 5% of its 52-week low', created_at: '2026-10-14T14:00:00+00:00' },
     { id: 1, kind: 'alert', title: 'ORCL: MACD Bearish', body: 'Oracle Corp: MACD crossed below its signal line on Oct 14',
       created_at: '2026-10-14T13:45:51+00:00' }] } }));
   await page.route('**/api/notifications/read', route => route.fulfill({ json: { ok: true } }));
+  const dismissed = [];
+  await page.route('**/api/notifications/*/dismiss', route => { dismissed.push(route.request().url().split('/').at(-2)); return route.fulfill({ json: { dismissed: 1 } }); });
+  await page.route('**/api/notifications/dismiss-all', route => { dismissed.push(route.request().postDataJSON()); return route.fulfill({ json: { dismissed: 1 } }); });
   await page.goto('/#dashboard');
   await page.getByRole('button', { name: /🔔/ }).click();
   const panel = page.locator('.notif-panel');
@@ -724,6 +728,11 @@ test('notification panel stays inside the screen', async ({ page }, testInfo) =>
   expect(box.x + box.width).toBeLessThanOrEqual(width + 1);
   expect(box.y + box.height).toBeLessThanOrEqual(height + 1);
   await panel.screenshot({ path: testInfo.outputPath('notifications.png') });
+  await panel.getByRole('button', { name: 'Dismiss ORCL: MACD Bearish' }).click();
+  await expect(panel.getByText('ORCL: MACD Bearish')).toHaveCount(0);
+  await panel.getByRole('button', { name: 'Clear all' }).click();
+  await expect(panel.getByText(/No alerts yet/)).toBeVisible();
+  expect(dismissed).toEqual(['1', { up_to_id: 2 }]);
 });
 
 test('setup scanner and track record fit the screen as cards on phones', async ({ page }, testInfo) => {

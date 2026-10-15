@@ -454,6 +454,11 @@ def init_db():
             cur.execute(f"ALTER TABLE closed_options ADD COLUMN IF NOT EXISTS {column} TEXT")
         elif column not in [r[1] for r in cur.execute("PRAGMA table_info(closed_options)").fetchall()]:
             cur.execute(f"ALTER TABLE closed_options ADD COLUMN {column} TEXT")
+    # Dismissed rows are hidden but kept so their dedup_key stops the same alert from being re-sent
+    if USE_PG:
+        cur.execute("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS dismissed_at TEXT")
+    elif "dismissed_at" not in [r[1] for r in cur.execute("PRAGMA table_info(notifications)").fetchall()]:
+        cur.execute("ALTER TABLE notifications ADD COLUMN dismissed_at TEXT")
     conn.commit()
 
     # ── Indexes (idempotent for both PG and SQLite) ──
@@ -1194,10 +1199,21 @@ def get_notification(user_id: int, dedup_key: str) -> dict | None:
 def list_notifications(user_id: int, limit: int = 50) -> list[dict]:
     rows = _run(
         f"SELECT id, kind, ticker, title, body, created_at, read_at FROM notifications "
-        f"WHERE user_id={PH} ORDER BY created_at DESC, id DESC LIMIT {PH}",
+        f"WHERE user_id={PH} AND dismissed_at IS NULL ORDER BY created_at DESC, id DESC LIMIT {PH}",
         (user_id, limit), "all",
     )
     return [_decode_notification(r) for r in rows]
+
+
+def dismiss_notifications(user_id: int, notification_id: int | None = None, up_to_id: int | None = None) -> int:
+    """Hide one notification, or every one with id <= up_to_id (what the user saw), from the bell."""
+    now = utc_now().strftime("%Y-%m-%d %H:%M:%S")
+    where, params = f"user_id={PH} AND dismissed_at IS NULL", [now, now, user_id]
+    if notification_id is not None:
+        where, params = where + f" AND id={PH}", params + [notification_id]
+    if up_to_id is not None:
+        where, params = where + f" AND id<={PH}", params + [up_to_id]
+    return _run(f"UPDATE notifications SET dismissed_at={PH}, read_at=COALESCE(read_at, {PH}) WHERE {where}", tuple(params))
 
 
 def mark_notifications_read(user_id: int) -> None:

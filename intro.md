@@ -1188,7 +1188,7 @@ These check the current condition, not necessarily a newly observed crossing. If
 
 ### Notification Bell and Push
 
-The bell displays saved notifications/unread state, polls approximately every two minutes, and includes push settings. On phones the panel opens full-width just below the header and scrolls within the screen. Alert titles read like "ORCL: MACD Bearish" or "AAPL: Near 52W High". Optional ntfy delivery uses a user-configured topic; a random topic can be generated. Treat the topic as sensitive: someone with access to it may see messages depending on the server's access controls. There is no guarantee of instantaneous delivery, and push delivery is not brokerage order execution.
+The bell displays saved notifications/unread state, polls approximately every two minutes, and includes push settings. On phones the panel opens full-width just below the header and scrolls within the screen. Alert titles read like "ORCL: MACD Bearish" or "AAPL: Near 52W High". **×** on a notification dismisses it, and **Clear all** dismisses every notification shown (one that arrives while the panel is open is kept). Dismissed notifications disappear from the bell but stay in the database until the 30-day cleanup, so the same alert is not sent again that day; a dismissed weekly review still opens under Weekly review. There is no undo. Optional ntfy delivery uses a user-configured topic; a random topic can be generated. Treat the topic as sensitive: someone with access to it may see messages depending on the server's access controls. There is no guarantee of instantaneous delivery, and push delivery is not brokerage order execution.
 
 ### Background Schedule
 

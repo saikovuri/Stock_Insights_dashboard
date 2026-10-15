@@ -4691,6 +4691,7 @@ button.signal-chip { cursor: pointer; }
   box-shadow: var(--shadow-lg); z-index: 1000; padding: 0.75rem;
 }
 .notif-panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+.notif-header-actions { display: flex; gap: 0.35rem; }
 /* Phones: the bell isn't at the screen edge, so pin the panel to the viewport instead of the bell */
 @media (max-width: 600px) {
   .notif-panel {
@@ -4708,7 +4709,10 @@ button.signal-chip { cursor: pointer; }
 }
 .notif-msg { margin-top: 0.35rem; color: var(--text-secondary); }
 .notif-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.5rem; }
-.notif-item { border-left: 3px solid var(--accent); padding: 0.4rem 0.6rem; background: var(--bg-subtle); border-radius: 0 6px 6px 0; }
+.notif-item { position: relative; border-left: 3px solid var(--accent); padding: 0.4rem 2rem 0.4rem 0.6rem; background: var(--bg-subtle); border-radius: 0 6px 6px 0; }
+.notif-dismiss { position: absolute; top: 0.15rem; right: 0.15rem; width: 32px; height: 32px; border: none; background: none;
+  color: var(--text-muted); font-size: 1.1rem; line-height: 1; cursor: pointer; border-radius: 6px; }
+.notif-dismiss:hover, .notif-dismiss:focus-visible { color: var(--text); background: var(--border); }
 .notif-alert { border-left-color: var(--accent-secondary); }
 .notif-title { font-weight: 600; font-size: 0.85rem; }
 .notif-body { font-size: 0.8rem; color: var(--text-secondary); white-space: pre-line; }

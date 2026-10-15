@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   fetchNotifications, markNotificationsRead, fetchNotificationSettings, saveNotificationSettings,
+  dismissNotification, dismissAllNotifications,
 } from '../api/stockApi';
 
 const POLL_MS = 120_000;
@@ -71,6 +72,17 @@ export default function NotificationBell() {
     setTopic('stockinsights-' + Array.from(rand, b => b.toString(16).padStart(2, '0')).join(''));
   };
 
+  const dismiss = async (id) => {
+    setItems(list => list.filter(n => n.id !== id));
+    try { await dismissNotification(id); } catch { load(); }
+  };
+
+  const clearAll = async () => {
+    const upTo = Math.max(...items.map(n => n.id));
+    setItems([]);
+    try { await dismissAllNotifications(upTo); } catch { load(); }
+  };
+
   return (
     <div className="notif-wrap" ref={ref}>
       <button className="btn-theme notif-bell" onClick={toggle} title="Notifications">
@@ -80,7 +92,10 @@ export default function NotificationBell() {
         <div className="notif-panel" style={panelTop != null ? { '--notif-top': `${panelTop}px` } : undefined}>
           <div className="notif-panel-header">
             <strong>Notifications</strong>
-            <button className="btn-secondary btn-sm" onClick={openSettings}>⚙️ Push</button>
+            <span className="notif-header-actions">
+              {items.length > 0 && <button className="btn-secondary btn-sm" onClick={clearAll}>Clear all</button>}
+              <button className="btn-secondary btn-sm" onClick={openSettings}>⚙️ Push</button>
+            </span>
           </div>
 
           {showSettings && (
@@ -104,6 +119,7 @@ export default function NotificationBell() {
             <ul className="notif-list">
               {items.map(n => (
                 <li key={n.id} className={`notif-item notif-${n.kind}`}>
+                  <button type="button" className="notif-dismiss" aria-label={`Dismiss ${n.title}`} title="Dismiss" onClick={() => dismiss(n.id)}>×</button>
                   <div className="notif-title">{n.kind === 'briefing' ? '📰' : '⚡'} {n.title}</div>
                   <div className="notif-body">{n.body}</div>
                   <div className="notif-time">{parseTs(n.created_at).toLocaleString()}</div>

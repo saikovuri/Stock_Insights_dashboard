@@ -462,6 +462,22 @@ class FeatureTests(unittest.TestCase):
             self.assertEqual([p["ticker"] for p in self.client.get("/api/journal/plans").json()["items"]], ["MSFT"])
         self.assertEqual(self.client.get("/api/journal/plans").status_code, 401)
 
+    def test_dismissed_notifications_hide_but_still_block_duplicate_alerts(self):
+        uid, other = new_user(), new_user()
+        for key in ("a", "b", "c"):
+            database.add_notification(uid, "alert", f"Alert {key}", "body", key)
+        database.add_notification(other, "alert", "Other", "body", "a")
+        ids = {n["title"]: n["id"] for n in database.list_notifications(uid)}
+        with self.as_user(other):
+            self.client.post(f"/api/notifications/{ids['Alert a']}/dismiss")
+        with self.as_user(uid):
+            self.assertEqual(self.client.post(f"/api/notifications/{ids['Alert a']}/dismiss").json(), {"dismissed": 1})
+            self.assertFalse(database.add_notification(uid, "alert", "Alert a", "body", "a"), "dismissed key must still dedupe")
+            self.assertEqual([n["title"] for n in self.client.get("/api/notifications").json()["items"]], ["Alert c", "Alert b"])
+            self.assertEqual(self.client.post("/api/notifications/dismiss-all", json={"up_to_id": ids["Alert b"]}).json(), {"dismissed": 1})
+            self.assertEqual([n["title"] for n in self.client.get("/api/notifications").json()["items"]], ["Alert c"])
+        self.assertEqual(len(database.list_notifications(other)), 1)
+
     def test_stock_profiles_group_by_industry_and_measure_beta_against_spy(self):
         import market
         import numpy as np

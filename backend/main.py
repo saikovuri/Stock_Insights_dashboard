@@ -988,6 +988,22 @@ def notifications_read(user: dict = Depends(get_current_user)):
     return {"ok": True}
 
 
+class DismissAllRequest(BaseModel):
+    up_to_id: int = Field(gt=0)
+
+
+@app.post("/api/notifications/dismiss-all")
+def notifications_dismiss_all(req: DismissAllRequest, user: dict = Depends(get_current_user)):
+    from database import dismiss_notifications
+    return {"dismissed": dismiss_notifications(int(user["user_id"]), up_to_id=req.up_to_id)}
+
+
+@app.post("/api/notifications/{notification_id}/dismiss")
+def notifications_dismiss(notification_id: int, user: dict = Depends(get_current_user)):
+    from database import dismiss_notifications
+    return {"dismissed": dismiss_notifications(int(user["user_id"]), notification_id=notification_id)}
+
+
 @app.get("/api/notifications/settings")
 def notifications_settings_get(user: dict = Depends(get_current_user)):
     return {"ntfy_topic": get_ntfy_topic(user["user_id"])}

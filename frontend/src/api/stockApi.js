@@ -330,6 +330,8 @@ export async function fetchBriefing(refresh = false) {
 }
 
 // ── Notifications ────────────────────────────────────────────────
+export const dismissNotification = (id) => sendJson(`${BASE}/notifications/${id}/dismiss`, 'POST', null, 'Failed to dismiss notification');
+export const dismissAllNotifications = (upToId) => sendJson(`${BASE}/notifications/dismiss-all`, 'POST', { up_to_id: upToId }, 'Failed to clear notifications');
 export async function fetchNotifications() {
   const res = await authFetch(`${BASE}/notifications`);
   if (!res.ok) throw new Error(await readError(res, 'Failed to load notifications'));
