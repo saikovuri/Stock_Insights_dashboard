@@ -8,5 +8,5 @@ const isNative = Capacitor.isNativePlatform();
 export const API_BASE = import.meta.env.VITE_API_URL
   ? `${import.meta.env.VITE_API_URL}/api`
   : isNative
-    ? 'https://stockpilot.tail112222.ts.nets.net/api'
+    ? 'https://stockpilot.tail112222.ts.net/api'
     : '/api';
