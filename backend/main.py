@@ -222,6 +222,20 @@ def batch_metrics(request: Request, req: BatchMetricsRequest):
     return {"quotes": {r["ticker"]: r for r in results}}
 
 
+@app.post("/api/stock/profiles")
+@limiter.limit("30/minute")
+def stock_profiles(request: Request, req: BatchMetricsRequest):
+    """Industry, sector and 1-year beta per ticker (max 40), for stress scenarios."""
+    from concurrent.futures import ThreadPoolExecutor
+    import market
+    tickers = list(dict.fromkeys(_valid_ticker(t) for t in req.tickers[:40]))
+    if not tickers:
+        return {"profiles": {}}
+    with ThreadPoolExecutor(max_workers=min(len(tickers), 8)) as pool:
+        results = list(pool.map(market.ticker_profile, tickers))
+    return {"profiles": {r["ticker"]: r for r in results}}
+
+
 _INTRADAY = ("1m", "2m", "5m", "15m", "30m", "1h")
 # Extra history so long averages (SMA 200 etc.) are populated from the first visible bar
 _WARMUP = {

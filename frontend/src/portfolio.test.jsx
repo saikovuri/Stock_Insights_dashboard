@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { authFetch } from './api/stockApi';
 import { calculatePosition } from './components/PositionCalculator';
-import { pnlAt } from './components/OptionsDesk';
+import { pnlAt, scopedMove, industryExposure } from './components/OptionsDesk';
 import IncomeIdeas, { eligibleIncomeIdeas } from './components/IncomeIdeas';
 import { alignedCorrelation } from './components/CorrelationHeatmap';
 import { render, screen, fireEvent, cleanup, act, waitFor, within } from '@testing-library/react';
@@ -39,6 +39,7 @@ beforeEach(() => {
   localStorage.clear(); sessionStorage.clear();
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value() { this.open = true; } });
   vi.spyOn(stockApi, 'fetchTradePlans').mockResolvedValue({ items: [] });
+  vi.spyOn(stockApi, 'fetchTickerProfiles').mockResolvedValue({ profiles: {} });
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
@@ -1110,6 +1111,32 @@ test('0DTE baseline retains market time value', () => {
   expect(pnlAt([option], [], 0, 0, 0, false).total).toBe(100);
   expect(pnlAt([option], [], 0, 0, 1, false).total).toBe(200);
   expect(pnlAt([{ ...option, quoted: false }], [], 0, 0, 0, false).total).toBeNull();
+});
+
+test('stress scenario can shock one industry or scale moves by beta', async () => {
+  const profiles = { NVDA: { industry: 'Semiconductors', beta: 2 }, AMD: { industry: 'Semiconductors', beta: 2.5 }, KO: { industry: 'Beverages', beta: 0.5 } };
+  expect(scopedMove('beta', profiles, -10)('NVDA')).toBe(-20);
+  expect(scopedMove('beta', profiles, -50)('AMD')).toBe(-95);
+  expect(scopedMove('beta', profiles, -10)('XYZ')).toBe(-10);
+  expect(scopedMove('group:Semiconductors', profiles, -10)('KO')).toBe(0);
+  const holdings = [{ id: 1, ticker: 'NVDA', shares: 10, current_price: 100, buy_price: 100 },
+    { id: 2, ticker: 'KO', shares: 100, current_price: 60, buy_price: 60 }];
+  const put = { id: 3, ticker: 'AMD', type: 'put', position: 'short', strike: 150, contracts: 1, premium: 3, market_price: 3,
+    quoted: true, current_price: 160, iv: 40, dte: 30 };
+  const exposure = industryExposure([put], holdings, profiles);
+  expect(exposure.map(g => [g.industry, g.stocks, g.puts, Math.round(g.pct)])).toEqual([['Semiconductors', 1000, 15000, 73], ['Beverages', 6000, 0, 27]]);
+  expect(pnlAt([], holdings, scopedMove('group:Semiconductors', profiles, -10), 0, 0, true).total).toBeCloseTo(-100);
+  expect(pnlAt([], holdings, scopedMove('beta', profiles, -10), 0, 0, true).total).toBeCloseTo(-200 - 300);
+  const { WhatIf } = await import('./components/OptionsDesk');
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+  stockApi.fetchTickerProfiles.mockResolvedValue({ profiles });
+  render(<WhatIf options={[put]} holdings={holdings} />);
+  const table = await screen.findByRole('table', { name: 'Exposure by industry' });
+  expect(within(table).getByText('73%').className).toBe('negative');
+  fireEvent.click(within(table).getByRole('button', { name: 'Stress only Semiconductors' }));
+  expect(screen.getByLabelText('Apply move to').value).toBe('group:Semiconductors');
+  expect(screen.getByText(/Only AMD, NVDA move; every other position keeps today's price/)).toBeTruthy();
+  expect(stockApi.fetchTickerProfiles).toHaveBeenCalledWith(['AMD', 'KO', 'NVDA']);
 });
 
 test('income ideas never offer zero contracts or unknown earnings', () => {

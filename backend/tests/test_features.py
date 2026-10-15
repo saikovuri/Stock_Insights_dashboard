@@ -462,6 +462,32 @@ class FeatureTests(unittest.TestCase):
             self.assertEqual([p["ticker"] for p in self.client.get("/api/journal/plans").json()["items"]], ["MSFT"])
         self.assertEqual(self.client.get("/api/journal/plans").status_code, 401)
 
+    def test_stock_profiles_group_by_industry_and_measure_beta_against_spy(self):
+        import market
+        import numpy as np
+        import pandas as pd
+        days = pd.bdate_range("2025-01-01", periods=120)
+        spy = pd.Series(100 * np.cumprod(1 + np.tile([0.01, -0.005, 0.004, -0.008], 30)), index=days)
+        chip = 100 * (1 + 2 * spy.pct_change().fillna(0)).cumprod()
+        closes = {"SPY": spy, "NVDA": chip}
+        metrics = {"NVDA": {"sector": "Technology", "industry": "Semiconductors", "beta": 9},
+                   "XYZ": {"sector": "N/A", "industry": "N/A", "beta": 1.3}}
+
+        def history(ticker, period, interval):
+            if ticker not in closes:
+                raise ValueError("no history")
+            return pd.DataFrame({"Close": closes[ticker]})
+        with patch.object(market, "get_stock_data", side_effect=history), \
+             patch.object(market, "get_key_metrics", side_effect=lambda t: metrics[t]), \
+             patch.object(market, "get_or_fetch", side_effect=lambda key, fetch, ttl: fetch()):
+            profiles = self.client.post("/api/stock/profiles", json={"tickers": ["nvda", "XYZ", "NVDA"]}).json()["profiles"]
+        self.assertEqual(list(profiles), ["NVDA", "XYZ"])
+        self.assertEqual((profiles["NVDA"]["industry"], profiles["NVDA"]["beta"], profiles["NVDA"]["beta_source"]),
+                         ("Semiconductors", 2.0, "1y daily vs SPY"))
+        self.assertEqual((profiles["XYZ"]["industry"], profiles["XYZ"]["beta"], profiles["XYZ"]["beta_source"]),
+                         ("Unknown", 1.3, "provider"))
+        self.assertIn(("SMH", "Semiconductors"), market.SECTORS)
+
     def test_portfolio_fit_scores_correlation_sector_size_and_cash(self):
         import numpy as np
         import pandas as pd

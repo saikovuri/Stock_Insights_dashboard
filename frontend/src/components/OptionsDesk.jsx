@@ -1,9 +1,9 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import TabStrip from './TabStrip';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, Legend, CartesianGrid, ReferenceLine, ComposedChart, Bar } from 'recharts';
 import {
   fetchOptionActions, fetchPortfolioEarnings, fetchWheelLedger, fetchOptionsReview, fetchOptionsCoach,
-  fetchPremiumIncome, saveIncomeGoal,
+  fetchPremiumIncome, saveIncomeGoal, fetchTickerProfiles,
 } from '../api/stockApi';
 import { LimitHint } from './TradeSizing';
 
@@ -139,20 +139,49 @@ function bs(S, K, T, sigma, kind) {
 }
 const unquotedOption = option => option.quoted === false || option.market_price == null || !(option.current_price > 0);
 
+/** Per-ticker % move: every stock equally, the market move times each stock's beta, or one industry only. */
+export function scopedMove(scope, profiles, move) {
+  if (scope === 'beta') return ticker => Math.max(-95, move * (profiles[ticker]?.beta ?? 1));
+  if (scope.startsWith('group:')) {
+    const group = scope.slice(6);
+    return ticker => ((profiles[ticker]?.industry || 'Unknown') === group ? move : 0);
+  }
+  return () => move;
+}
+
+/** Shares value and short-put assignment value per industry, largest first. */
+export function industryExposure(options, holdings, profiles) {
+  const groups = new Map();
+  const add = (ticker, key, value) => {
+    const industry = profiles[ticker]?.industry || 'Unknown';
+    const group = groups.get(industry) || { industry, stocks: 0, puts: 0, tickers: new Set() };
+    group[key] += value;
+    group.tickers.add(ticker);
+    groups.set(industry, group);
+  };
+  holdings.forEach(h => add(h.ticker, 'stocks', h.current_price > 0 ? h.shares * h.current_price : 0));
+  options.forEach(o => add(o.ticker, 'puts', o.position === 'short' && o.type === 'put' ? o.strike * 100 * o.contracts : 0));
+  const rows = [...groups.values()].map(group => ({ ...group, tickers: [...group.tickers].sort(), total: group.stocks + group.puts }));
+  const total = rows.reduce((sum, group) => sum + group.total, 0);
+  return rows.map(group => ({ ...group, pct: total ? group.total / total * 100 : 0 })).sort((a, b) => b.total - a.total);
+}
+
 export function pnlAt(options, holdings, move, ivChg, days, withStocks) {
+  const moveOf = typeof move === 'function' ? move : () => move;
   const incomplete = options.some(unquotedOption)
     || (withStocks && holdings.some(holding => !(holding.current_price > 0)));
   if (incomplete) return { total: null, rows: [], incomplete: true };
   let total = 0;
   const rows = options.map(o => {
-    const S = o.current_price * (1 + move / 100);
+    const m = moveOf(o.ticker);
+    const S = o.current_price * (1 + m / 100);
     const sigma = (o.iv || 30) / 100;
     const iv = Math.max(sigma * (1 + ivChg / 100), 0.01);
     const T0 = o.time_to_expiry_years ?? Math.max(o.dte, 1 / 24) / 365;
     const T = Math.max(T0 - days / 365, 0);
     // Anchor the model to today's market mark; the gap fades out by expiry
     const gap = o.quoted !== false && T0 > 0 ? o.market_price - bs(o.current_price, o.strike, T0, sigma, o.type) : 0;
-    const v = move === 0 && ivChg === 0 && days === 0 ? o.market_price
+    const v = m === 0 && ivChg === 0 && days === 0 ? o.market_price
       : Math.max(bs(S, o.strike, T, iv, o.type) + gap * (T0 > 0 ? T / T0 : 0), 0);
     const pnl = ((o.position === 'short' ? o.premium - v : v - o.premium) * 100 * o.contracts);
     total += pnl;
@@ -160,7 +189,7 @@ export function pnlAt(options, holdings, move, ivChg, days, withStocks) {
   });
   if (withStocks) {
     for (const h of holdings) {
-      const pnl = h.shares * (h.current_price * (1 + move / 100) - h.buy_price);
+      const pnl = h.shares * (h.current_price * (1 + moveOf(h.ticker) / 100) - h.buy_price);
       total += pnl;
       rows.push({ key: `h${h.id}`, label: `${h.ticker} ${h.shares} shares`, pnl });
     }
@@ -174,6 +203,21 @@ export function WhatIf({ options: allOptions, holdings: allHoldings }) {
   const [days, setDays] = useState(0);
   const [withStocks, setWithStocks] = useState(true);
   const [skipMissing, setSkipMissing] = useState(false);
+  const [scope, setScope] = useState('all');
+  const [profiles, setProfiles] = useState(null);
+  const tickerKey = [...new Set([...allOptions, ...allHoldings].map(p => p.ticker))].sort().join(',');
+  useEffect(() => {
+    let active = true;
+    if (!tickerKey) return undefined;
+    fetchTickerProfiles(tickerKey.split(',')).then(data => { if (active) setProfiles(data.profiles || {}); })
+      .catch(() => { if (active) setProfiles({}); });
+    return () => { active = false; };
+  }, [tickerKey]);
+  const known = useMemo(() => profiles || {}, [profiles]);
+  const moveFor = useCallback(m => scopedMove(scope, known, m), [scope, known]);
+  const exposure = useMemo(() => (profiles ? industryExposure(allOptions, allHoldings, known) : []), [profiles, allOptions, allHoldings, known]);
+  const group = scope.startsWith('group:') ? scope.slice(6) : null;
+  const scopeLabel = scope === 'beta' ? 'S&P 500' : group ? group : 'Stocks';
   const missing = useMemo(() => [
     ...allOptions.filter(unquotedOption).map(o => `${o.ticker} ${o.position || 'long'} $${o.strike} ${o.type}`),
     ...(withStocks ? allHoldings.filter(h => !(h.current_price > 0)).map(h => `${h.ticker} ${h.shares} shares`) : []),
@@ -182,12 +226,12 @@ export function WhatIf({ options: allOptions, holdings: allHoldings }) {
   const holdings = useMemo(() => (skipMissing ? allHoldings.filter(h => h.current_price > 0) : allHoldings), [allHoldings, skipMissing]);
   const maxDte = Math.max(0, ...options.map(o => Math.ceil((o.time_to_expiry_years ?? o.dte / 365) * 365)));
   const now = useMemo(() => pnlAt(options, holdings, 0, 0, 0, withStocks).total, [options, holdings, withStocks]);
-  const res = useMemo(() => pnlAt(options, holdings, move, ivChg, days, withStocks), [options, holdings, move, ivChg, days, withStocks]);
+  const res = useMemo(() => pnlAt(options, holdings, moveFor(move), ivChg, days, withStocks), [options, holdings, moveFor, move, ivChg, days, withStocks]);
   const curve = useMemo(() => Array.from({ length: 41 }, (_, i) => {
     const m = -20 + i;
-    return { move: m, scenario: pnlAt(options, holdings, m, ivChg, days, withStocks).total,
-      expiry: pnlAt(options, holdings, m, 0, maxDte, withStocks).total };
-  }), [options, holdings, ivChg, days, withStocks, maxDte]);
+    return { move: m, scenario: pnlAt(options, holdings, moveFor(m), ivChg, days, withStocks).total,
+      expiry: pnlAt(options, holdings, moveFor(m), 0, maxDte, withStocks).total };
+  }), [options, holdings, moveFor, ivChg, days, withStocks, maxDte]);
   if (!allOptions.length && !allHoldings.length) return <p className="empty-state">Add positions to run scenarios.</p>;
   if (res.incomplete) {
     return (
@@ -207,7 +251,12 @@ export function WhatIf({ options: allOptions, holdings: allHoldings }) {
         </p>
       )}
       <div className="whatif-controls">
-        <label>Stocks move <strong>{move > 0 ? '+' : ''}{move}%</strong>
+        <label>Apply move to<select className="tool-input" value={scope} onChange={e => setScope(e.target.value)}>
+          <option value="all">Every stock equally</option>
+          <option value="beta">Each stock by its beta to the S&P 500</option>
+          {exposure.map(g => <option key={g.industry} value={`group:${g.industry}`}>Only {g.industry} ({g.tickers.join(', ')})</option>)}
+        </select></label>
+        <label>{scopeLabel} move <strong>{move > 0 ? '+' : ''}{move}%</strong>
           <input type="range" min={-30} max={30} value={move} onChange={e => setMove(+e.target.value)} /></label>
         <label>Implied volatility <strong>{ivChg > 0 ? '+' : ''}{ivChg}%</strong>
           <input type="range" min={-60} max={100} step={5} value={ivChg} onChange={e => setIvChg(+e.target.value)} /></label>
@@ -215,6 +264,9 @@ export function WhatIf({ options: allOptions, holdings: allHoldings }) {
           <input type="range" min={0} max={Math.max(maxDte, 1)} value={days} onChange={e => setDays(+e.target.value)} /></label>
         <label className="whatif-check"><input type="checkbox" checked={withStocks} onChange={e => setWithStocks(e.target.checked)} /> Include shares</label>
       </div>
+      {scope === 'beta' && <p className="market-sub">Each stock moves {move > 0 ? '+' : ''}{move}% × its 1-year beta: {tickerKey.split(',').map(t =>
+        `${t} ${known[t]?.beta != null ? `${known[t].beta}×` : '1× (beta unavailable)'}`).join(', ')}. Moves are capped at -95%.</p>}
+      {group && <p className="market-sub">Only {exposure.find(g => g.industry === group)?.tickers.join(', ') || group} move; every other position keeps today's price.</p>}
       <div className="doctor-stats">
         <div><span>P&L now</span><strong className={cls(now)}>{usd(now)}</strong></div>
         <div><span>P&L in this scenario</span><strong className={cls(res.total)}>{usd(res.total)}</strong></div>
@@ -225,7 +277,7 @@ export function WhatIf({ options: allOptions, holdings: allHoldings }) {
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
           <XAxis dataKey="move" {...axis} tickFormatter={v => `${v}%`} />
           <YAxis {...axis} width={60} tickFormatter={v => usd(v)} />
-          <Tooltip {...tip} formatter={v => usd(v)} labelFormatter={v => `Stocks ${v > 0 ? '+' : ''}${v}%`} />
+          <Tooltip {...tip} formatter={v => usd(v)} labelFormatter={v => `${scopeLabel} ${v > 0 ? '+' : ''}${v}%`} />
           <Legend />
           <ReferenceLine y={0} stroke="var(--text-muted)" />
           <ReferenceLine x={move} stroke="#7c6cf0" strokeDasharray="4 3" />
@@ -237,8 +289,25 @@ export function WhatIf({ options: allOptions, holdings: allHoldings }) {
         <thead><tr><th>Position</th><th>Scenario P&L</th></tr></thead>
         <tbody>{res.rows.map(r => <tr key={r.key}><td>{r.label}</td><td className={cls(r.pnl)}>{usd(r.pnl)}</td></tr>)}</tbody>
       </table>
+      {exposure.length > 0 && <>
+        <h4 className="sub-chart-title">Exposure by industry</h4>
+        <table className="market-table phone-cards" aria-label="Exposure by industry">
+          <thead><tr><th>Industry</th><th>Shares value</th><th>Short-put assignment</th><th>Share of total</th><th><span className="sr-only">Action</span></th></tr></thead>
+          <tbody>{exposure.map(g => <tr key={g.industry}>
+            <td><strong>{g.industry}</strong><div className="market-sub">{g.tickers.join(', ')}</div></td>
+            <td data-label="Shares value">{usd(g.stocks)}</td>
+            <td data-label="Short-put assignment">{usd(g.puts)}</td>
+            <td data-label="Share of total" className={g.pct >= 40 ? 'negative' : ''}>{g.pct.toFixed(0)}%</td>
+            <td><button className="btn-secondary btn-sm" aria-label={`Stress only ${g.industry}`} disabled={scope === `group:${g.industry}`}
+              onClick={() => setScope(`group:${g.industry}`)}>Stress this</button></td>
+          </tr>)}</tbody>
+        </table>
+        <p className="ivrank-note">Short-put assignment = strike × 100 × contracts, the cash needed if assigned. Industries come from the market-data provider and can be broad or missing (Unknown).
+          Calls and long puts are listed under their industry but not counted in these dollar columns.</p>
+      </>}
       <p className="ivrank-note">
-        Every stock gets the same % move. Options are repriced with Black-Scholes from their current implied volatility
+        {scope === 'all' ? 'Every stock gets the same % move.' : scope === 'beta' ? 'Each stock moves by its beta times the S&P 500 move; beta is a historical average, not a forecast, and single days can differ a lot.'
+          : `Only ${group} positions move.`} Options are repriced with Black-Scholes from their current implied volatility
         (30% when IV is unavailable); positions without a market quote block the calculation unless you choose to leave them out. Expired scenario options are worth intrinsic value.
       </p>
     </>

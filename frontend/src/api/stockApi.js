@@ -469,6 +469,11 @@ export const deleteCustomAlert = (id) => sendJson(`${BASE}/alerts/custom/${id}`,
 
 // ── Market ───────────────────────────────────────────────────────
 export const fetchMarketOverview = () => getJson(`${BASE}/market/overview`, 'Failed to load market overview');
+export async function fetchTickerProfiles(tickers) {
+  const res = await netFetch(`${BASE}/stock/profiles`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tickers }) });
+  if (!res.ok) throw new Error(await readError(res, 'Failed to load industry and beta'));
+  return res.json();
+}
 export const fetchMovers = (kind) => getJson(`${BASE}/market/movers?kind=${kind}`, 'Failed to load movers');
 export const fetchMyEarnings = () => getJson(`${BASE}/market/my-earnings`, 'Failed to load earnings', true);
 

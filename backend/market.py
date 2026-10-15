@@ -1,6 +1,7 @@
 """Market overview: indices, volatility, sector heatmap, top movers and market regime."""
 
 import logging
+import math
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 from zoneinfo import ZoneInfo
@@ -8,7 +9,7 @@ from zoneinfo import ZoneInfo
 import yfinance as yf
 
 from cache import get_or_fetch
-from stock_data import get_quote, get_stock_data
+from stock_data import get_key_metrics, get_quote, get_stock_data
 
 log = logging.getLogger(__name__)
 ET = ZoneInfo("America/New_York")
@@ -18,6 +19,8 @@ SECTORS = [
     ("XLK", "Technology"), ("XLC", "Communication"), ("XLY", "Consumer Disc."), ("XLF", "Financials"),
     ("XLV", "Health Care"), ("XLI", "Industrials"), ("XLE", "Energy"), ("XLP", "Staples"),
     ("XLB", "Materials"), ("XLU", "Utilities"), ("XLRE", "Real Estate"),
+    # Industry ETFs inside Technology, shown so a chip or software selloff is visible on its own
+    ("SMH", "Semiconductors"), ("IGV", "Software"),
 ]
 SCREENS = {"gainers": "day_gainers", "losers": "day_losers", "active": "most_actives"}
 
@@ -107,6 +110,38 @@ def overview() -> dict:
             "updated_at": datetime.now(ET).isoformat(),
         }
     return get_or_fetch("market:overview", _fetch, ttl=90)
+
+
+def _beta(ticker: str) -> float | None:
+    import pandas as pd
+    stock = get_stock_data(ticker, period="1y", interval="1d")["Close"].pct_change()
+    market = get_stock_data("SPY", period="1y", interval="1d")["Close"].pct_change()
+    joined = pd.concat([stock, market], axis=1, join="inner").dropna()
+    if len(joined) < 60:
+        return None
+    variance = joined.iloc[:, 1].var()
+    return round(float(joined.iloc[:, 0].cov(joined.iloc[:, 1]) / variance), 2) if variance else None
+
+
+def ticker_profile(ticker: str) -> dict:
+    """Industry, sector and beta for grouping and beta-weighting stress scenarios."""
+    def _fetch():
+        try:
+            metrics = get_key_metrics(ticker)
+        except Exception:
+            metrics = {}
+        known = lambda value: value if value and value != "N/A" else None
+        sector, industry = known(metrics.get("sector")), known(metrics.get("industry"))
+        beta, source = None, None
+        try:
+            beta, source = _beta(ticker), "1y daily vs SPY"
+        except Exception as e:
+            log.info("Beta unavailable for %s: %s", ticker, e)
+        if beta is None and isinstance(metrics.get("beta"), (int, float)) and math.isfinite(metrics["beta"]):
+            beta, source = round(float(metrics["beta"]), 2), "provider"
+        return {"ticker": ticker, "industry": industry or sector or "Unknown", "sector": sector or "Unknown",
+                "beta": beta, "beta_source": source if beta is not None else None}
+    return get_or_fetch(f"profile:{ticker}", _fetch, ttl=6 * 3600)
 
 
 def search_symbols(query: str) -> list[dict]:
