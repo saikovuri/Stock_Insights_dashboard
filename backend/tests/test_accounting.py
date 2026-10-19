@@ -1313,6 +1313,48 @@ class DirectionalSafeguardsTests(unittest.TestCase):
         self.assertEqual([i["kind"] for i in result["ideas"]], ["shares"])
         self.assertIn("Shares are still shown", result["no_trade_reason"])
 
+    def test_two_to_six_month_plan_holds_through_earnings(self):
+        result, _ = self.evaluate(earnings_offset=40, risk="medium", expiry_offsets=(30, 90))
+        self.assertEqual(result["dte"], 90)
+        self.assertTrue(result["earnings_before_expiry"])
+        self.assertIsNone(result["no_trade_reason"])
+
+
+class DebitSpreadPickerTests(unittest.TestCase):
+    # NVDA Dec 2027 calls (strike, mid, bid, ask, delta) as quoted on 2026-10-19 with spot $217.85
+    CHAIN = [(170, 68.47, 67.85, 69.10, .81), (175, 64.90, 64.55, 65.25, .79), (180, 61.58, 61.30, 61.85, .78),
+             (185, 58.40, 58.15, 58.65, .76), (190, 55.70, 55.45, 55.95, .74), (195, 52.83, 52.30, 53.35, .72),
+             (200, 49.92, 49.55, 50.30, .70), (210, 44.73, 44.25, 45.20, .66), (215, 42.30, 42.00, 42.60, .64),
+             (220, 39.77, 39.55, 40.00, .62), (225, 37.62, 37.55, 37.70, .60), (230, 35.25, 35.05, 35.45, .58),
+             (240, 31.27, 31.00, 31.55, .53), (250, 27.67, 27.40, 27.95, .49), (260, 24.48, 24.35, 24.60, .45),
+             (275, 20.30, 20.10, 20.50, .40), (300, 14.80, 14.60, 15.00, .32)]
+
+    def rows(self):
+        return [dict(strike=k, mid=m, bid=b, ask=a, delta=d, oi=5000, iv=0.37) for k, m, b, a, d in self.CHAIN]
+
+    def test_small_budget_moves_toward_the_money_instead_of_a_deep_in_the_money_sliver(self):
+        import options_analytics as analytics
+        idea, _ = analytics._debit_spread(self.rows(), "call", 217.85, 1.16, 500, 0.75, 92)
+        strikes = [leg["strike"] for leg in idea["legs"]]
+        self.assertNotEqual(strikes, [185, 190], "the old pick: $5 wide, 0.56:1 reward to risk")
+        self.assertGreaterEqual(idea["reward_risk"], 1)
+        self.assertLessEqual(idea["cost"], 500)
+        self.assertTrue(idea["narrowed"])
+        self.assertGreaterEqual(idea["legs"][0]["delta"], 0.60)
+
+    def test_ideal_spread_is_kept_when_it_fits(self):
+        import options_analytics as analytics
+        idea, _ = analytics._debit_spread(self.rows(), "call", 217.85, 1.16, 5000, 0.75, 92)
+        self.assertEqual([leg["strike"] for leg in idea["legs"]], [185, 275])
+        self.assertFalse(idea["narrowed"])
+
+    def test_no_spread_when_nothing_pays_at_least_its_risk(self):
+        import options_analytics as analytics
+        rows = [r for r in self.rows() if r["strike"] <= 195]
+        idea, cheapest = analytics._debit_spread(rows, "call", 217.85, 1.16, 500, 0.75, 92)
+        self.assertIsNone(idea)
+        self.assertIsNotNone(cheapest)
+
 
 if __name__ == "__main__":
     unittest.main()

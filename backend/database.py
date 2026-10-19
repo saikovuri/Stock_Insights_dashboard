@@ -484,7 +484,7 @@ def init_db():
     added_columns = {table: {"account": "TEXT"} for table in ("holdings", "options", "closed_trades", "closed_options", "journal")}
     added_columns["watchlist"] = {"list_name": "TEXT", "note": "TEXT"}
     # Legs of one vertical spread share a spread_id (see spreads.py)
-    added_columns["options"]["spread_id"] = "TEXT"
+    added_columns["options"].update(spread_id="TEXT", spread_ratio="INTEGER", spread_legs="INTEGER", spread_kind="TEXT")
     added_columns["closed_options"]["spread_id"] = "TEXT"
     for table, columns in added_columns.items():
         for column, datatype in columns.items():
@@ -728,12 +728,14 @@ def get_user_options(user_id: int) -> list[dict]:
 
 
 def _insert_option(cur, user_id, ticker, option_type, strike, expiry, premium, contracts, position, account,
-                   spread_id=None) -> dict:
+                   spread=None) -> dict:
+    """spread: (spread_id, ratio, leg count, kind) for a leg of a multi-leg structure."""
     action = "BTO" if position == "long" else "STO"
+    spread_id, ratio, legs, kind = spread or (None, None, None, None)
     values = (user_id, ticker.upper(), option_type.lower(), position.lower(), strike, expiry, premium, contracts,
-              account_name(account), spread_id)
-    sql = (f"INSERT INTO options (user_id, ticker, option_type, position, strike, expiry, premium, contracts, account, spread_id) "
-           f"VALUES ({', '.join([PH] * 10)})")
+              account_name(account), spread_id, ratio, legs, kind)
+    sql = (f"INSERT INTO options (user_id, ticker, option_type, position, strike, expiry, premium, contracts, account, "
+           f"spread_id, spread_ratio, spread_legs, spread_kind) VALUES ({', '.join([PH] * 13)})")
     if USE_PG:
         cur.execute(sql + " RETURNING *", values)
         new_row = _fetchone(cur)
@@ -768,25 +770,29 @@ def add_user_option(user_id: int, ticker: str, option_type: str, strike: float,
         _release(conn)
 
 
-def add_user_spread(user_id: int, ticker: str, kind: str, expiry: str, long_strike: float, long_premium: float,
-                    short_strike: float, short_premium: float, contracts: int, account: str | None = None) -> dict:
-    """Open both legs of a vertical spread in one transaction."""
+def _structure_legs(legs: list[dict], units: int, expect_kind: str | None = None) -> dict:
+    """Validate the legs of a structure to open or edit; returns spreads.validate_open's description."""
     import spreads
+    for leg in legs:
+        _option_values(leg["option_type"], leg["position"], leg["strike"], leg["expiry"], leg["premium"], units * leg["ratio"])
+    return spreads.validate_open(legs, units, expect_kind)
+
+
+def add_user_spread(user_id: int, ticker: str, legs: list[dict], units: int, account: str | None = None,
+                    kind: str | None = None) -> dict:
+    """Open every leg of a multi-leg structure in one transaction. Each leg is
+    {position, option_type, strike, expiry, premium (per share), ratio (contracts per structure)}."""
     from uuid import uuid4
-    spreads.validate_strikes(kind, long_strike, short_strike)
-    option_type = spreads.KINDS[kind]["type"]
-    _option_values(option_type, "long", long_strike, expiry, long_premium, contracts)
-    _option_values(option_type, "short", short_strike, expiry, short_premium, contracts)
+    info = _structure_legs(legs, units, kind)
     spread_id = uuid4().hex[:16]
     conn = get_db()
     try:
         cur = conn.cursor()
-        long_leg = _insert_option(cur, user_id, ticker, option_type, long_strike, expiry, long_premium, contracts,
-                                  "long", account, spread_id)
-        short_leg = _insert_option(cur, user_id, ticker, option_type, short_strike, expiry, short_premium, contracts,
-                                   "short", account, spread_id)
+        rows = [_insert_option(cur, user_id, ticker, leg["option_type"], leg["strike"], leg["expiry"], leg["premium"],
+                               units * leg["ratio"], leg["position"], account,
+                               (spread_id, leg["ratio"], len(legs), info["kind"])) for leg in legs]
         conn.commit()
-        return {"spread_id": spread_id, "long": long_leg, "short": short_leg, **spreads.describe(long_leg, short_leg)}
+        return {"spread_id": spread_id, "legs": rows, "contracts": units, **{k: v for k, v in info.items() if k != "legs"}}
     except Exception:
         conn.rollback()
         raise
@@ -794,35 +800,42 @@ def add_user_spread(user_id: int, ticker: str, kind: str, expiry: str, long_stri
         _release(conn)
 
 
-def _spread_legs(cur, user_id: int, spread_id: str) -> tuple[dict, dict]:
+def _open_structure(cur, user_id: int, spread_id: str) -> list[dict]:
     import spreads
     cur.execute(f"SELECT * FROM options WHERE user_id={PH} AND spread_id={PH} ORDER BY id" + (" FOR UPDATE" if USE_PG else ""),
                 (user_id, spread_id))
-    pair = spreads.pair_open(_fetchall(cur)).get(spread_id)
-    if pair is None:
-        raise LookupError("Spread not found, or one leg was already closed on its own")
-    return pair
+    legs = spreads.group_open(_fetchall(cur)).get(spread_id)
+    if legs is None:
+        raise LookupError("Spread not found, or one of its legs was closed or changed on its own")
+    return legs
 
 
-def close_user_spread(user_id: int, spread_id: str, long_close: float, short_close: float, contracts: int,
-                      *, closed_at: str | None = None) -> dict:
-    """Close the same number of contracts on both legs at once: sell the long leg and buy back the short leg."""
+def close_user_spread(user_id: int, spread_id: str, prices: dict[int, float], units: int,
+                      *, closed_at: str | None = None, only: set[int] | None = None) -> dict:
+    """Close `units` of a structure: every leg (or just the legs in `only`, e.g. the expired ones) at its price per
+    leg id, ratio × units contracts each, in one transaction."""
     import spreads
     conn = get_db()
     try:
         if not USE_PG:
             conn.execute("BEGIN IMMEDIATE")
         cur = conn.cursor()
-        long_leg, short_leg = _spread_legs(cur, user_id, spread_id)
-        if contracts > long_leg["contracts"]:
+        legs = _open_structure(cur, user_id, spread_id)
+        held = spreads.units_of(legs)
+        if units > held:
             raise ValueError("Close exceeds contracts in this spread")
-        results = [close_user_option(user_id, leg["ticker"], leg["option_type"], leg["strike"], leg["expiry"], price,
-                                     contracts, leg["position"], option_id=leg["id"], closed_at=closed_at, _conn=conn)
-                   for leg, price in ((short_leg, short_close), (long_leg, long_close))]
+        targets = [leg for leg in legs if only is None or leg["id"] in only]
+        if set(prices) - {leg["id"] for leg in legs} or any(leg["id"] not in prices for leg in targets):
+            raise ValueError("Enter a closing price for every leg")
+        results = [close_user_option(user_id, leg["ticker"], leg["option_type"], leg["strike"], leg["expiry"],
+                                     prices[leg["id"]], units * leg["ratio"], leg["position"], option_id=leg["id"],
+                                     closed_at=closed_at, _conn=conn)
+                   for leg in sorted(targets, key=lambda leg: leg["position"] != "short")]
         conn.commit()
-        kind = spreads.kind_of(long_leg["option_type"], long_leg["strike"], short_leg["strike"])
-        return {"action": "CLOSE_SPREAD", "spread_id": spread_id, "ticker": long_leg["ticker"], "kind": kind,
-                "contracts": contracts, "close_net": round(spreads.net_premium(kind, long_close, short_close), 4),
+        info = spreads.describe_open(legs)
+        return {"action": "CLOSE_SPREAD", "spread_id": spread_id, "ticker": legs[0]["ticker"], "kind": info["kind"],
+                "label": info["label"], "contracts": units,
+                "close_net": round(spreads.net_value(legs, prices), 4) if only is None else None,
                 "pnl": round(sum(result["pnl"] for result in results), 2),
                 "closed_ids": [result["closed_id"] for result in results]}
     except Exception:
@@ -832,8 +845,96 @@ def close_user_spread(user_id: int, spread_id: str, long_close: float, short_clo
         _release(conn)
 
 
+def update_user_spread(user_id: int, spread_id: str, legs: list[dict], units: int) -> dict:
+    """Correct an open structure's strikes, expiries, fills or size in place (each leg keeps its id and open date).
+    Every leg must be given, by id."""
+    conn = get_db()
+    try:
+        if not USE_PG:
+            conn.execute("BEGIN IMMEDIATE")
+        cur = conn.cursor()
+        current = _open_structure(cur, user_id, spread_id)
+        if sorted(leg.get("id") or 0 for leg in legs) != sorted(leg["id"] for leg in current):
+            raise ValueError("Send every leg of this spread, by id")
+        info = _structure_legs(legs, units)
+        for leg in legs:
+            cur.execute(f"""UPDATE options SET option_type={PH}, position={PH}, strike={PH}, expiry={PH}, premium={PH},
+                contracts={PH}, spread_ratio={PH}, spread_kind={PH} WHERE id={PH} AND user_id={PH}""",
+                (leg["option_type"], leg["position"], leg["strike"], leg["expiry"], leg["premium"], units * leg["ratio"],
+                 leg["ratio"], info["kind"], leg["id"], user_id))
+        cur.execute(f"INSERT INTO transactions (user_id, action, ticker, details) VALUES ({PH}, 'EDIT_SPREAD', {PH}, {PH})",
+                    (user_id, current[0]["ticker"], json.dumps({"spread_id": spread_id, "kind": info["kind"], "contracts": units})))
+        conn.commit()
+        return {"spread_id": spread_id, "contracts": units, **{k: v for k, v in info.items() if k != "legs"}}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        _release(conn)
+
+
+def link_user_options(user_id: int, option_ids: list[int]) -> dict:
+    """Group existing open options (e.g. imported legs) into one structure. Legs must share a ticker and account and
+    must not belong to another intact structure."""
+    import spreads
+    from uuid import uuid4
+    conn = get_db()
+    try:
+        if not USE_PG:
+            conn.execute("BEGIN IMMEDIATE")
+        cur = conn.cursor()
+        cur.execute(f"SELECT * FROM options WHERE user_id={PH}" + (" FOR UPDATE" if USE_PG else ""), (user_id,))
+        everything = _fetchall(cur)
+        rows = sorted((row for row in everything if row["id"] in set(option_ids)), key=lambda row: row["id"])
+        if len(rows) != len(set(option_ids)):
+            raise LookupError("Option not found")
+        if len({row["ticker"] for row in rows}) != 1 or len({row.get("account") or "" for row in rows}) != 1:
+            raise ValueError("Linked legs must be on the same ticker and in the same account")
+        intact = {leg["id"] for group in spreads.group_open(everything).values() for leg in group}
+        if intact & {row["id"] for row in rows}:
+            raise ValueError("A leg already belongs to a spread; unlink it first")
+        units, ratios = spreads._units(rows)
+        info = spreads.describe([{**row, "ratio": r} for row, r in zip(rows, ratios)], units)
+        spread_id = uuid4().hex[:16]
+        for row, ratio in zip(rows, ratios):
+            cur.execute(f"UPDATE options SET spread_id={PH}, spread_ratio={PH}, spread_legs={PH}, spread_kind={PH} WHERE id={PH} AND user_id={PH}",
+                        (spread_id, ratio, len(rows), info["kind"], row["id"], user_id))
+        cur.execute(f"INSERT INTO transactions (user_id, action, ticker, details) VALUES ({PH}, 'LINK_SPREAD', {PH}, {PH})",
+                    (user_id, rows[0]["ticker"], json.dumps({"spread_id": spread_id, "option_ids": [row["id"] for row in rows]})))
+        conn.commit()
+        return {"spread_id": spread_id, "contracts": units, **{k: v for k, v in info.items() if k != "legs"}}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        _release(conn)
+
+
+def unlink_user_spread(user_id: int, spread_id: str) -> dict | None:
+    """Treat a structure's legs as separate options again (nothing is closed or changed)."""
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        cur.execute(f"SELECT id, ticker FROM options WHERE user_id={PH} AND spread_id={PH}", (user_id, spread_id))
+        legs = _fetchall(cur)
+        if not legs:
+            conn.rollback()
+            return None
+        cur.execute(f"UPDATE options SET spread_id=NULL, spread_ratio=NULL, spread_legs=NULL, spread_kind=NULL WHERE user_id={PH} AND spread_id={PH}",
+                    (user_id, spread_id))
+        cur.execute(f"INSERT INTO transactions (user_id, action, ticker, details) VALUES ({PH}, 'UNLINK_SPREAD', {PH}, {PH})",
+                    (user_id, legs[0]["ticker"], json.dumps({"spread_id": spread_id})))
+        conn.commit()
+        return {"spread_id": spread_id, "unlinked": len(legs)}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        _release(conn)
+
+
 def delete_user_spread(user_id: int, spread_id: str) -> dict | None:
-    """Remove a mistaken spread entry (both legs) without recording a close."""
+    """Remove a mistaken spread entry (every leg) without recording a close."""
     conn = get_db()
     try:
         cur = conn.cursor()
@@ -1122,25 +1223,34 @@ def record_closed_option(user_id: int, request, *, trade_id: int | None = None) 
         _release(conn)
 
 
-def record_closed_spread(user_id: int, request) -> dict:
-    """Record a completed vertical spread from the journal: both legs in one transaction, fees and notes on the leg
-    that defines the trade (the short leg of a credit spread, the long leg of a debit spread)."""
-    import hashlib
+def _closed_structure_legs(request, *, ids: list[int] | None = None) -> list:
+    """One ClosedOptionRequest per leg of a completed structure. Fees and notes go on the leg that defines the trade
+    (first short leg of a credit structure, first long leg of a debit one). A leg that expired before the structure
+    was closed counts as closed on its expiry date."""
     import spreads
     from decimal import Decimal
-    from portfolio_models import ClosedOptionRequest, ClosedSpreadRequest
+    from portfolio_models import ClosedOptionRequest
+    legs = [{"position": leg.position, "option_type": leg.option_type, "strike": float(leg.strike), "expiry": leg.expiry.isoformat(),
+             "ratio": leg.ratio, "premium": float(leg.open_premium)} for leg in request.legs]
+    info = spreads.validate_open(legs, request.contracts, request.kind)
+    primary = next(i for i, leg in enumerate(legs) if leg["position"] == ("short" if info["style"] == "credit" else "long"))
+    out = []
+    for i, leg in enumerate(request.legs):
+        out.append(ClosedOptionRequest(
+            ticker=request.ticker, option_type=leg.option_type, position=leg.position, strike=leg.strike, expiry=leg.expiry,
+            contracts=request.contracts * leg.ratio, open_premium=leg.open_premium, close_premium=leg.close_premium,
+            opened_at=request.opened_at, closed_at=min(request.closed_at, leg.expiry),
+            fees=request.fees if i == primary else Decimal("0"), notes=request.notes if i == primary else "",
+            idempotency_key=f"{request.idempotency_key}-{i}", account=request.account))
+    return out
+
+
+def record_closed_spread(user_id: int, request) -> dict:
+    """Record a completed multi-leg structure from the journal: every leg in one transaction."""
+    import hashlib
+    from portfolio_models import ClosedSpreadRequest
     request = ClosedSpreadRequest.model_validate(request)
-    credit = spreads.KINDS[request.kind]["style"] == "credit"
-    common = {"ticker": request.ticker, "option_type": spreads.KINDS[request.kind]["type"], "expiry": request.expiry,
-              "contracts": request.contracts, "opened_at": request.opened_at, "closed_at": request.closed_at,
-              "account": request.account}
-    legs = []
-    for position, strike, opened, closed in (("short", request.short_strike, request.short_open, request.short_close),
-                                             ("long", request.long_strike, request.long_open, request.long_close)):
-        primary = (position == "short") == credit
-        legs.append(ClosedOptionRequest(**common, position=position, strike=strike, open_premium=opened, close_premium=closed,
-                                        fees=request.fees if primary else Decimal("0"), notes=request.notes if primary else "",
-                                        idempotency_key=f"{request.idempotency_key}-{position[0]}"))
+    legs = _closed_structure_legs(request)
     spread_id = "j" + hashlib.sha256(f"{user_id}:{request.idempotency_key}".encode()).hexdigest()[:15]
     conn = get_db()
     try:
@@ -1152,6 +1262,36 @@ def record_closed_spread(user_id: int, request) -> dict:
         rows = [_record_closed_option(cur, user_id, leg, spread_id=spread_id) for leg in legs]
         conn.commit()
         return {"spread_id": spread_id, "legs": rows, "pnl": round(sum(row["pnl"] for row in rows), 2)}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        _release(conn)
+
+
+def update_closed_spread(user_id: int, trade_id: int, request) -> dict:
+    """Correct a manually logged closed structure (the row with this id in the merged history). Every leg must be
+    sent with its id; each keeps its record and audit history, and fees are replaced."""
+    import spreads
+    from portfolio_models import ClosedSpreadRequest
+    request = ClosedSpreadRequest.model_validate(request)
+    row = next((r for r in spreads.merge_closed(get_closed_options(user_id)) if r["id"] == trade_id and r.get("spread")), None)
+    if row is None or not row["is_manual"]:
+        raise LookupError("Manual closed spread not found")
+    ids = [leg.id for leg in request.legs]
+    if sorted(i or 0 for i in ids) != sorted(row["spread"]["leg_ids"]):
+        raise ValueError("Send every leg of this spread, by id")
+    legs = _closed_structure_legs(request)
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        if USE_PG:
+            cur.execute(f"SELECT id FROM users WHERE id={PH} FOR UPDATE", (user_id,))
+        else:
+            cur.execute("BEGIN IMMEDIATE")
+        rows = [_record_closed_option(cur, user_id, leg, trade_id=leg_id) for leg, leg_id in zip(legs, ids)]
+        conn.commit()
+        return {"spread_id": row["spread_id"], "legs": rows, "pnl": round(sum(r["pnl"] for r in rows), 2)}
     except Exception:
         conn.rollback()
         raise

@@ -114,62 +114,80 @@ class LifecycleRequest(BaseModel):
     cycle: str | None = Field(default=None, min_length=1, max_length=80)
 
 
-SpreadKind = Literal["bull_call", "bear_put", "bull_put", "bear_call"]
+SpreadKind = Literal["bull_call", "bear_put", "bull_put", "bear_call", "iron_condor", "iron_butterfly", "call_butterfly",
+                     "put_butterfly", "call_calendar", "put_calendar", "call_diagonal", "put_diagonal"]
 
 
-def _spread_strikes(kind: str, long_strike, short_strike) -> None:
-    import spreads
-    spreads.validate_strikes(kind, float(long_strike), float(short_strike))
+def _iso_day(value: str) -> str:
+    if date.fromisoformat(value).isoformat() != value:
+        raise ValueError("Expiry must be YYYY-MM-DD")
+    return value
+
+
+class SpreadLeg(BaseModel):
+    """One leg of a structure: premium is the per-share fill; ratio is contracts per structure (2 for a butterfly's body)."""
+    model_config = ConfigDict(allow_inf_nan=False, extra="forbid")
+    id: int | None = Field(default=None, gt=0)
+    position: Literal["long", "short"]
+    option_type: Literal["call", "put"]
+    strike: float = Field(gt=0)
+    expiry: str
+    premium: float = Field(ge=0)
+    ratio: int = Field(default=1, ge=1, le=10, strict=True)
+
+    _expiry = field_validator("expiry")(lambda cls, value: _iso_day(value))
 
 
 class SpreadRequest(BaseModel):
-    """Open a two-leg vertical spread; premiums are the per-share fills of each leg."""
+    """Open (or correct) a multi-leg structure; contracts is the number of structures."""
     model_config = ConfigDict(allow_inf_nan=False, extra="forbid")
     ticker: str = Field(min_length=1, max_length=20, pattern=r"^[A-Za-z^][A-Za-z0-9.^=-]*$")
-    kind: SpreadKind
-    expiry: str
-    long_strike: float = Field(gt=0)
-    long_premium: float = Field(ge=0)
-    short_strike: float = Field(gt=0)
-    short_premium: float = Field(ge=0)
+    kind: SpreadKind | None = None
+    legs: list[SpreadLeg] = Field(min_length=2, max_length=4)
     contracts: int = Field(default=1, gt=0, le=10_000, strict=True)
     account: str | None = Field(default=None, pattern=ACCOUNT_PATTERN)
 
-    @field_validator("expiry")
-    @classmethod
-    def valid_expiry(cls, value):
-        parsed = date.fromisoformat(value)
-        if parsed.isoformat() != value:
-            raise ValueError("Expiry must be YYYY-MM-DD")
-        return value
+    def leg_dicts(self) -> list[dict]:
+        return [leg.model_dump() for leg in self.legs]
 
-    @model_validator(mode="after")
-    def valid_spread(self):
-        _spread_strikes(self.kind, self.long_strike, self.short_strike)
-        return self
+
+class SpreadClosePrice(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False, extra="forbid")
+    id: int = Field(gt=0)
+    premium: float = Field(ge=0)
 
 
 class SpreadCloseRequest(BaseModel):
-    """Close both legs: sell the long leg at long_premium and buy back the short leg at short_premium."""
+    """Close `contracts` structures: each leg at its per-share price (sell the long legs, buy back the short legs)."""
     model_config = ConfigDict(allow_inf_nan=False, extra="forbid")
-    long_premium: float = Field(ge=0)
-    short_premium: float = Field(ge=0)
+    prices: list[SpreadClosePrice] = Field(min_length=2, max_length=4)
     contracts: int = Field(gt=0, strict=True)
+
+
+class LinkRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    option_ids: list[int] = Field(min_length=2, max_length=4)
+
+
+class ClosedSpreadLeg(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False, extra="forbid")
+    id: int | None = Field(default=None, gt=0)
+    position: Literal["long", "short"]
+    option_type: Literal["call", "put"]
+    strike: Decimal = Field(gt=0, max_digits=16, decimal_places=6)
+    expiry: date
+    ratio: int = Field(default=1, ge=1, le=10, strict=True)
+    open_premium: Decimal = Field(gt=0, max_digits=16, decimal_places=6)
+    close_premium: Decimal = Field(ge=0, max_digits=16, decimal_places=6)
 
 
 class ClosedSpreadRequest(BaseModel):
-    """A completed vertical spread logged after the fact, one fill per leg for opening and closing."""
+    """A completed structure logged after the fact: one opening and one closing fill per leg."""
     model_config = ConfigDict(allow_inf_nan=False, extra="forbid")
     ticker: str = Field(min_length=1, max_length=20, pattern=r"^[A-Za-z^][A-Za-z0-9.^=-]*$")
-    kind: SpreadKind
-    expiry: date
+    kind: SpreadKind | None = None
+    legs: list[ClosedSpreadLeg] = Field(min_length=2, max_length=4)
     contracts: int = Field(gt=0, strict=True)
-    long_strike: Decimal = Field(gt=0, max_digits=16, decimal_places=6)
-    short_strike: Decimal = Field(gt=0, max_digits=16, decimal_places=6)
-    long_open: Decimal = Field(gt=0, max_digits=16, decimal_places=6)
-    short_open: Decimal = Field(gt=0, max_digits=16, decimal_places=6)
-    long_close: Decimal = Field(ge=0, max_digits=16, decimal_places=6)
-    short_close: Decimal = Field(ge=0, max_digits=16, decimal_places=6)
     opened_at: date
     closed_at: date
     fees: Decimal = Field(default=Decimal("0"), ge=0, max_digits=14, decimal_places=2)
@@ -184,13 +202,12 @@ class ClosedSpreadRequest(BaseModel):
         return value.upper()
 
     @model_validator(mode="after")
-    def valid_spread(self):
-        _spread_strikes(self.kind, self.long_strike, self.short_strike)
+    def valid_dates(self):
         if self.opened_at > self.closed_at:
             raise ValueError("Closing date cannot precede opening date")
         if self.closed_at > datetime.now(timezone.utc).date():
             raise ValueError("Completed trades cannot have future dates")
-        if self.closed_at > self.expiry:
+        if self.closed_at > max(leg.expiry for leg in self.legs):
             raise ValueError("Closing date cannot be after expiry")
         return self
 

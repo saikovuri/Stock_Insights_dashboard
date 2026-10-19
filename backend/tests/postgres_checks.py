@@ -153,15 +153,31 @@ def main():
     assert [p["id"] for p in trade_plans.list_plans(user, "AAPL")] == [plan["id"]]
     assert not trade_plans.delete_plan(other, plan["id"]) and trade_plans.delete_plan(user, plan["id"])
     import spreads
-    opened = database.add_user_spread(user, "SPY", "bull_put", "2099-01-15", 95, 1.0, 100, 2.5, 2, account="IRA")
-    assert database.close_user_spread(user, opened["spread_id"], 0.2, 0.7, 1)["pnl"] == 100
-    database.close_user_spread(user, opened["spread_id"], 0, 0, 1)
+    put_legs = [dict(position="long", option_type="put", strike=95, expiry="2099-01-15", premium=1.0, ratio=1),
+                dict(position="short", option_type="put", strike=100, expiry="2099-01-15", premium=2.5, ratio=1)]
+    opened = database.add_user_spread(user, "SPY", put_legs, 2, account="IRA", kind="bull_put")
+    pg_ids = {o["position"]: o["id"] for o in database.get_user_options(user) if o.get("spread_id") == opened["spread_id"]}
+    assert database.close_user_spread(user, opened["spread_id"], {pg_ids["long"]: 0.2, pg_ids["short"]: 0.7}, 1)["pnl"] == 100
+    database.close_user_spread(user, opened["spread_id"], {pg_ids["long"]: 0, pg_ids["short"]: 0}, 1)
     pg_spreads = [row for row in spreads.merge_closed(database.get_closed_options(user)) if row.get("spread")]
     assert sorted(row["pnl"] for row in pg_spreads) == [100, 150], pg_spreads
+    condor = database.add_user_spread(user, "SPY", [
+        dict(position="long", option_type="put", strike=90, expiry="2099-01-15", premium=0.5, ratio=1),
+        dict(position="short", option_type="put", strike=95, expiry="2099-01-15", premium=1.5, ratio=1),
+        dict(position="short", option_type="call", strike=105, expiry="2099-01-15", premium=1.4, ratio=1),
+        dict(position="long", option_type="call", strike=110, expiry="2099-01-15", premium=0.4, ratio=1)], 1)
+    condor_legs = [o for o in database.get_user_options(user) if o.get("spread_id") == condor["spread_id"]]
+    database.update_user_spread(user, condor["spread_id"], [dict(position=o["position"], option_type=o["option_type"],
+        strike=o["strike"], expiry=o["expiry"], premium=o["premium"], ratio=1, id=o["id"]) for o in condor_legs], 2)
+    assert database.unlink_user_spread(user, condor["spread_id"])["unlinked"] == 4
+    relinked = database.link_user_options(user, [o["id"] for o in condor_legs])
+    assert relinked["kind"] == "iron_condor" and relinked["contracts"] == 2, relinked
+    assert database.delete_user_spread(user, relinked["spread_id"])["deleted"] == 4
     journal_spread = database.record_closed_spread(user, {
-        "ticker": "SPY", "kind": "bull_call", "expiry": "2026-03-20", "contracts": 1, "long_strike": 500, "short_strike": 510,
-        "long_open": 6, "short_open": 2, "long_close": 9, "short_close": 1, "opened_at": "2026-03-02", "closed_at": "2026-03-09",
-        "fees": 1.3, "idempotency_key": uuid4().hex})
+        "ticker": "SPY", "kind": "bull_call", "contracts": 1, "opened_at": "2026-03-02", "closed_at": "2026-03-09",
+        "fees": 1.3, "idempotency_key": uuid4().hex[:40],
+        "legs": [dict(position="long", option_type="call", strike=500, expiry="2026-03-20", open_premium=6, close_premium=9),
+                 dict(position="short", option_type="call", strike=510, expiry="2026-03-20", open_premium=2, close_premium=1)]})
     assert journal_spread["pnl"] == 400, journal_spread
     leg_ids = [leg["id"] for leg in journal_spread["legs"]]
     assert database.delete_closed_option(user, leg_ids)

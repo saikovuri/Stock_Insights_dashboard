@@ -382,23 +382,25 @@ The user supplies bullish/bearish direction, budget, and a risk/time-horizon sel
 | Extreme / 0DTE-this week | 0-6 | 0 | 0.45 |
 | High / near-dated | 7-21 | 14 | 0.40 |
 | Moderate | 28-50 | 38 | 0.50 |
+| Patient / 2-6 months | 51-179 | 90 | 0.60 |
 | Low / LEAPS | 180-900 | 365 | 0.75 |
 
 These are preferred windows, unlike the strict Wheel scan windows. LEAPS can fall back to the longest expiry if at least 120 days away; the general final fallback chooses nearest target within 0-1,000 days. Always inspect returned DTE. "Low" is a relative category within this calculator, not low risk in absolute terms.
 
-For Extreme, High and Moderate, when the chosen expiry is on or after a known earnings date, the calculator moves to the best liquid expiry **before** the report. It searches from half the plan's minimum DTE up to its maximum, so Moderate can drop to about two weeks. The expiry note says so, including when the result is shorter than the plan's usual window. LEAPS cannot avoid reports and are not moved.
+For Extreme, High and Moderate, when the chosen expiry is on or after a known earnings date, the calculator moves to the best liquid expiry **before** the report. It searches from half the plan's minimum DTE up to its maximum, so Moderate can drop to about two weeks. The expiry note says so, including when the result is shorter than the plan's usual window. Patient (2-6 months) and LEAPS usually can't avoid a report and are not moved; they show the earnings warning instead.
 
-The long-option builder first seeks the target delta. If unaffordable, it can choose an affordable alternative with delta at least 0.20 and marks it as stretched. Debit spreads buy near target delta and sell near an expected-move-based strike; they can narrow the wing until one spread fits the budget. Whole quantities are `floor(budget / unit cost)`. Midpoints determine the initial cost estimates.
+The long-option builder first seeks the target delta. If unaffordable, it can choose an affordable alternative with delta at least 0.20 and marks it as stretched. Debit spreads first try buying near the target delta and selling near the expected move. If that is over budget, they don't just shrink the width (which used to produce narrow, deep in-the-money spreads paying well under 1:1). Instead they search all liquid pairs whose bought strike has delta from 0.30 up to the target and whose width stays within the expected move. A pair qualifies only if it fits the budget and its reward is at least its risk at a realistic fill, halfway between the mid and the natural price (buy at the ask, sell at the bid). The closest to the target delta wins (higher chance of profit), then the widest. No qualifying pair means no spread is shown. Whole quantities are `floor(budget / unit cost)`. Midpoints determine the displayed cost estimates. When the breakeven is already past the current price, the card shows **Room to fall** (bullish) or **Room to rise** (bearish) instead of Move needed.
 
-Only ideas finally classified as good/OK liquidity remain eligible. For Extreme/High/Moderate, unknown earnings (except ETFs/funds) or earnings on/before every liquid expiry suppress the **option** recommendations. Shares have no expiry, so they stay available with a note that they also gap on a report. LEAPS (Low) are not blocked by earnings; any report before expiry is shown as an earnings warning, because IV crush and gaps are part of holding long-dated options. No liquid affordable candidate produces an explicit no-trade reason; there is no thin-market recommendation fallback.
+Only ideas finally classified as good/OK liquidity remain eligible. For Extreme/High/Moderate, unknown earnings (except ETFs/funds) or earnings on/before every liquid expiry suppress the **option** recommendations. Shares have no expiry, so they stay available with a note that they also gap on a report. Patient and LEAPS plans are not blocked by earnings; any report before expiry is shown as an earnings warning, because IV crush and gaps are part of holding long-dated options. No liquid affordable candidate produces an explicit no-trade reason; there is no thin-market recommendation fallback.
 
 The deterministic "best fit" order is:
 
 1. For bullish direction, prefer shares if budget buys at least 100 shares.
 2. High/extreme: prefer a non-stretched long option unless high IV and an available spread favor the spread; otherwise use the spread if available.
 3. Moderate: prefer a debit spread if available.
-4. Low: prefer non-stretched LEAPS; otherwise shares if available.
-5. Final fallback among eligible structures: spread, long option, shares.
+4. Patient: prefer a non-stretched long option; otherwise the spread; otherwise shares.
+5. Low: prefer non-stretched LEAPS; otherwise shares if available.
+6. Final fallback among eligible structures: spread, long option, shares.
 
 This comparison is a heuristic, not portfolio optimization or a validated expected-return ranking. An option's maximum loss can be the entire debit; a stop order cannot guarantee the quoted loss limit during a gap.
 
@@ -626,7 +628,7 @@ Portfolio has **Holdings**, **Portfolio Risk**, and **Income & Performance**. Ho
 
 Signed-in users can label records with brokerage accounts (for example Taxable, Roth IRA) inside one login. The account bar's selector filters current stocks, options and closed history; **All accounts** combines them and shows a badge on records outside Default. New lots, options and imports go into the selected account (All accounts records into **Default**). Ticker-level sales consume FIFO lots from the selected account only, and covered-call assignment only uses shares in the option's account; assigned puts add shares to the option's account. Closed records inherit the lot's account. Existing records belong to Default. Names allow letters, numbers, spaces and `. _ & ' ( ) -`, up to 40 characters.
 
-Select an account to enter its **cash balance** (or choose **Enter cash** in its row). The full account bar, with cash, new accounts and the cash table, appears under Holdings; Portfolio Risk and Income & Performance show only the account selector. Free cash = cash minus that account's **option collateral**: a short put reserves strike × 100 × contracts, unless a long put of the same ticker and expiry in that account protects it. A lower-strike long put (a bull put spread) leaves only the strike width × 100 × contracts reserved; a long put at or above the short strike (a bear put debit spread) covers assignment fully, so nothing is reserved. A short call not covered by the account's shares and matched with a higher-strike long call (a bear call spread) also reserves the width; covered calls reserve nothing. Each protective contract and each 100-share block is used once. Credits received are not netted. Cash is a user-entered balance, not a ledger: it does not change automatically when you record trades, and it is not broker buying power or margin. Risk, Doctor, tax, dividends, the ledger report and the SPY comparison remain combined across accounts. Account ledger deposits and withdrawals can name a brokerage account, which makes that account's value history flow-adjusted; entries without an account count toward Default.
+Select an account to enter its **cash balance** (or choose **Enter cash** in its row). The full account bar, with cash, new accounts and the cash table, appears under Holdings; Portfolio Risk and Income & Performance show only the account selector. Free cash = cash minus that account's **option collateral**. Each intact multi-leg structure reserves its own collateral (see Spreads and Other Multi-Leg Trades); for other options, a short put reserves strike × 100 × contracts, unless a long put of the same ticker and expiry in that account protects it. A lower-strike long put (a bull put spread) leaves only the strike width × 100 × contracts reserved; a long put at or above the short strike (a bear put debit spread) covers assignment fully, so nothing is reserved. A short call not covered by the account's shares and matched with a higher-strike long call (a bear call spread) also reserves the width; covered calls reserve nothing. Each protective contract and each 100-share block is used once. Credits received are not netted. Cash is a user-entered balance, not a ledger: it does not change automatically when you record trades, and it is not broker buying power or margin. Risk, Doctor, tax, dividends, the ledger report and the SPY comparison remain combined across accounts. Account ledger deposits and withdrawals can name a brokerage account, which makes that account's value history flow-adjusted; entries without an account count toward Default.
 
 ### Stocks
 
@@ -688,26 +690,54 @@ After expiry (past the 4 p.m. Eastern close on the expiry date), an option shows
 
 When buying or selling to close, the optional **Wheel cycle** field, or the expiry prompt, links the new closed record to a named cycle after the close is saved. For a roll, close the old leg with the cycle name, then open the new leg. If the link fails, the close stays recorded and the message says it was not linked; link it later from Journal's Wheel cycles. Retries cannot double-link the same close.
 
-#### Vertical Spreads (Bull/Bear, Credit/Debit)
+#### Spreads and Other Multi-Leg Trades
 
-Choose **Action → Open a spread (2 legs)** to record a two-leg vertical spread: both legs on the same ticker, type and expiry, opened together.
+Choose **Action → Open a spread (2–4 legs)**, pick a **Structure**, and enter each leg's strike and actual fill per share. All legs are on one ticker and open together.
 
-| Spread | Legs | Opened for | Max profit | Max loss | Breakeven |
-| --- | --- | --- | --- | --- | --- |
-| Bull call | Buy lower call, sell upper call | Debit | Width − debit | Debit | Lower strike + debit |
-| Bear put | Buy upper put, sell lower put | Debit | Width − debit | Debit | Upper strike − debit |
-| Bull put | Sell upper put, buy lower put | Credit | Credit | Width − credit | Upper strike − credit |
-| Bear call | Sell lower call, buy upper call | Credit | Credit | Width − credit | Lower strike + credit |
+| Structure | Legs (per structure) | Usually opened for |
+| --- | --- | --- |
+| Bull call / Bear put | Buy one call (put), sell another at a different strike, same expiry | Debit |
+| Bull put / Bear call | Sell one put (call), buy a further out-of-the-money one, same expiry | Credit |
+| Iron condor | Buy a low put, sell a higher put, sell a call at or above it, buy a higher call, same expiry | Credit |
+| Iron butterfly | An iron condor whose sold put and call share the middle strike | Credit |
+| Call / put butterfly | Buy 1 low strike, sell 2 middle, buy 1 high, same expiry; unequal (broken) wings allowed | Debit, or a credit with a broken wing |
+| Call / put calendar | Sell a nearer expiry and buy a later one at the same strike | Debit |
+| Call / put diagonal | Sell a nearer expiry and buy a later one at a different strike | Debit |
 
-Dollar amounts are per share × 100 × contracts. Enter both strikes and each leg's actual fill per share; the form previews the net debit or credit, max profit, max loss, breakeven and (credit spreads) the cash it reserves. It rejects a net that is zero, has the wrong sign for the spread type, or is not below the strike width. Both legs are saved in one transaction as normal option records linked by a spread ID, so each leg keeps its own mark, Greeks and audit trail.
+Leg labels say what each leg is (for example "Leg 2 · Sell 1 put (second strike)"). The structure is recognized from the legs themselves, so strikes in the wrong order are rejected ("These strikes make a bear put, not a bull put"), as are any other combination, a net of zero, a debit/credit opposite to the structure's usual one, and fills that leave no possible profit or loss.
 
-The options table shows each intact spread as one row: type, CREDIT/DEBIT, long/short strikes, where the stock sits (**Max profit**, **Between strikes**, **Max loss**, with breakeven on hover), net entry, net mark (long-leg midpoint minus short-leg midpoint, or the reverse for credit spreads), and combined P&L as a percentage of max loss. P&L is unavailable unless both legs have a usable quote. **▸** shows the two legs underneath.
+Limits come from the value of all legs at expiry, which is straight-line between strikes, so every structure is measured the same way. The preview and table show:
+- **net debit or credit** per share;
+- **max profit** and **max loss**, both per share × 100 × contracts, and the **breakeven(s)** (two for condors and butterflies);
+- **cash reserved**: the most the legs can owe at expiry. That is the strike width for a credit vertical, the wider side of an iron condor, and nothing for a debit vertical or a balanced butterfly. Credits received are not netted.
 
-- **× Close spread** opens a panel for the buy-back price of the short leg and the sale price of the long leg, plus contracts. Both legs close together in one transaction; a partial close keeps the remaining contracts as a spread. The preview shows the net close and P&L.
-- **⌛** (after expiry) settles both legs at their intrinsic value from the underlying's close on the expiry date (daily history), dated the expiry date. If that close is unavailable it asks you to close at settlement prices instead. If the stock finished between the strikes the short leg was probably assigned: open the legs and use 📥 on the short leg instead.
-- **🗑** deletes a mistaken entry (both legs) without recording a close.
+Calendars and diagonals are measured at the nearer expiry, assuming the later leg is worth at least its intrinsic value. So max loss is a bound (the debit, plus any unfavorable strike gap for a diagonal), max profit "depends on volatility", and no breakeven is shown.
 
-Legs can still be closed, assigned, edited or deleted one at a time from the expanded rows. Doing so breaks the link: the remaining leg shows as an ordinary option. Roll / repair is not offered on spread legs, because rolling one leg would change the spread. A broker import or sync that replaces a leg re-adds it as a single option. Iron condors, butterflies, calendars and diagonals are not grouped.
+Every leg is saved as a normal option record in one transaction, linked by a spread ID with its ratio (2 for a butterfly's body) and the leg count, so each leg keeps its own mark and audit trail.
+
+The options table shows each intact structure as one row:
+- structure name, CREDIT/DEBIT and strikes (calendars show each leg's strike and expiry);
+- where the stock sits at expiry values (**Max profit**, **Between strikes**, **Max loss**, with breakevens on hover);
+- the nearest expiry, net entry and net mark (the legs at their midpoints; for credit structures, the cost to close);
+- combined P&L as a percentage of max loss. P&L is unavailable unless every leg has a usable quote.
+
+**▸** shows the legs underneath. Row actions:
+- **×** closes every leg together: enter each leg's fill, plus how many structures. A partial close keeps the rest of the structure intact, at its ratios.
+- **✏️** corrects strikes, expiries, fills or size in place (each leg keeps its id and open date). To change the structure type, delete it and open a new one.
+- **🔗** unlinks the legs so they become separate options again; nothing is closed.
+- **⌛** (once a leg has expired) settles the expired legs at their intrinsic value from the underlying's close on that expiry day (daily history), dated that day. If that close is unavailable it asks you to close at settlement prices. If a sold leg finished in the money it may have been assigned instead: open the legs and use 📥 on that leg. For a calendar, only the near leg settles and the later leg stays open.
+- **🗑** deletes a mistaken entry (every leg) without recording a close.
+
+**Legs closed separately.** Legs can still be closed, assigned, edited or deleted one at a time from the expanded rows. The structure then stops being intact, and the remaining legs show a **left from {structure}** badge. They are judged on their own (Option alerts adds an Info note), and their collateral reverts to single-option rules.
+
+**Link as spread.** Above the options table, open legs that look like one structure are suggested. The check covers:
+- unlinked legs, including leftovers and broker imports;
+- legs on the same ticker and account with matching contracts;
+- iron condors first, then verticals and calendars/diagonals.
+
+**Link as spread** groups them (ratios come from the contract counts). Nothing is linked automatically. A broker import or sync that replaces a leg re-adds it unlinked, so it shows up here.
+
+Roll / repair is not offered on structure legs, because rolling one leg changes the structure. Ratio spreads, straddles, strangles, jade lizards and structures with more than four legs are not supported.
 
 Source: [backend/spreads.py](backend/spreads.py), [frontend/src/components/SpreadPositions.jsx](frontend/src/components/SpreadPositions.jsx), [frontend/src/spreads.js](frontend/src/spreads.js).
 
@@ -804,12 +834,12 @@ Open option records are checked individually using the exact contract quote, can
 
 Ex-dividend estimates prefer an announced date, otherwise project the last interval from recent payment history. Insufficient history or a gap over twice the recent payment interval can suppress the estimate. Verify issuer announcements and broker exercise handling.
 
-**Spread legs** carry a "{type} spread" badge (the long leg of a credit spread, or the short leg of a debit spread, is marked "protective leg"). For an intact spread, rules are judged on the spread's net value instead of each leg on its own:
-- **Credit spreads:** stop at a net loss of at least 2× the net credit and profit capture at 50% of the net credit, both on the short leg (these also feed the take-profit and stop rules in My trading rules). The short call is covered by its long call, so it is not flagged uncovered and does not use up shares. Pin risk, tested strike, gamma, roll count, ex-dividend and early-assignment checks still apply to the short leg, because a short leg can still be assigned on its own.
-- **Debit spreads:** take-profit when the spread's mark reaches 80% of its width or doubles its debit; decay warning when it is down 50% with 21 or fewer days left. The short leg keeps only its pin-risk, ex-dividend, early-assignment and earnings checks.
-- The protective leg's own long-option take-profit and decay alerts are dropped, and spread legs don't show the single-option Repair button or buy-back limit hint.
+**Structure legs** carry a badge with the structure and strikes. The bought legs of a credit structure and the sold legs of a debit one are marked "protective leg". For an intact structure, rules are judged on its net value instead of each leg on its own, on the leg that defines the trade (the first sold leg of a credit structure, the first bought leg of a debit one):
+- **Credit structures** (credit verticals, iron condors/butterflies): stop at a net loss of at least 2× the net credit, and profit capture at 50% of it. These also feed the take-profit and stop rules in My trading rules. Sold calls are covered by the structure's bought calls, so they are not flagged uncovered and don't use up shares. Pin risk, tested strike, gamma, roll count, ex-dividend and early-assignment checks still apply to sold legs, because each can be assigned on its own.
+- **Debit structures** (debit verticals, butterflies, calendars, diagonals): take-profit when the mark reaches 80% of the maximum value or doubles the debit (calendars and diagonals: doubling only). Decay warning when down 50% with 21 or fewer days left on the nearest leg. Sold legs keep pin-risk, ex-dividend, early-assignment and earnings checks; for calendars and diagonals they also keep tested and gamma, because the sold leg expires first.
+- Bought legs lose their own long-option take-profit and decay alerts. Structure legs don't show the single-option Repair button or buy-back limit hint. Legs left from a broken structure get an Info note and the single-option rules.
 
-The stop/profit checks need quotes on both legs.
+The stop/profit checks need quotes on every leg.
 
 When a short position shows a profit-capture, stop or pin-risk action, a **buy-to-close limit** hint shows the price steps described under Order hints below.
 
@@ -830,7 +860,7 @@ Per position it shows:
 - for short puts, the cash needed if assigned next to the account's free cash;
 - for long options, today's intrinsic value.
 
-A leg of a vertical spread carries a note naming the other leg. Credit spreads: if both legs finish in the money, exercising the long leg offsets the assignment, so the net cost is the strike width × 100 × contracts; if only the short leg finishes in the money, assignment comes without that offset. For the short put of a bull put spread, cash if assigned is the width when the stock is below both strikes, otherwise the full strike, and the date's "puts reserve" total uses the width. Debit spreads: the long leg is deeper in the money, so if the short leg is assigned, exercising the long leg covers it and the spread pays its full width; a bear put's short put shows $0 cash if assigned. Spread short calls are not given a share-delivery plan.
+A leg of a structure carries a note with the structure, strikes and its max loss. For the first sold put of a structure, cash if assigned nets out bought puts in the same structure that would also be in the money: evaluated at the current price when it is below the strike, otherwise just below the strike. That gives the strike width for a bull put or condor put side when the stock is below both puts, the full strike when only the sold put is in the money, and $0 for a bear put (its bought put is deeper in the money). The date's "puts reserve" total uses the structure's put-side collateral. Sold calls in structures are not given a share-delivery plan.
 
 For short calls, **If assigned** compares two ways of delivering 100 × contracts shares from the recorded lots in the same account and ticker:
 - **Oldest lots first** (a common broker default, FIFO);
@@ -1031,7 +1061,11 @@ Combines recorded closed stock and option records, sorted by closing timestamp d
 
 Gross/net P&L values, capture/return percentages and the gross realized total are green for profit, red for loss, and neutral for zero. The same value coloring applies to the recorded closed-options table in Manual journal. These colors do not change calculations or deduct fees from gross P&L.
 
-The table has one row per closing record with seven columns. A closed vertical spread is one row: its two leg records (closed together, with equal contracts) are combined. A credit spread counts as a short trade and a debit spread as a long trade, with net premiums per share, summed gross P&L and fees, and the review, notes and plan comparison of the leg that defines the trade (the short leg of a credit spread, the long leg of a debit spread). Captured %, win rate, statistics, groupings, Options review, the options coach and the weekly review therefore count it once. The Strategy grouping shows it as, for example, "Bull put spread". Plan comparisons treat it as a "Debit spread" or "Credit spread" structure, and CSV export writes type "Option spread" with both strikes.
+The table has one row per closing record with seven columns. A closed structure is one row: the k-th closing record of each of its legs form the k-th trade (closing a structure closes every leg, so partial closes line up), merged when they form a supported structure. A credit structure counts as a short trade and a debit one as a long trade. The row carries:
+- net premiums per share and summed gross P&L and fees;
+- the review, notes and plan comparison of the leg that defines the trade.
+
+Captured %, win rate, statistics, groupings, Options review, the options coach and the weekly review therefore count it once. The Strategy grouping shows it as, for example, "Bull put spread" or "Iron condor". Plan comparisons treat it as a "Debit spread" or "Credit spread" structure. CSV export writes type "Option spread" with all strikes.
 
 - **Trade:** ticker, a side badge (short/long put/call, the spread type, or stock), strike (long/short strikes for spreads), expiry and size, and the brokerage account when it is not Default.
 - **Dates:** opened → closed, with days held and DTE left at the close underneath.
@@ -1106,13 +1140,19 @@ The subtotal excludes unlinked records, open-position marks, dividends, taxes an
 
 Gross P&L is `(opening premium - closing premium) * contracts * 100` for shorts, reversed for longs. Net P&L subtracts recorded fees. For example only, one short put opened at $1.20 and bought back at $0.35 yields $85 gross, or $83.70 after $1.30 total fees. Enter actual fills; an $85 outcome alone does not establish contract details, dates or fees.
 
-The record, audit trail and fee entry save atomically, without creating an open position or a second manual stock-journal entry. Retrying an unchanged submission in the form reuses its request key. A new submission is not automatically matched against existing trades, so do not re-enter a position already recorded in Portfolio. The saved record appears in Manual journal, Trade history, Portfolio closed options and Options review. Fee corrections made through the account ledger update net results; gross trade P&L remains unchanged. Combined fees are recorded on the closing date, not separately allocated to opening/closing cash-flow dates. Broker import and explicit assignment/exercise tax treatment are not provided by this form; two-leg vertical spreads use its **Spread (2 legs)** mode described below.
+The record, audit trail and fee entry save atomically, without creating an open position or a second manual stock-journal entry. Retrying an unchanged submission in the form reuses its request key. A new submission is not automatically matched against existing trades, so do not re-enter a position already recorded in Portfolio. The saved record appears in Manual journal, Trade history, Portfolio closed options and Options review. Fee corrections made through the account ledger update net results; gross trade P&L remains unchanged. Combined fees are recorded on the closing date, not separately allocated to opening/closing cash-flow dates. Broker import and explicit assignment/exercise tax treatment are not provided by this form; multi-leg trades use its **Spread (2–4 legs)** mode described below.
 
 The left-hand **Actions** column provides Review trade plus edit and delete controls for manually recorded options. Edit pre-fills the form; **Save option changes** updates the same record, recalculates P&L and reverses/replaces its recorded fees atomically. Cancel leaves the saved record unchanged. Delete requires confirmation, removes the manual trade from results and reverses its active fees and cycle allocations while retaining immutable audit history. Editing cannot reduce contracts below an existing cycle allocation; reverse that allocation in Account ledger or Wheel cycles first. Trades closed from live Portfolio lots cannot be edited through this manual-entry workflow, but support nonfinancial reviews.
 
 **Expiry**, **Opened on** and **Closed on** have visible calendar buttons that open the browser's native date picker, with dark/light theme support. Direct date entry remains available when the browser does not support programmatic picker opening.
 
-**Spread (2 legs)** in the same form logs a completed vertical spread: ticker, spread type (bull call, bull put, bear call, bear put), expiry, contracts, lower and upper strikes, opening and closing dates, each leg's opening and closing fill per share (labels say which leg was bought or sold), total fees for all legs, and notes. It previews the opening net debit/credit with max profit and loss, and gross and net P&L, which is the sum of both legs. Both legs save in one transaction, with fees and notes on the leg that defines the trade; retrying an unchanged submission reuses its request key. The spread shows as one trade everywhere. It can be deleted (both legs together) but not edited: delete and re-enter it. Use 0 for a leg that expired worthless.
+**Spread (2–4 legs)** in the same form logs a completed multi-leg trade, using any structure from Portfolio's spread builder. Enter:
+- ticker, structure, expiry (per leg for calendars/diagonals) and contracts;
+- opening and closing dates;
+- each leg's strike with its opening and closing fill per share;
+- total fees for all legs, and notes.
+
+It previews the opening net, limits and breakevens, and gross and net P&L (the sum of all legs). Every leg saves in one transaction, with fees and notes on the leg that defines the trade; retrying an unchanged submission reuses its request key. A leg that expired before the closing date is recorded as closed on its expiry. Use 0 for a leg that expired worthless. The trade shows as one row everywhere. **✏️** edits a manually logged structure (every leg keeps its record and audit history; fees are replaced), and delete removes every leg of that close together.
 
 **Manual stock journal** remains separate: record long/short direction, shares, entry date/price, optional stop/target, setup tag and notes; add exit date/price when closed. Its statistics and coach below apply only to these stock-style manual entries, not the options journal. Available setup tags are Breakout, Pullback, Gap and go, Opening range, Reversal, Earnings, Trend follow, Squeeze, and Long-term buy. Tags are user classifications, not proof that a scanner rule was satisfied.
 
@@ -1136,7 +1176,7 @@ Manual statistics do not automatically include broker fees, financing, tax adjus
 
 Analyzes recorded closed options, including historical entries, separately from manual stock-journal entries. Shows count, positive-net-P&L win rate, net P&L after recorded fees, average win/loss, profit factor and worst recorded outcome. Unrecorded costs are not inferred. Realized option results in Combined P&L and Premium income also include recorded fees; premium cash-flow totals still exclude fees. Breakdowns are long/short call/put, ticker, exit type, and DTE at opening: <=0, 1-7, 8-30, 31-60, over 60, or unknown.
 
-A zero close price is labeled "zero-price close (reason unrecorded)" rather than assumed to be expiry or assignment. This existing exit-type breakdown is derived from fills and does not use the separately recorded Journal review reason. Vertical spreads recorded as spreads (from Portfolio or the journal's spread form) count as one trade under their spread type; option legs entered separately are not reconstructed into spreads. Options AI coaching requires at least five closed option records and AI access. It also receives the Journal review answers (plan followed, habit tags, exit reason, capture target) for the 40 most recent closes and the plan/tag net-P&L summary, labeled as self-reported. Its conclusions are separate from the manual-journal coach.
+A zero close price is labeled "zero-price close (reason unrecorded)" rather than assumed to be expiry or assignment. This existing exit-type breakdown is derived from fills and does not use the separately recorded Journal review reason. Structures recorded as such (from Portfolio, the journal's spread form, or linked legs) count as one trade under their structure; closed legs that were never linked are not reconstructed into spreads. Options AI coaching requires at least five closed option records and AI access. It also receives the Journal review answers (plan followed, habit tags, exit reason, capture target) for the 40 most recent closes and the plan/tag net-P&L summary, labeled as self-reported. Its conclusions are separate from the manual-journal coach.
 
 ### Pre-Trade Checklist
 

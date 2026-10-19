@@ -768,8 +768,14 @@ _RISK_PLANS = {
     "extreme": {"label": "0DTE / this week", "dte": (0, 6, 0), "delta": 0.45},
     "high": {"label": "Near-dated (1–3 weeks)", "dte": (7, 21, 14), "delta": 0.40},
     "moderate": {"label": "30–45 days out", "dte": (28, 50, 38), "delta": 0.50},
+    "medium": {"label": "2–6 months out", "dte": (51, 179, 90), "delta": 0.60},
     "low": {"label": "LEAPS (6+ months)", "dte": (180, 900, 365), "delta": 0.75},
 }
+# Horizons too long to step around a report: they hold through earnings with a warning instead
+_HOLDS_THROUGH_EARNINGS = {"medium", "low"}
+# A debit spread must be able to make at least what it risks, judged at a fill halfway between mid and natural
+_MIN_REWARD_RISK = 1.0
+_SPREAD_MIN_DELTA = 0.30
 
 
 def _near_delta(rows: list[dict], target: float, band: float = 0.08) -> dict | None:
@@ -891,8 +897,16 @@ def _long_option(rows, kind, S, T, budget, target):
     }, ideal["mid"] * 100
 
 
+def _fill_debit(long: dict, short: dict) -> float:
+    """Debit halfway between the mid and the natural price (pay the long ask, sell at the short bid)."""
+    mid, natural = long["mid"] - short["mid"], long["ask"] - short["bid"]
+    return (mid + max(natural, mid)) / 2
+
+
 def _debit_spread(rows, kind, S, T, budget, target, em):
-    """Buy near the target delta, sell near the expected move; narrow the width until it fits the budget.
+    """Buy near the target delta, sell near the expected move. If that doesn't fit the budget, search other pairs
+    instead of shrinking the width: keep the bought strike as close to the target delta as possible while the spread
+    still pays at least what it risks (_MIN_REWARD_RISK at a realistic fill) and stays within the expected move.
     Returns (idea | None, cheapest one-lot cost seen)."""
     long = _near_delta(rows, target)
     if not long:
@@ -900,47 +914,73 @@ def _debit_spread(rows, kind, S, T, budget, target, em):
     sign = 1 if kind == "call" else -1
     reach = max(em or S * 0.05, _spread_width(S))
     goal = long["strike"] + sign * reach
-    shorts = [r for r in rows if sign * (r["strike"] - long["strike"]) > 0 and r["bid"] > 0]
-    shorts = [r for r in shorts if _tradable(r)] or shorts
+    priced = [r for r in rows if r["bid"] > 0]
+    pool = [r for r in priced if _tradable(r)] or priced
+    shorts = [r for r in pool if sign * (r["strike"] - long["strike"]) > 0]
     if not shorts:
         return None, None
     ideal = max(shorts, key=lambda r: 0.4 * _oi_score(r["oi"]) - abs(r["strike"] - goal) / reach)
-    w_ideal = abs(ideal["strike"] - long["strike"])
-    narrower = sorted((r for r in shorts if abs(r["strike"] - long["strike"]) < w_ideal),
-                      key=lambda r: -abs(r["strike"] - long["strike"]))
-    cheapest = None
-    for s in [ideal] + narrower:
-        width = abs(s["strike"] - long["strike"])
-        debit = long["mid"] - s["mid"]
+
+    def evaluate(lg, sh):
+        width, debit = abs(sh["strike"] - lg["strike"]), lg["mid"] - sh["mid"]
         if not 0 < debit < width:
-            continue
-        cheapest = debit * 100 if cheapest is None else min(cheapest, debit * 100)
-        if debit * 100 > budget:
-            continue
-        n = int(budget // (debit * 100))
-        be = long["strike"] + sign * debit
-        oi = min(long["oi"], s["oi"])
-        worst = max(_spread_pct(long["bid"], long["ask"]) or 0, _spread_pct(s["bid"], s["ask"]) or 0)
-        label = "Bull call" if kind == "call" else "Bear put"
-        return {
-            "kind": "spread", "title": f"{label} debit spread",
-            "legs": [{"action": "BUY", "type": kind, "strike": long["strike"], "mid": round(long["mid"], 2),
-                      "oi": long["oi"], "delta": round(long["delta"], 2), "spread_pct": _leg_spread(long)},
-                     {"action": "SELL", "type": kind, "strike": s["strike"], "mid": round(s["mid"], 2),
-                      "oi": s["oi"], "delta": round(s["delta"], 2), "spread_pct": _leg_spread(s)}],
-            "qty": n, "unit": "spread", "cost": round(debit * 100 * n, 2), "max_loss": round(debit * 100 * n, 2),
-            "max_profit": round((width - debit) * 100 * n, 2),
-            "reward_risk": round((width - debit) / debit, 2),
-            "breakeven": round(be, 2), "move_needed_pct": _move_pct(kind, S, be),
-            "prob_profit_pct": _prob_profit(kind, S, be, T, long["iv"]),
-            "open_interest": oi, "liquidity": _liquidity(oi, worst),
-            "narrowed": s is not ideal,
-            "notes": ("Narrower than the expected-move target to fit the budget. " if s is not ideal else
-                      "Short strike sits near the expected move. ")
-                     + "Profit is capped at the short strike, but it costs far less and decays slower than a lone "
-                       "option. Enter both legs as one order at a limit near the mid.",
-        }, cheapest
-    return None, cheapest
+            return None
+        fill = _fill_debit(lg, sh)
+        return width, debit, fill < width and (width - fill) / fill >= _MIN_REWARD_RISK
+
+    cheapest, choice = None, None
+    first = evaluate(long, ideal)
+    if first:
+        cheapest = first[1] * 100
+        if first[1] * 100 <= budget and first[2]:
+            choice = (long, ideal, False)
+    if choice is None:
+        best_key = None
+        for lg in pool:
+            if not _SPREAD_MIN_DELTA <= lg["delta"] <= target + 0.02:
+                continue
+            for sh in pool:
+                if sign * (sh["strike"] - lg["strike"]) <= 0 or abs(sh["strike"] - lg["strike"]) > reach:
+                    continue
+                result = evaluate(lg, sh)
+                if not result:
+                    continue
+                width, debit, ok = result
+                cheapest = debit * 100 if cheapest is None else min(cheapest, debit * 100)
+                if not ok or debit * 100 > budget:
+                    continue
+                # Closest to the target delta first (higher chance of profit), then the widest affordable spread
+                key = (round(lg["delta"], 2), width, min(lg["oi"], sh["oi"]))
+                if best_key is None or key > best_key:
+                    best_key, choice = key, (lg, sh, True)
+    if choice is None:
+        return None, cheapest
+    lg, s, adjusted = choice
+    width, debit = abs(s["strike"] - lg["strike"]), lg["mid"] - s["mid"]
+    n = int(budget // (debit * 100))
+    be = lg["strike"] + sign * debit
+    oi = min(lg["oi"], s["oi"])
+    worst = max(_spread_pct(lg["bid"], lg["ask"]) or 0, _spread_pct(s["bid"], s["ask"]) or 0)
+    label = "Bull call" if kind == "call" else "Bear put"
+    return {
+        "kind": "spread", "title": f"{label} debit spread",
+        "legs": [{"action": "BUY", "type": kind, "strike": lg["strike"], "mid": round(lg["mid"], 2),
+                  "oi": lg["oi"], "delta": round(lg["delta"], 2), "spread_pct": _leg_spread(lg)},
+                 {"action": "SELL", "type": kind, "strike": s["strike"], "mid": round(s["mid"], 2),
+                  "oi": s["oi"], "delta": round(s["delta"], 2), "spread_pct": _leg_spread(s)}],
+        "qty": n, "unit": "spread", "cost": round(debit * 100 * n, 2), "max_loss": round(debit * 100 * n, 2),
+        "max_profit": round((width - debit) * 100 * n, 2),
+        "reward_risk": round((width - debit) / debit, 2),
+        "breakeven": round(be, 2), "move_needed_pct": _move_pct(kind, S, be),
+        "prob_profit_pct": _prob_profit(kind, S, be, T, lg["iv"]),
+        "open_interest": oi, "liquidity": _liquidity(oi, worst),
+        "narrowed": adjusted,
+        "notes": (f"The {lg['delta']:.2f}-delta strike with a short strike near the expected move is over budget, so this "
+                  "uses the closest strikes that fit and still pay at least as much as they risk. " if adjusted else
+                  "Short strike sits near the expected move. ")
+                 + "Profit is capped at the short strike, but it costs far less and decays slower than a lone "
+                   "option. Enter both legs as one order at a limit near the mid.",
+    }, cheapest
 
 
 def _pick_best(ideas: dict, direction: str, risk: str, budget: float, S: float, iv_high: bool):
@@ -962,13 +1002,18 @@ def _pick_best(ideas: dict, direction: str, risk: str, budget: float, S: float, 
     if risk == "moderate" and spread:
         return "spread", ("Best value for a move over the next month or so: the sold strike pays for part of the "
                           "premium and time decay hurts much less than owning a lone option.")
-    if risk == "low":
+    if risk in ("low", "medium"):
         if long and not long["stretched"]:
-            return "long", (f"An in-the-money LEAPS moves about {round(long['legs'][0]['delta'] * 100)}% as much as the "
-                            "stock for a fraction of the price, with many months for the idea to play out.")
+            return "long", (f"An in-the-money {'LEAPS' if risk == 'low' else 'option'} moves about "
+                            f"{round(long['legs'][0]['delta'] * 100)}% as much as the stock for a fraction of the price, "
+                            "with months for the idea to play out.")
+        if risk == "medium" and spread:
+            return "spread", ("A near-the-money option for these months doesn't fit the budget; the spread keeps the bought "
+                              "strike near the money and pays at least as much as it risks, instead of a far "
+                              "out-of-the-money call that needs a big move.")
         if shares:
-            return "shares", ("LEAPS near the money are above your budget; a few shares is the lowest-risk way to "
-                              "express the view — no expiry, no time decay.")
+            return "shares", (("LEAPS" if risk == "low" else "Options") + " near the money are above your budget; a few "
+                              "shares is the lowest-risk way to express the view — no expiry, no time decay.")
     for k in ("spread", "long", "shares"):
         if ideas.get(k):
             return k, "Closest fit for your budget."
@@ -991,8 +1036,8 @@ def directional_ideas(ticker: str, direction: str, budget: float, risk: str) -> 
         exp = exp or _pick_expiry(exps, target_dte, 0, 1000)
         if not exp:
             raise LookupError("No suitable expirations")
-        # Short-horizon plans avoid holding through a report when an earlier liquid expiry exists; LEAPS can't.
-        if earnings and earnings <= exp and risk != "low":
+        # Short-horizon plans avoid holding through a report when an earlier liquid expiry exists; longer ones can't.
+        if earnings and earnings <= exp and risk not in _HOLDS_THROUGH_EARNINGS:
             pre, _ = _liquid_expiry(ticker, [e for e in exps if e < earnings], target_dte, max(lo // 2, 0), hi, S)
             if pre:
                 exp_note = (f"Moved to {pre}, the last liquid expiry before earnings on {earnings}, so the trade "
@@ -1043,9 +1088,9 @@ def directional_ideas(ticker: str, direction: str, budget: float, risk: str) -> 
         args = (direction, risk, budget, S, iv_level == "high")
         eligible = {key: idea for key, idea in ideas.items() if idea.get("liquidity") in ("good", "ok")}
         no_trade_reason = None
-        if not earnings and not no_earnings and risk != "low":
+        if not earnings and not no_earnings and risk not in _HOLDS_THROUGH_EARNINGS:
             no_trade_reason = "Earnings date is unavailable, so option event risk is not cleared."
-        elif earnings and earnings <= exp and risk != "low":
+        elif earnings and earnings <= exp and risk not in _HOLDS_THROUGH_EARNINGS:
             no_trade_reason = ("Earnings occur by every liquid expiry in this timeframe, so no option trade passes the "
                                "event-risk check.")
         elif not eligible:
@@ -1076,7 +1121,7 @@ def directional_ideas(ticker: str, direction: str, budget: float, risk: str) -> 
             track_record.record_directional(result)
         return result
 
-    return get_or_fetch(f"directional-v3:{ticker}:{direction}:{risk}:{budget}", _fetch, ttl=180)
+    return get_or_fetch(f"directional-v4:{ticker}:{direction}:{risk}:{budget}", _fetch, ttl=180)
 
 
 # ── Covered calls after assignment (wheel step 2) ───────────────────────────

@@ -7,7 +7,7 @@ import {
   editHolding, deleteHolding, editOption, deleteOption,
   fetchClosedTrades, fetchClosedOptions, assignOption, expireOption, deleteClosedTrade, deleteClosedOption, deleteClosedSpread,
 } from '../api/stockApi';
-import { SpreadFields, SpreadRow, SpreadClosePanel } from './SpreadPositions';
+import { StructureBuilder, SpreadRow, SpreadClosePanel, LinkSuggestions } from './SpreadPositions';
 import PortfolioChart from './PortfolioChart';
 import SectorAllocation from './SectorAllocation';
 import PortfolioDoctor from './PortfolioDoctor';
@@ -77,6 +77,7 @@ export default function Portfolio() {
   const [expanded, setExpanded] = useState({});         // { ticker: true/false } for collapsibles
   const [repairOpt, setRepairOpt] = useState(null);     // short option position open in Roll / repair
   const [closingSpread, setClosingSpread] = useState(null);
+  const [editingSpread, setEditingSpread] = useState(null);
   const [openSpreadLegs, setOpenSpreadLegs] = useState({}); // { spread_id: true } shows that spread's two legs
   const validOptionPremium = String(optForm.premium).trim() !== ''
     && Number.isFinite(Number(optForm.premium)) && Number(optForm.premium) >= 0;
@@ -691,7 +692,7 @@ export default function Portfolio() {
                 <option value="sto">Sell to Open (Short)</option>
                 <option value="stc">Sell to Close</option>
                 <option value="btc">Buy to Close</option>
-                {editOptIdx === null && <option value="spread">Open a spread (2 legs)</option>}
+                {editOptIdx === null && <option value="spread">Open a spread (2–4 legs)</option>}
               </select>
             </div>
             <div className="form-field">
@@ -712,16 +713,16 @@ export default function Portfolio() {
               <input id="opt-strike" type="number" placeholder="Strike price" value={optForm.strike} min={0.01} step={1}
                 onChange={(e) => setOptForm({ ...optForm, strike: parseFloat(e.target.value) || 0 })} />
             </div>
-            </>}
             <div className="form-field">
               <label htmlFor="opt-expiry">Expiry Date</label>
               <input id="opt-expiry" type="date" value={optForm.expiry}
                 onChange={(e) => setOptForm({ ...optForm, expiry: e.target.value })}
                 min={new Date().toISOString().split('T')[0]} />
             </div>
+            </>}
             {optForm.action === 'spread' ? (
-              <SpreadFields ticker={optForm.ticker} expiry={optForm.expiry} account={account} setMsg={setMsg}
-                onOpened={() => { setOptForm({ ticker: '', type: 'call', strike: 100, expiry: '', premium: 2.5, contracts: 1, action: 'spread' }); loadOptions(); }} />
+              <StructureBuilder ticker={optForm.ticker} account={account} setMsg={setMsg}
+                onDone={() => { setOptForm({ ticker: '', type: 'call', strike: 100, expiry: '', premium: 2.5, contracts: 1, action: 'spread' }); loadOptions(); }} />
             ) : <>
             <div className="form-field">
               <label htmlFor="opt-premium">{optForm.action === 'btc' ? 'Buy-back price ($/share)' : optForm.action === 'stc' ? 'Closing sale price ($/share)' : 'Premium ($)'}</label>
@@ -774,6 +775,7 @@ export default function Portfolio() {
                   </span>
                 </div>
               </div>
+              <LinkSuggestions suggestions={optionsSummary.link_suggestions} setMsg={setMsg} onLinked={loadOptions} />
               <table className="portfolio-table options-table">
                 <thead>
                   <tr>
@@ -805,7 +807,8 @@ export default function Portfolio() {
                     if (item.spread) return <SpreadRow key={`spread-${item.spread.spread_id}`} spread={item.spread} account={account}
                       open={!!openSpreadLegs[item.spread.spread_id]} setMsg={setMsg}
                       onToggle={() => setOpenSpreadLegs(value => ({ ...value, [item.spread.spread_id]: !value[item.spread.spread_id] }))}
-                      onClose={spread => { setRepairOpt(null); setClosingSpread(spread); setTimeout(() => document.getElementById('spread-close-panel')?.scrollIntoView({ block: 'center' }), 0); }}
+                      onClose={spread => { setRepairOpt(null); setEditingSpread(null); setClosingSpread(spread); setTimeout(() => document.getElementById('spread-close-panel')?.scrollIntoView({ block: 'center' }), 0); }}
+                      onEdit={spread => { setRepairOpt(null); setClosingSpread(null); setEditingSpread(spread); setTimeout(() => document.getElementById('spread-edit-panel')?.scrollIntoView({ block: 'center' }), 0); }}
                       onChanged={() => { loadOptions(); loadClosed(); }} />;
                     const o = item.option;
                     const diff = o.type === 'call'
@@ -818,7 +821,8 @@ export default function Portfolio() {
                     const side = o.position || 'long';
                     return (
                     <tr key={o.id || i} className={`${editOptIdx === o.id ? 'row-editing' : ''}${item.leg ? ' spread-leg-row' : ''}`}>
-                      <td><strong>{o.ticker}</strong>{item.leg && <span className="market-sub"> spread leg</span>}{!account && o.account && o.account !== 'Default' && <span className="account-badge">{o.account}</span>}</td>
+                      <td><strong>{o.ticker}</strong>{item.leg && <span className="market-sub"> spread leg</span>}
+                        {o.broken_spread && <span className="account-badge" title="The rest of this structure was closed or changed; this leg is now tracked on its own">left from {o.broken_spread.toLowerCase()}</span>}{!account && o.account && o.account !== 'Default' && <span className="account-badge">{o.account}</span>}</td>
                       <td className={o.type === 'call' ? 'positive' : 'negative'} data-label="Type">
                         {o.type.toUpperCase()}
                       </td>
@@ -886,6 +890,10 @@ export default function Portfolio() {
                   })}
                 </tbody>
               </table>
+              {editingSpread && (
+                <StructureBuilder key={editingSpread.spread_id} spread={editingSpread} ticker={editingSpread.ticker} setMsg={setMsg}
+                  onCancel={() => setEditingSpread(null)} onDone={() => { setEditingSpread(null); loadOptions(); }} />
+              )}
               {closingSpread && (
                 <SpreadClosePanel key={closingSpread.spread_id} spread={closingSpread} setMsg={setMsg} onCancel={() => setClosingSpread(null)}
                   onDone={() => { setClosingSpread(null); loadOptions(); loadClosed(); }} />

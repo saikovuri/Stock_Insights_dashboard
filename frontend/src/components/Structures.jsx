@@ -7,6 +7,7 @@ const RISKS = {
   extreme: { label: '⚡ Extreme', sub: '0–6 days', hint: '0DTE / this-week options: lottery-ticket odds, can go to zero in hours.' },
   high: { label: '🔥 High', sub: '1–3 weeks', hint: 'Near-dated options: most leverage, can go to zero fast.' },
   moderate: { label: '⚖️ Moderate', sub: '30–45 days', hint: 'Enough time for the idea to work, still leveraged.' },
+  medium: { label: '📅 Patient', sub: '2–6 months', hint: 'A few months for the idea to play out; holds through earnings with a warning.' },
   low: { label: '🛡 Low', sub: 'LEAPS / shares', hint: 'Long-dated in-the-money options or shares — slow time decay.' },
 };
 
@@ -54,7 +55,8 @@ function IdeaCard({ i, expiry, why }) {
         <div><span>Max loss</span><strong className="negative">{money(i.max_loss)}</strong></div>
         <div><span>Max profit</span><strong className="positive">{money(i.max_profit)}</strong></div>
         <div><span>Breakeven</span><strong>${i.breakeven}</strong></div>
-        <div><span>Move needed</span><strong>{i.move_needed_pct > 0 ? '+' : ''}{i.move_needed_pct}%</strong></div>
+        <div><span>{i.move_needed_pct < 0 ? `Room to ${i.legs[0]?.type === 'put' ? 'rise' : 'fall'}` : 'Move needed'}</span><strong>{i.move_needed_pct < 0
+          ? `${Math.abs(i.move_needed_pct)}%` : `${i.move_needed_pct > 0 ? '+' : ''}${i.move_needed_pct}%`}</strong></div>
         {i.prob_profit_pct != null && (
           <div><span>Chance of profit <Tip term="pop" /></span><strong>~{i.prob_profit_pct}%</strong></div>
         )}

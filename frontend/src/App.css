@@ -1390,6 +1390,14 @@ body {
   .options-table .spread-leg-row td:first-child { padding-left: 2rem; }
 }
 .spread-preview { margin: 0; font-size: 0.85rem; line-height: 1.5; }
+.structure-legs-editor { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 0.6rem; grid-column: 1 / -1; }
+.structure-leg-editor { border: 1px solid var(--border, rgba(255, 255, 255, 0.12)); border-radius: 8px; padding: 0.5rem 0.65rem 0.65rem;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 0.4rem; min-width: 0; }
+.structure-leg-editor legend { font-size: 0.75rem; font-weight: 600; padding: 0 0.25rem; }
+.structure-leg-editor label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.72rem; min-width: 0; }
+.structure-leg-editor input { width: 100%; min-width: 0; box-sizing: border-box; }
+.link-suggestions { list-style: none; margin: 0.75rem 0 0; padding: 0; display: grid; gap: 0.4rem; }
+.link-suggestions li { font-size: 0.85rem; padding: 0.45rem 0.6rem; border-radius: 8px; background: rgba(116, 185, 255, 0.08); }
 
 .btn-icon {
   background: none;
@@ -5336,4 +5344,13 @@ button.signal-chip { cursor: pointer; }
 }
 @media (max-width: 380px) {
   .header-title-text { display: none; }
+}
+
+/* Multi-leg builder: legs and the payoff preview take a full row in the option form */
+.portfolio-form.labeled-form > .structure-legs-editor,
+.portfolio-form.labeled-form > .spread-preview { grid-column: 1 / -1; flex: 1 1 100%; width: 100%; }
+@media (max-width: 640px) {
+  /* Five risk plans: wrap to two rows instead of clipping the last one */
+  .structures-dir-row:has(.structures-risk-btn) { flex-wrap: wrap; }
+  .structures-dir-row .structures-risk-btn { flex: 1 1 28%; min-width: 0; }
 }

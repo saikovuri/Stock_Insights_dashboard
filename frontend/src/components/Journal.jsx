@@ -10,9 +10,10 @@ import TabStrip from './TabStrip';
 import PnlCalendar from './PnlCalendar';
 import {
   fetchJournal, addJournalEntry, updateJournalEntry, deleteJournalEntry, fetchJournalCoach, fetchClosedTrades, fetchClosedOptions, logClosedOption, updateClosedOption, deleteClosedOption,
-  recordAccountingEntry, fetchTradePlans, logClosedSpread, deleteClosedSpread,
+  recordAccountingEntry, fetchTradePlans, logClosedSpread, deleteClosedSpread, updateClosedSpread,
 } from '../api/stockApi';
-import { SPREAD_KINDS, spreadLegs, spreadPreview } from '../spreads';
+import { STRUCTURES, structureName, previewStructure, templateLegs } from '../spreads';
+import { LegsEditor, PreviewLine } from './SpreadPositions';
 
 const SETUP_TAGS = ['Breakout', 'Pullback', 'Gap and go', 'Opening range', 'Reversal', 'Earnings', 'Trend follow', 'Squeeze', 'Long-term buy'];
 const today = () => new Date().toISOString().slice(0, 10);
@@ -122,8 +123,8 @@ export function matchPlan(plans, trade) {
 /** What the closed trade actually was, in the pre-trade checklist's structure terms where possible. */
 export const tradeStructure = trade => trade.spread ? `${trade.spread.style} spread`
   : recordedTradeMetrics(trade).option ? `${trade.position} ${trade.option_type}` : null;
-const tradeLabel = trade => trade.spread ? `${trade.spread.label} spread` : `${trade.position} ${trade.option_type}`;
-const tradeStrikes = trade => trade.spread ? `$${trade.spread.long_strike}/$${trade.spread.short_strike}` : `$${trade.strike}`;
+const tradeLabel = trade => trade.spread ? structureName(trade.spread) : `${trade.position} ${trade.option_type}`;
+const tradeStrikes = trade => trade.spread ? trade.spread.strikes : `$${trade.strike}`;
 
 /** Plain comparisons of a closed trade against its saved plan: loss limit, holding period and structure. */
 export function planChecks(plan, trade) {
@@ -148,7 +149,7 @@ export function planChecks(plan, trade) {
 const CSV_COLUMNS = [
   ['Type', row => row.spread ? 'Option spread' : recordedTradeMetrics(row).option ? 'Option' : 'Stock'], ['Ticker', row => row.ticker],
   ['Side', row => recordedTradeMetrics(row).option ? tradeLabel(row) : 'stock'],
-  ['Strike', row => row.spread ? `${row.spread.long_strike}/${row.spread.short_strike}` : row.strike], ['Expiry', row => row.expiry], ['Quantity', row => row.quantity],
+  ['Strike', row => row.spread ? row.spread.strikes.replace(/\$/g, '') : row.strike], ['Expiry', row => row.expiry], ['Quantity', row => row.quantity],
   ['Account', row => row.account || 'Default'],
   ['Opened', row => String(row.opened_at || row.acquired_at || '').slice(0, 10)], ['Closed', row => String(row.closed_at || '').slice(0, 10)],
   ['Open price', row => row.open_premium ?? row.buy_price], ['Close price', row => row.close_premium ?? row.sell_price],
@@ -206,7 +207,7 @@ export function howClosed(row) {
 }
 
 export const GROUPINGS = {
-  strategy: ['Strategy', row => row.spread ? `${row.spread.label} spread` : `${row.position === 'short' ? 'Short' : 'Long'} ${row.option_type}`],
+  strategy: ['Strategy', row => row.spread ? structureName(row.spread) : `${row.position === 'short' ? 'Short' : 'Long'} ${row.option_type}`],
   dte: ['Days to expiry at entry', row => bucket(calendarDays(row.opened_at, row.expiry), DTE_BUCKETS), [...DTE_BUCKETS.map(([, label]) => label), 'Unknown']],
   held: ['Days held', row => bucket(recordedTradeMetrics(row).daysHeld, HELD_BUCKETS), [...HELD_BUCKETS.map(([, label]) => label), 'Unknown']],
   closed: ['How it was closed', howClosed, CLOSE_ORDER],
@@ -500,7 +501,7 @@ function RecordedHistory({ optionsOnly = false, version = 0, onEdit, onDelete, b
             <button className="btn-secondary btn-sm" type="button" title="Exit reason, target and review notes" aria-label={`Review ${row.ticker} trade ${row.id}`}
               disabled={busy || !row.ledger_event_id} onClick={() => { setSaved(null); setReviewTrade(row); }}>Review</button>
             {onEdit && row.is_manual && <>
-              {!row.spread && <button className="btn-icon" type="button" title="Edit manual option" aria-label={`Edit ${row.ticker} option`} disabled={busy} onClick={() => onEdit(row)}>✏️</button>}
+              <button className="btn-icon" type="button" title={row.spread ? 'Edit manual spread' : 'Edit manual option'} aria-label={`Edit ${row.ticker} option`} disabled={busy} onClick={() => onEdit(row)}>✏️</button>
               <button className="btn-icon" type="button" title="Delete manual option" aria-label={`Delete ${row.ticker} option`} disabled={busy} onClick={() => onDelete(row)}>🗑</button>
             </>}
             {(row.notes || row.review) && <details className="closed-option-notes"><summary>Notes</summary>{row.notes && <p>{row.notes}</p>}
@@ -532,82 +533,86 @@ function OptionDateField({ name, label, value, onChange, max }) {
   </div>;
 }
 
-const EMPTY_SPREAD = { ticker: '', kind: 'bull_put', expiry: '', contracts: '1', lower: '', upper: '', open_lower: '', open_upper: '',
-  close_lower: '', close_upper: '', opened_at: '', closed_at: '', fees: '0', notes: '' };
-
-/** Log a completed two-leg vertical spread; both legs are stored together and shown as one trade. */
-function ClosedSpreadForm({ onSaved }) {
-  const [form, setForm] = useState(EMPTY_SPREAD);
+/** Log a completed multi-leg structure, or correct one (`initial` is its merged trade row). */
+function ClosedSpreadForm({ initial, onSaved, onCancel }) {
+  const editing = Boolean(initial);
+  const spread = initial?.spread;
+  const [kind, setKind] = useState(editing ? spread.kind : 'bull_put');
+  const [form, setForm] = useState(editing ? { ticker: initial.ticker, contracts: String(initial.contracts), opened_at: String(initial.opened_at || '').slice(0, 10),
+    closed_at: String(initial.closed_at || '').slice(0, 10), fees: String(initial.fees ?? 0), notes: initial.notes || '' }
+    : { ticker: '', contracts: '1', opened_at: '', closed_at: '', fees: '0', notes: '' });
+  const [expiry, setExpiry] = useState(editing ? spread.legs[0].expiry : '');
+  const [legs, setLegs] = useState(editing ? spread.legs.map(l => ({ ...l, strike: String(l.strike), premium: String(l.premium), close: String(l.close_premium) }))
+    : templateLegs('bull_put'));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const attempt = useRef(null);
   const set = key => event => setForm(value => ({ ...value, [key]: event.target.value }));
-  const meta = SPREAD_KINDS[form.kind];
-  const bull = form.kind.startsWith('bull');
-  const pick = (lowerValue, upperValue) => bull ? { long: lowerValue, short: upperValue } : { long: upperValue, short: lowerValue };
-  const opens = pick(form.open_lower, form.open_upper), closes = pick(form.close_lower, form.close_upper);
+  const multi = editing ? spread.multi_expiry : Boolean(STRUCTURES[kind].multi);
+  const effective = legs.map(l => ({ ...l, expiry: multi ? l.expiry : expiry }));
   const contracts = Number(form.contracts);
-  const preview = spreadPreview({ kind: form.kind, lower: form.lower, upper: form.upper, longPremium: opens.long, shortPremium: opens.short, contracts });
-  const closeValid = [form.close_lower, form.close_upper].every(value => value !== '' && Number.isFinite(Number(value)) && Number(value) >= 0);
+  const preview = previewStructure(effective, contracts, editing ? null : kind);
+  const closesValid = legs.every(l => l.close !== '' && Number.isFinite(Number(l.close)) && Number(l.close) >= 0);
+  const opensValid = legs.every(l => Number(l.premium) > 0);
   const feesValid = form.fees !== '' && Number.isFinite(Number(form.fees)) && Number(form.fees) >= 0;
-  const openFillsValid = Number(form.open_lower) > 0 && Number(form.open_upper) > 0;
+  const lastExpiry = effective.map(l => l.expiry).filter(Boolean).sort().at(-1);
   const dateError = form.opened_at && form.closed_at && form.opened_at > form.closed_at ? 'Closing date cannot precede opening date.'
     : form.closed_at && form.closed_at > today() ? 'Completed trades cannot have future dates.'
-      : form.expiry && form.closed_at && form.closed_at > form.expiry ? 'Closing date cannot be after expiry.' : null;
-  const valid = preview && !preview.error && openFillsValid && closeValid && feesValid && Number.isInteger(contracts) && contracts > 0
-    && /^[A-Z^][A-Z0-9.^=-]{0,19}$/.test(form.ticker.trim().toUpperCase()) && form.opened_at && form.closed_at && form.expiry && !dateError;
-  const gross = valid ? Math.round(((Number(closes.long) - Number(opens.long)) + (Number(opens.short) - Number(closes.short))) * contracts * 100 * 100) / 100 : null;
-  const legLabel = (when, low) => `${when}: ${when === 'Opened' ? ((low === bull) ? 'bought' : 'sold') : ((low === bull) ? 'sold' : 'bought back')} ${low ? 'lower' : 'upper'} ${meta.type} ($/share)`;
+      : lastExpiry && form.closed_at && form.closed_at > lastExpiry ? 'Closing date cannot be after expiry.' : null;
+  const valid = preview && !preview.error && opensValid && closesValid && feesValid && Number.isInteger(contracts) && contracts > 0
+    && /^[A-Z^][A-Z0-9.^=-]{0,19}$/.test(form.ticker.trim().toUpperCase()) && form.opened_at && form.closed_at && !dateError;
+  const gross = valid ? Math.round(effective.reduce((sum, l) => sum + (l.position === 'long' ? 1 : -1) * l.ratio
+    * (Number(l.close) - Number(l.premium)), 0) * contracts * 100 * 100) / 100 : null;
   const save = async event => {
     event.preventDefault();
     if (!valid || busy) return;
-    const { long_strike, short_strike } = spreadLegs(form.kind, Number(form.lower), Number(form.upper));
-    const payload = { ticker: form.ticker.trim().toUpperCase(), kind: form.kind, expiry: form.expiry, contracts, long_strike, short_strike,
-      long_open: Number(opens.long), short_open: Number(opens.short), long_close: Number(closes.long), short_close: Number(closes.short),
-      opened_at: form.opened_at, closed_at: form.closed_at, fees: Number(form.fees), notes: form.notes };
+    const payload = { ticker: form.ticker.trim().toUpperCase(), ...(editing ? {} : { kind }), contracts, opened_at: form.opened_at,
+      closed_at: form.closed_at, fees: Number(form.fees), notes: form.notes,
+      legs: effective.map(l => ({ position: l.position, option_type: l.option_type, strike: Number(l.strike), expiry: l.expiry, ratio: Number(l.ratio),
+        open_premium: Number(l.premium), close_premium: Number(l.close), ...(l.id ? { id: l.id } : {}) })) };
     const signature = JSON.stringify(payload);
     if (attempt.current?.signature !== signature) attempt.current = { signature, key: crypto.randomUUID() };
     setBusy(true); setError(null);
     try {
-      await logClosedSpread({ ...payload, idempotency_key: attempt.current.key });
-      attempt.current = null; setForm(EMPTY_SPREAD);
-      onSaved(`${payload.ticker} ${meta.label.toLowerCase()} spread recorded.`);
+      const request = { ...payload, idempotency_key: attempt.current.key };
+      if (editing) await updateClosedSpread(initial.id, request);
+      else await logClosedSpread(request);
+      attempt.current = null;
+      onSaved(`${payload.ticker} ${structureName(editing ? spread : STRUCTURES[kind]).toLowerCase()} ${editing ? 'updated' : 'recorded'}.`);
     } catch (reason) { setError(reason.message); }
     finally { setBusy(false); }
   };
-  return <form className="closed-option-form" aria-label="Closed spread entry" onSubmit={save}>
+  return <form className="closed-option-form" aria-label={editing ? 'Edit closed spread' : 'Closed spread entry'} onSubmit={save}>
     <fieldset disabled={busy}>
-      <legend>Completed vertical spread · two legs, same expiry · Standard 100-share contracts</legend>
+      <legend>{editing ? `Edit closed ${structureName(spread).toLowerCase()}` : 'Completed multi-leg trade'} · Standard 100-share contracts</legend>
       <label>Ticker<input className="tool-input" required maxLength={20} value={form.ticker} onChange={set('ticker')} /></label>
-      <label>Spread<select className="tool-input" value={form.kind} onChange={set('kind')}>
-        {Object.entries(SPREAD_KINDS).map(([key, kind]) => <option key={key} value={key}>{kind.label} ({kind.style})</option>)}</select></label>
-      <OptionDateField name="spread-expiry" label="Expiry" value={form.expiry} onChange={set('expiry')} />
+      {!editing && <label>Structure<select className="tool-input" value={kind} onChange={event => { setKind(event.target.value); setLegs(templateLegs(event.target.value)); }}>
+        {Object.entries(STRUCTURES).map(([key, item]) => <option key={key} value={key}>{structureName(item)}{item.style ? ` (${item.style})` : ''}</option>)}</select></label>}
+      {!multi && <OptionDateField name="spread-expiry" label="Expiry" value={expiry} onChange={event => setExpiry(event.target.value)} />}
       <label>Contracts<input className="tool-input" type="number" required min="1" step="1" value={form.contracts} onChange={set('contracts')} /></label>
-      <label>Lower strike ($)<input className="tool-input" type="number" required min="0.000001" step="0.000001" value={form.lower} onChange={set('lower')} /></label>
-      <label>Upper strike ($)<input className="tool-input" type="number" required min="0.000001" step="0.000001" value={form.upper} onChange={set('upper')} /></label>
       <OptionDateField name="spread-opened" label="Opened on" max={today()} value={form.opened_at} onChange={set('opened_at')} />
       <OptionDateField name="spread-closed" label="Closed on" max={today()} value={form.closed_at} onChange={set('closed_at')} />
-      <label>{legLabel('Opened', true)}<input className="tool-input" type="number" required min="0.000001" step="0.000001" value={form.open_lower} onChange={set('open_lower')} /></label>
-      <label>{legLabel('Opened', false)}<input className="tool-input" type="number" required min="0.000001" step="0.000001" value={form.open_upper} onChange={set('open_upper')} /></label>
-      <label>{legLabel('Closed', true)}<input className="tool-input" type="number" required min="0" step="0.000001" value={form.close_lower} onChange={set('close_lower')} /></label>
-      <label>{legLabel('Closed', false)}<input className="tool-input" type="number" required min="0" step="0.000001" value={form.close_upper} onChange={set('close_upper')} /></label>
+      <LegsEditor legs={legs} multi={multi} idPrefix="closed-spread" onChange={(i, patch) => setLegs(list => list.map((l, j) => (j === i ? { ...l, ...patch } : l)))}
+        prices={[['premium', 'Opened at ($/share)', 'opening fill'], ['close', 'Closed at ($/share)', 'closing fill']]} />
       <label>Total fees ($, all legs)<input className="tool-input" type="number" required min="0" step="0.01" value={form.fees} onChange={set('fees')} /></label>
       <div className="closed-option-wide closed-option-notes-field">
         <label htmlFor="closed-spread-notes">Spread notes</label>
         <textarea id="closed-spread-notes" className="tool-input" rows={3} maxLength={1000} value={form.notes} onChange={set('notes')} />
       </div>
-      <p className="closed-option-wide market-sub" role="status">{preview?.error ? <span className="negative">{preview.error}</span>
-        : preview ? `Opened for a net ${preview.style} of $${preview.net.toFixed(2)}/share · max profit ${money(preview.maxProfit)} · max loss ${money(preview.maxLoss)}`
-          : meta.hint}</p>
+      <p className="closed-option-wide market-sub" role="status"><PreviewLine preview={preview} kind={kind} /></p>
       <div className="closed-option-wide doctor-stats" aria-label="Spread P&L preview">
         <div><span>Gross P&L</span><strong>{money(gross)}</strong></div>
         <div><span>Recorded fees</span><strong>{feesValid ? money(Number(form.fees)) : '—'}</strong></div>
         <div><span>Net P&L</span><strong>{gross == null ? '—' : money(gross - Number(form.fees))}</strong></div>
       </div>
-      <p className="closed-option-wide market-sub">For previously unrecorded trades only. Use 0 for a leg that expired worthless. Fees and notes are kept on the leg that defines the trade; delete and re-enter to correct a spread.</p>
+      <p className="closed-option-wide market-sub">{editing ? 'Corrections keep each leg’s record and audit history and replace recorded fees.'
+        : 'For previously unrecorded trades only. Use 0 for a leg that expired worthless; a leg that expired before the closing date is recorded as closed on its expiry.'}</p>
       {dateError && <p className="closed-option-wide error-text" role="alert">{dateError}</p>}
       {error && <p className="closed-option-wide error-text" role="alert">{error}</p>}
-      <button className="btn-primary btn-sm" disabled={!valid || busy} type="submit">{busy ? 'Saving...' : 'Record closed spread'}</button>
+      <div className="closed-option-wide form-actions">
+        <button className="btn-primary btn-sm" disabled={!valid || busy} type="submit">{busy ? 'Saving...' : editing ? 'Save spread changes' : 'Record closed spread'}</button>
+        {editing && <button className="btn-secondary btn-sm" type="button" onClick={onCancel}>Cancel</button>}
+      </div>
     </fieldset>
   </form>;
 }
@@ -621,6 +626,7 @@ function ClosedOptionJournal() {
   const [saved, setSaved] = useState(null);
   const [version, setVersion] = useState(0);
   const [editId, setEditId] = useState(null);
+  const [editSpread, setEditSpread] = useState(null);
   const tickerInput = useRef(null);
   const attempt = useRef(null);
   const pending = useRef(false);
@@ -655,11 +661,13 @@ function ClosedOptionJournal() {
     finally { pending.current = false; setBusy(false); }
   };
   const edit = row => {
+    if (row.spread) { setEditSpread(row); setShow(false); setError(null); setSaved(null); return; }
+    setEditSpread(null);
     setForm(Object.fromEntries(Object.keys(EMPTY_OPTION).map(key => [key, String(row[key] ?? EMPTY_OPTION[key])])));
     setEditId(row.id); setShow(true); setError(null); setSaved(null); attempt.current = null;
   };
   const remove = async row => {
-    const what = row.spread ? `${row.ticker} ${row.spread.label.toLowerCase()} spread (both legs)` : `${row.ticker} manual option entry`;
+    const what = row.spread ? `${row.ticker} ${structureName(row.spread).toLowerCase()} (every leg)` : `${row.ticker} manual option entry`;
     if (pending.current || !window.confirm(`Delete this ${what} and its recorded fees? The audit history will be retained.`)) return;
     pending.current = true; setBusy(true); setError(null); setSaved(null);
     try {
@@ -679,11 +687,13 @@ function ClosedOptionJournal() {
     {saved && <p role="status" className="positive">{saved}</p>}
     {error && <p className="error-text" role="alert">{error}</p>}
     {show && editId === null && <div className="trade-history-kinds" role="group" aria-label="Entry type">
-      {[['single', 'Single option'], ['spread', 'Spread (2 legs)']].map(([value, label]) =>
+      {[['single', 'Single option'], ['spread', 'Spread (2–4 legs)']].map(([value, label]) =>
         <button key={value} type="button" className={`watchlist-tab${mode === value ? ' active' : ''}`} aria-pressed={mode === value}
           onClick={() => setMode(value)}>{label}</button>)}
     </div>}
     {show && mode === 'spread' && editId === null && <ClosedSpreadForm onSaved={message => { setSaved(message); setShow(false); setVersion(value => value + 1); }} />}
+    {editSpread && <ClosedSpreadForm key={editSpread.id} initial={editSpread} onCancel={() => setEditSpread(null)}
+      onSaved={message => { setSaved(message); setEditSpread(null); setVersion(value => value + 1); }} />}
     {show && (mode === 'single' || editId !== null) && <form className="closed-option-form" aria-label="Closed option entry" onSubmit={save}>
       <fieldset disabled={busy}>
         <legend>{editId !== null ? 'Edit closed option' : 'Completed single-leg option'} · Standard 100-share contracts</legend>

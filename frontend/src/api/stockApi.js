@@ -537,16 +537,23 @@ export const assignOption = (id, cycle = '') => sendJson(`${BASE}/portfolio/opti
 export const expireOption = (id, cycle = '') => sendJson(`${BASE}/portfolio/options/${id}/expire`, 'POST', cycle ? { cycle } : null, 'Could not record expiry');
 export const deleteClosedTrade = (id) => sendJson(`${BASE}/portfolio/closed/${id}`, 'DELETE', null, 'Failed to delete trade');
 export const deleteClosedOption = (id) => sendJson(`${BASE}/portfolio/options/closed/${id}`, 'DELETE', null, 'Failed to delete trade');
-// ── Vertical spreads (two linked legs) ───────────────────────────
+// ── Multi-leg structures (legs linked by spread id) ─────────────
 export const openSpread = (payload) => sendJson(`${BASE}/portfolio/spreads`, 'POST', payload, 'Failed to open spread');
+export const editSpread = (spreadId, payload) =>
+  sendJson(`${BASE}/portfolio/spreads/${encodeURIComponent(spreadId)}`, 'PUT', payload, 'Failed to update spread');
 export const closeSpread = (spreadId, payload) =>
   sendJson(`${BASE}/portfolio/spreads/${encodeURIComponent(spreadId)}/close`, 'POST', payload, 'Failed to close spread');
 export const expireSpread = (spreadId) =>
   sendJson(`${BASE}/portfolio/spreads/${encodeURIComponent(spreadId)}/expire`, 'POST', null, 'Failed to settle spread');
 export const deleteSpread = (spreadId) =>
   sendJson(`${BASE}/portfolio/spreads/${encodeURIComponent(spreadId)}`, 'DELETE', null, 'Failed to delete spread');
+export const linkSpread = (optionIds) => sendJson(`${BASE}/portfolio/spreads/link`, 'POST', { option_ids: optionIds }, 'Failed to link legs');
+export const unlinkSpread = (spreadId) =>
+  sendJson(`${BASE}/portfolio/spreads/${encodeURIComponent(spreadId)}/unlink`, 'POST', null, 'Failed to unlink spread');
 export const logClosedSpread = (payload) =>
   sendJson(`${BASE}/portfolio/options/closed/spread`, 'POST', payload, 'Failed to record closed spread');
+export const updateClosedSpread = (tradeId, payload) =>
+  sendJson(`${BASE}/portfolio/options/closed/spread/${tradeId}`, 'PUT', payload, 'Failed to update closed spread');
 export const deleteClosedSpread = (tradeId) =>
   sendJson(`${BASE}/portfolio/options/closed/spread/${tradeId}`, 'DELETE', null, 'Failed to delete spread');
 export const fetchPremiumIncome = () => getJson(`${BASE}/portfolio/premium-income`, 'Failed to load premium income', true);

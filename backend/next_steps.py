@@ -110,7 +110,7 @@ def _covered_call_items(holdings: list[dict], options: list[dict]) -> list[dict]
         cost[key] += h["shares"] * h["buy_price"]
     calls = defaultdict(int)
     import spreads
-    spread_legs = {leg["id"] for legs in spreads.pair_open(options).values() for leg in legs}
+    spread_legs = {leg["id"] for legs in spreads.group_open(options).values() for leg in legs}
     for o in options:
         if o["position"] == "short" and o["option_type"] == "call" and o.get("id") not in spread_legs:
             calls[(o.get("account") or database.DEFAULT_ACCOUNT, o["ticker"])] += o["contracts"]

@@ -1,3 +1,4 @@
+import { structureName } from '../spreads';
 const usd = (value) => `${value < 0 ? '-' : ''}$${Math.abs(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 function DeleteCell({ type, id, confirmDelete, setConfirmDelete, onDelete }) {
@@ -80,10 +81,10 @@ export function ClosedOptions({ data, confirmDelete, setConfirmDelete, onDelete 
           {data.trades.map((t) => (
             <tr key={t.id}>
               <td><strong>{t.ticker}</strong> <span className={t.option_type === 'call' ? 'positive' : 'negative'}>{t.option_type.toUpperCase()}</span>{' '}
-                {t.spread ? <span className={`side-badge side-${t.position}`} title={`${t.spread.style} spread; prices are net per share`}>
-                  {t.spread.label.toUpperCase()} SPREAD</span>
+                {t.spread ? <span className={`side-badge side-${t.position}`} title={`${t.spread.style}; prices are net per share`}>
+                  {structureName(t.spread).toUpperCase()}</span>
                   : <span className={`side-badge side-${t.position}`}>{t.position.toUpperCase()}</span>}</td>
-              <td data-label="Strike">{t.spread ? `$${t.spread.long_strike}/$${t.spread.short_strike}` : `$${t.strike.toFixed(2)}`}</td>
+              <td data-label="Strike">{t.spread ? t.spread.strikes : `$${t.strike.toFixed(2)}`}</td>
               <td data-label="Expiry">{t.expiry}</td>
               <td data-label="Qty">{t.contracts}</td>
               <td data-label={t.spread ? `Open (net ${t.spread.style})` : 'Open'}>${t.open_premium.toFixed(2)}</td>
