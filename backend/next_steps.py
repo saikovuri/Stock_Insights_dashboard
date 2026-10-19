@@ -86,13 +86,13 @@ def _cash_items(user_id: int, account: str | None = None) -> list[dict]:
         if free is None:
             if reserved > 0:
                 items.append({"level": "warn", "code": "cash_unknown", "account": name,
-                              "title": f"{name}: short puts reserve {_usd(reserved)} but no cash balance is recorded",
+                              "title": f"{name}: short puts and credit spreads reserve {_usd(reserved)} but no cash balance is recorded",
                               "detail": "Enter the account's cash under Portfolio → Holdings (account bar) so collateral and free cash can be checked."})
         elif free < 0:
             items.append({"level": "warn", "code": "over_committed", "account": name,
-                          "title": f"{name}: short puts need {_usd(-free)} more cash than recorded",
-                          "detail": f"Put collateral {_usd(reserved)} vs cash {_usd(a['cash'])}. Fine if the account uses margin "
-                                    "and you accept that; otherwise add cash, or close or roll a put before assignment."})
+                          "title": f"{name}: short options need {_usd(-free)} more cash than recorded",
+                          "detail": f"Option collateral {_usd(reserved)} vs cash {_usd(a['cash'])}. Fine if the account uses margin "
+                                    "and you accept that; otherwise add cash, or close or roll a position before assignment."})
         elif free >= IDLE_CASH_MIN:
             items.append({"level": "idea", "code": "idle_cash", "account": name,
                           "title": f"{name}: {_usd(free)} cash not committed to any short put",
@@ -109,8 +109,10 @@ def _covered_call_items(holdings: list[dict], options: list[dict]) -> list[dict]
         shares[key] += h["shares"]
         cost[key] += h["shares"] * h["buy_price"]
     calls = defaultdict(int)
+    import spreads
+    spread_legs = {leg["id"] for legs in spreads.pair_open(options).values() for leg in legs}
     for o in options:
-        if o["position"] == "short" and o["option_type"] == "call":
+        if o["position"] == "short" and o["option_type"] == "call" and o.get("id") not in spread_legs:
             calls[(o.get("account") or database.DEFAULT_ACCOUNT, o["ticker"])] += o["contracts"]
     items = []
     for key in sorted(shares, key=lambda k: -cost[k]):

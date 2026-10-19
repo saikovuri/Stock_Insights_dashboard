@@ -5,8 +5,9 @@ import {
   fetchPortfolioSummary, buyStock, sellStock, sellStockLot,
   fetchOptionsSummary, buyOption, closeOption,
   editHolding, deleteHolding, editOption, deleteOption,
-  fetchClosedTrades, fetchClosedOptions, assignOption, expireOption, deleteClosedTrade, deleteClosedOption,
+  fetchClosedTrades, fetchClosedOptions, assignOption, expireOption, deleteClosedTrade, deleteClosedOption, deleteClosedSpread,
 } from '../api/stockApi';
+import { SpreadFields, SpreadRow, SpreadClosePanel } from './SpreadPositions';
 import PortfolioChart from './PortfolioChart';
 import SectorAllocation from './SectorAllocation';
 import PortfolioDoctor from './PortfolioDoctor';
@@ -75,6 +76,8 @@ export default function Portfolio() {
   const [sellLotId, setSellLotId] = useState(null);    // lot id being sold
   const [expanded, setExpanded] = useState({});         // { ticker: true/false } for collapsibles
   const [repairOpt, setRepairOpt] = useState(null);     // short option position open in Roll / repair
+  const [closingSpread, setClosingSpread] = useState(null);
+  const [openSpreadLegs, setOpenSpreadLegs] = useState({}); // { spread_id: true } shows that spread's two legs
   const validOptionPremium = String(optForm.premium).trim() !== ''
     && Number.isFinite(Number(optForm.premium)) && Number(optForm.premium) >= 0;
 
@@ -334,6 +337,8 @@ export default function Portfolio() {
         localStorage.setItem('guest_sold_stocks', JSON.stringify(sold));
       } else if (type === 'closed-stock') {
         await deleteClosedTrade(id);
+      } else if (type === 'closed-spread') {
+        await deleteClosedSpread(id);
       } else {
         await deleteClosedOption(id);
       }
@@ -686,6 +691,7 @@ export default function Portfolio() {
                 <option value="sto">Sell to Open (Short)</option>
                 <option value="stc">Sell to Close</option>
                 <option value="btc">Buy to Close</option>
+                {editOptIdx === null && <option value="spread">Open a spread (2 legs)</option>}
               </select>
             </div>
             <div className="form-field">
@@ -693,6 +699,7 @@ export default function Portfolio() {
               <input id="opt-ticker" type="text" placeholder="e.g. AAPL" value={optForm.ticker}
                 onChange={(e) => setOptForm({ ...optForm, ticker: e.target.value })} maxLength={10} />
             </div>
+            {optForm.action !== 'spread' && <>
             <div className="form-field">
               <label htmlFor="opt-type">Type</label>
               <select id="opt-type" value={optForm.type} onChange={(e) => setOptForm({ ...optForm, type: e.target.value })}>
@@ -705,12 +712,17 @@ export default function Portfolio() {
               <input id="opt-strike" type="number" placeholder="Strike price" value={optForm.strike} min={0.01} step={1}
                 onChange={(e) => setOptForm({ ...optForm, strike: parseFloat(e.target.value) || 0 })} />
             </div>
+            </>}
             <div className="form-field">
               <label htmlFor="opt-expiry">Expiry Date</label>
               <input id="opt-expiry" type="date" value={optForm.expiry}
                 onChange={(e) => setOptForm({ ...optForm, expiry: e.target.value })}
                 min={new Date().toISOString().split('T')[0]} />
             </div>
+            {optForm.action === 'spread' ? (
+              <SpreadFields ticker={optForm.ticker} expiry={optForm.expiry} account={account} setMsg={setMsg}
+                onOpened={() => { setOptForm({ ticker: '', type: 'call', strike: 100, expiry: '', premium: 2.5, contracts: 1, action: 'spread' }); loadOptions(); }} />
+            ) : <>
             <div className="form-field">
               <label htmlFor="opt-premium">{optForm.action === 'btc' ? 'Buy-back price ($/share)' : optForm.action === 'stc' ? 'Closing sale price ($/share)' : 'Premium ($)'}</label>
               <input id="opt-premium" type="number" placeholder="Actual fill per share" value={optForm.premium} min={0} step="any" required
@@ -741,6 +753,7 @@ export default function Portfolio() {
                 </button>
               )}
             </div>
+            </>}
           </div>
 
           {optionsSummary && optionsSummary.options && optionsSummary.options.length > 0 ? (
@@ -780,7 +793,21 @@ export default function Portfolio() {
                   </tr>
                 </thead>
                 <tbody>
-                  {optionsSummary.options.map((o, i) => {
+                  {(() => {
+                    const spreadList = optionsSummary.spreads || [];
+                    const legIds = new Set(spreadList.flatMap(s => s.leg_ids));
+                    return [
+                      ...spreadList.flatMap(s => [{ spread: s }, ...(openSpreadLegs[s.spread_id]
+                        ? s.leg_ids.map(id => optionsSummary.options.find(o => o.id === id)).filter(Boolean).map(o => ({ option: o, leg: true })) : [])]),
+                      ...optionsSummary.options.filter(o => !legIds.has(o.id)).map(o => ({ option: o })),
+                    ];
+                  })().map((item, i) => {
+                    if (item.spread) return <SpreadRow key={`spread-${item.spread.spread_id}`} spread={item.spread} account={account}
+                      open={!!openSpreadLegs[item.spread.spread_id]} setMsg={setMsg}
+                      onToggle={() => setOpenSpreadLegs(value => ({ ...value, [item.spread.spread_id]: !value[item.spread.spread_id] }))}
+                      onClose={spread => { setRepairOpt(null); setClosingSpread(spread); setTimeout(() => document.getElementById('spread-close-panel')?.scrollIntoView({ block: 'center' }), 0); }}
+                      onChanged={() => { loadOptions(); loadClosed(); }} />;
+                    const o = item.option;
                     const diff = o.type === 'call'
                       ? o.current_price - o.strike
                       : o.strike - o.current_price;
@@ -790,8 +817,8 @@ export default function Portfolio() {
                       : moneyness === 'OTM' ? ((o.position || 'long') === 'short' ? 'positive' : '') : '';
                     const side = o.position || 'long';
                     return (
-                    <tr key={o.id || i} className={editOptIdx === o.id ? 'row-editing' : ''}>
-                      <td><strong>{o.ticker}</strong>{!account && o.account && o.account !== 'Default' && <span className="account-badge">{o.account}</span>}</td>
+                    <tr key={o.id || i} className={`${editOptIdx === o.id ? 'row-editing' : ''}${item.leg ? ' spread-leg-row' : ''}`}>
+                      <td><strong>{o.ticker}</strong>{item.leg && <span className="market-sub"> spread leg</span>}{!account && o.account && o.account !== 'Default' && <span className="account-badge">{o.account}</span>}</td>
                       <td className={o.type === 'call' ? 'positive' : 'negative'} data-label="Type">
                         {o.type.toUpperCase()}
                       </td>
@@ -832,7 +859,7 @@ export default function Portfolio() {
                           priceInput?.scrollIntoView({ block: 'center' });
                           priceInput?.focus();
                         }}>×</button>
-                        {side === 'short' && o.dte >= 0 && (
+                        {side === 'short' && o.dte >= 0 && !item.leg && (
                           <button className="btn-icon" title="Roll / repair this short option"
                             onClick={() => setRepairOpt(repairOpt?.id === o.id ? null : o)}>🔧</button>
                         )}
@@ -859,6 +886,10 @@ export default function Portfolio() {
                   })}
                 </tbody>
               </table>
+              {closingSpread && (
+                <SpreadClosePanel key={closingSpread.spread_id} spread={closingSpread} setMsg={setMsg} onCancel={() => setClosingSpread(null)}
+                  onDone={() => { setClosingSpread(null); loadOptions(); loadClosed(); }} />
+              )}
               {repairOpt && (
                 <div className="card roll-panel" id="roll-panel">
                   <div className="ivrank-header">

@@ -80,18 +80,20 @@ export function ClosedOptions({ data, confirmDelete, setConfirmDelete, onDelete 
           {data.trades.map((t) => (
             <tr key={t.id}>
               <td><strong>{t.ticker}</strong> <span className={t.option_type === 'call' ? 'positive' : 'negative'}>{t.option_type.toUpperCase()}</span>{' '}
-                <span className={`side-badge side-${t.position}`}>{t.position.toUpperCase()}</span></td>
-              <td data-label="Strike">${t.strike.toFixed(2)}</td>
+                {t.spread ? <span className={`side-badge side-${t.position}`} title={`${t.spread.style} spread; prices are net per share`}>
+                  {t.spread.label.toUpperCase()} SPREAD</span>
+                  : <span className={`side-badge side-${t.position}`}>{t.position.toUpperCase()}</span>}</td>
+              <td data-label="Strike">{t.spread ? `$${t.spread.long_strike}/$${t.spread.short_strike}` : `$${t.strike.toFixed(2)}`}</td>
               <td data-label="Expiry">{t.expiry}</td>
               <td data-label="Qty">{t.contracts}</td>
-              <td data-label="Open">${t.open_premium.toFixed(2)}</td>
-              <td data-label="Close">${t.close_premium.toFixed(2)}</td>
+              <td data-label={t.spread ? `Open (net ${t.spread.style})` : 'Open'}>${t.open_premium.toFixed(2)}</td>
+              <td data-label={t.spread ? 'Close (net)' : 'Close'}>${t.close_premium.toFixed(2)}</td>
               <td data-label="Gross P/L" className={t.pnl >= 0 ? 'positive' : 'negative'}>${t.pnl.toFixed(2)}</td>
               <td data-label="Fees">{t.fees == null ? 'Unavailable' : `$${t.fees.toFixed(2)}`}</td>
               <td data-label="Net P/L">{t.net_pnl == null ? 'Unavailable' : usd(t.net_pnl)}</td>
               <td data-label="Gross %" className={t.pnl_pct >= 0 ? 'positive' : 'negative'}>{t.pnl_pct.toFixed(2)}%</td>
               <td data-label="Closed">{String(t.closed_at).slice(0, 10)}</td>
-              <DeleteCell type="closed-option" id={t.id} {...remove} />
+              <DeleteCell type={t.spread ? 'closed-spread' : 'closed-option'} id={t.id} {...remove} />
             </tr>
           ))}
         </tbody>

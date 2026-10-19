@@ -45,7 +45,7 @@ def violations(rules: dict, holdings: list[dict], options: list[dict], prices: d
             if pct < rules["min_free_cash_pct"]:
                 items.append({"level": "warn", "code": "rule_free_cash", "account": a["name"],
                               "title": f"Rule: {a['name']} free cash is {pct:.0f}% of the account (your minimum {rules['min_free_cash_pct']:g}%)",
-                              "detail": "Free cash is cash minus short-put collateral. Close or roll a put, add cash, or trim a position."})
+                              "detail": "Free cash is cash minus collateral for short puts and credit spreads. Close or roll a put, add cash, or trim a position."})
     if rules.get("take_profit_pct") is not None:
         hits = [p for p in actions.get("positions", []) if p.get("position") == "short"
                 and (p.get("profit_captured_pct") or 0) >= rules["take_profit_pct"]]

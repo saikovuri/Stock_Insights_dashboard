@@ -58,6 +58,10 @@ def build(user_id: int, option_actions: dict) -> dict:
     smart_pools = {k: sorted((dict(l) for l in v), key=lambda l: (-l["buy_price"], str(l.get("date_added")), l["id"]))
                    for k, v in lots.items()}
     free_cash = {a["name"]: a["free_cash"] for a in accounts.list_accounts(user_id)["accounts"]}
+    import spreads
+    partner = {}
+    for long_leg, short_leg in spreads.pair_open(options).values():
+        partner[long_leg["id"]], partner[short_leg["id"]] = short_leg, long_leg
     spots, groups = {}, defaultdict(list)
     for o in options:
         account = o.get("account") or database.DEFAULT_ACCOUNT
@@ -70,7 +74,31 @@ def build(user_id: int, option_actions: dict) -> dict:
                  "strike": K, "contracts": n, "spot": spot, "itm": itm,
                  "distance_pct": None if spot is None else round((K - spot) / spot * 100, 1),
                  "chance_itm_pct": None if delta is None else round(abs(delta) * 100)}
-        if o["position"] == "short" and not call:
+        other = partner.get(o["id"])
+        if other is not None:
+            long_leg, short_leg = (o, other) if o["position"] == "long" else (other, o)
+            info = spreads.describe(long_leg, short_leg)
+            width_cash = round(info["width"] * 100 * n, 2)
+            both_itm = spot is not None and (spot > max(K, other["strike"]) if call else spot < min(K, other["strike"]))
+            entry["spread"] = info["label"]
+            if o["position"] == "short" and info["style"] == "debit":
+                # The long leg sits further in the money, so exercising it covers assignment and the spread pays its width
+                entry["spread_note"] = (f"{info['label']} spread with the ${other['strike']:g} {o['option_type']}: if this leg is assigned, "
+                                        f"exercising that leg covers it and the spread pays its full ${width_cash:,.0f} width.")
+                if not call:
+                    entry["cash_if_assigned"] = entry["cash_if_all_assigned"] = 0.0
+            elif o["position"] == "short":
+                entry["spread_note"] = (f"{info['label']} spread with the ${other['strike']:g} {o['option_type']}: if both finish in the "
+                                        f"money, exercising that leg offsets assignment and the net cost is ${width_cash:,.0f}. If only "
+                                        "this leg finishes in the money, assignment comes without that offset.")
+                if not call:
+                    entry["cash_if_assigned"] = width_cash if both_itm else round(K * 100 * n, 2)
+                    entry["cash_if_all_assigned"] = width_cash
+            else:
+                entry["spread_note"] = f"Protects the ${other['strike']:g} short {o['option_type']} of this {info['label'].lower()} spread."
+                if spot is not None:
+                    entry["intrinsic_now"] = round(max(0.0, (spot - K) if call else (K - spot)) * 100 * n, 2)
+        elif o["position"] == "short" and not call:
             entry["cash_if_assigned"] = round(K * 100 * n, 2)
         elif o["position"] == "short":
             key = (account, o["ticker"])
@@ -91,7 +119,7 @@ def build(user_id: int, option_actions: dict) -> dict:
         ladder.append({
             "expiry": expiry, "dte": (date.fromisoformat(expiry) - today).days, "positions": rows,
             "contracts": sum(r["contracts"] for r in rows),
-            "cash_if_all_puts_assigned": round(sum(r["cash_if_assigned"] for r in puts), 2),
+            "cash_if_all_puts_assigned": round(sum(r.get("cash_if_all_assigned", r["cash_if_assigned"]) for r in puts), 2),
             "cash_if_itm_puts_assigned": round(sum(r["cash_if_assigned"] for r in puts if r["itm"]), 2),
             "shares_if_itm_calls_assigned": sum(r["shares_if_assigned"] for r in calls if r["itm"]),
             "proceeds_if_itm_calls_assigned": round(sum(r["proceeds_if_assigned"] for r in calls if r["itm"]), 2),

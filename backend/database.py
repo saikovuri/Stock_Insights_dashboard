@@ -483,6 +483,9 @@ def init_db():
     # Columns must exist before audit triggers are rebuilt so snapshots include them.
     added_columns = {table: {"account": "TEXT"} for table in ("holdings", "options", "closed_trades", "closed_options", "journal")}
     added_columns["watchlist"] = {"list_name": "TEXT", "note": "TEXT"}
+    # Legs of one vertical spread share a spread_id (see spreads.py)
+    added_columns["options"]["spread_id"] = "TEXT"
+    added_columns["closed_options"]["spread_id"] = "TEXT"
     for table, columns in added_columns.items():
         for column, datatype in columns.items():
             if USE_PG:
@@ -724,30 +727,128 @@ def get_user_options(user_id: int) -> list[dict]:
     return _run(f"SELECT * FROM options WHERE user_id = {PH} ORDER BY id", (user_id,), "all")
 
 
+def _insert_option(cur, user_id, ticker, option_type, strike, expiry, premium, contracts, position, account,
+                   spread_id=None) -> dict:
+    action = "BTO" if position == "long" else "STO"
+    values = (user_id, ticker.upper(), option_type.lower(), position.lower(), strike, expiry, premium, contracts,
+              account_name(account), spread_id)
+    sql = (f"INSERT INTO options (user_id, ticker, option_type, position, strike, expiry, premium, contracts, account, spread_id) "
+           f"VALUES ({', '.join([PH] * 10)})")
+    if USE_PG:
+        cur.execute(sql + " RETURNING *", values)
+        new_row = _fetchone(cur)
+    else:
+        cur.execute(sql, values)
+        cur.execute(f"SELECT * FROM options WHERE id = {PH}", (cur.lastrowid,))
+        new_row = _fetchone(cur)
+    details = {"strike": strike, "expiry": expiry, "premium": premium, "contracts": contracts}
+    if spread_id:
+        details["spread_id"] = spread_id
+    cur.execute(
+        f"INSERT INTO transactions (user_id, action, ticker, details) VALUES ({PH}, {PH}, {PH}, {PH})",
+        (user_id, f"{action}_{option_type.upper()}", ticker.upper(), json.dumps(details)),
+    )
+    return new_row
+
+
 def add_user_option(user_id: int, ticker: str, option_type: str, strike: float,
                     expiry: str, premium: float, contracts: int, position: str = "long",
                     account: str | None = None) -> dict:
     _option_values(option_type, position, strike, expiry, premium, contracts)
     conn = get_db()
     try:
-        cur = conn.cursor()
-        action = "BTO" if position == "long" else "STO"
-        values = (user_id, ticker.upper(), option_type.lower(), position.lower(), strike, expiry, premium, contracts, account_name(account))
-        sql = f"INSERT INTO options (user_id, ticker, option_type, position, strike, expiry, premium, contracts, account) VALUES ({', '.join([PH] * 9)})"
-        if USE_PG:
-            cur.execute(sql + " RETURNING *", values)
-            new_row = _fetchone(cur)
-        else:
-            cur.execute(sql, values)
-            cur.execute(f"SELECT * FROM options WHERE id = {PH}", (cur.lastrowid,))
-            new_row = _fetchone(cur)
-        cur.execute(
-            f"INSERT INTO transactions (user_id, action, ticker, details) VALUES ({PH}, {PH}, {PH}, {PH})",
-            (user_id, f"{action}_{option_type.upper()}", ticker.upper(),
-             json.dumps({"strike": strike, "expiry": expiry, "premium": premium, "contracts": contracts})),
-        )
+        new_row = _insert_option(conn.cursor(), user_id, ticker, option_type, strike, expiry, premium, contracts,
+                                 position, account)
         conn.commit()
         return new_row
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        _release(conn)
+
+
+def add_user_spread(user_id: int, ticker: str, kind: str, expiry: str, long_strike: float, long_premium: float,
+                    short_strike: float, short_premium: float, contracts: int, account: str | None = None) -> dict:
+    """Open both legs of a vertical spread in one transaction."""
+    import spreads
+    from uuid import uuid4
+    spreads.validate_strikes(kind, long_strike, short_strike)
+    option_type = spreads.KINDS[kind]["type"]
+    _option_values(option_type, "long", long_strike, expiry, long_premium, contracts)
+    _option_values(option_type, "short", short_strike, expiry, short_premium, contracts)
+    spread_id = uuid4().hex[:16]
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        long_leg = _insert_option(cur, user_id, ticker, option_type, long_strike, expiry, long_premium, contracts,
+                                  "long", account, spread_id)
+        short_leg = _insert_option(cur, user_id, ticker, option_type, short_strike, expiry, short_premium, contracts,
+                                   "short", account, spread_id)
+        conn.commit()
+        return {"spread_id": spread_id, "long": long_leg, "short": short_leg, **spreads.describe(long_leg, short_leg)}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        _release(conn)
+
+
+def _spread_legs(cur, user_id: int, spread_id: str) -> tuple[dict, dict]:
+    import spreads
+    cur.execute(f"SELECT * FROM options WHERE user_id={PH} AND spread_id={PH} ORDER BY id" + (" FOR UPDATE" if USE_PG else ""),
+                (user_id, spread_id))
+    pair = spreads.pair_open(_fetchall(cur)).get(spread_id)
+    if pair is None:
+        raise LookupError("Spread not found, or one leg was already closed on its own")
+    return pair
+
+
+def close_user_spread(user_id: int, spread_id: str, long_close: float, short_close: float, contracts: int,
+                      *, closed_at: str | None = None) -> dict:
+    """Close the same number of contracts on both legs at once: sell the long leg and buy back the short leg."""
+    import spreads
+    conn = get_db()
+    try:
+        if not USE_PG:
+            conn.execute("BEGIN IMMEDIATE")
+        cur = conn.cursor()
+        long_leg, short_leg = _spread_legs(cur, user_id, spread_id)
+        if contracts > long_leg["contracts"]:
+            raise ValueError("Close exceeds contracts in this spread")
+        results = [close_user_option(user_id, leg["ticker"], leg["option_type"], leg["strike"], leg["expiry"], price,
+                                     contracts, leg["position"], option_id=leg["id"], closed_at=closed_at, _conn=conn)
+                   for leg, price in ((short_leg, short_close), (long_leg, long_close))]
+        conn.commit()
+        kind = spreads.kind_of(long_leg["option_type"], long_leg["strike"], short_leg["strike"])
+        return {"action": "CLOSE_SPREAD", "spread_id": spread_id, "ticker": long_leg["ticker"], "kind": kind,
+                "contracts": contracts, "close_net": round(spreads.net_premium(kind, long_close, short_close), 4),
+                "pnl": round(sum(result["pnl"] for result in results), 2),
+                "closed_ids": [result["closed_id"] for result in results]}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        _release(conn)
+
+
+def delete_user_spread(user_id: int, spread_id: str) -> dict | None:
+    """Remove a mistaken spread entry (both legs) without recording a close."""
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        cur.execute(f"SELECT * FROM options WHERE user_id={PH} AND spread_id={PH}", (user_id, spread_id))
+        legs = _fetchall(cur)
+        if not legs:
+            conn.rollback()
+            return None
+        cur.execute(f"DELETE FROM options WHERE user_id={PH} AND spread_id={PH}", (user_id, spread_id))
+        cur.execute(
+            f"INSERT INTO transactions (user_id, action, ticker, details) VALUES ({PH}, 'DELETE_SPREAD', {PH}, {PH})",
+            (user_id, legs[0]["ticker"], json.dumps({"spread_id": spread_id, "strikes": sorted(leg["strike"] for leg in legs)})),
+        )
+        conn.commit()
+        return {"spread_id": spread_id, "deleted": len(legs)}
     except Exception:
         conn.rollback()
         raise
@@ -811,9 +912,10 @@ def close_user_option(user_id: int, ticker: str, option_type: str, strike: float
         pnl = (opt["premium"] - close_premium) * closed * 100
     cost_basis = opt["premium"] * closed * 100
     pnl_pct = (pnl / cost_basis * 100) if cost_basis else 0
-    columns = "user_id, ticker, option_type, position, strike, expiry, open_premium, close_premium, contracts, pnl, pnl_pct, opened_at, source_lot_id, account"
+    columns = "user_id, ticker, option_type, position, strike, expiry, open_premium, close_premium, contracts, pnl, pnl_pct, opened_at, source_lot_id, account, spread_id"
     values = (user_id, ticker, option_type.lower(), position.lower(), strike, expiry, opt["premium"], close_premium, closed,
-              round(pnl, 2), round(pnl_pct, 2), str(opt.get("date_added") or "")[:10] or None, opt["id"], opt.get("account"))
+              round(pnl, 2), round(pnl_pct, 2), str(opt.get("date_added") or "")[:10] or None, opt["id"], opt.get("account"),
+              opt.get("spread_id"))
     if closed_at:
         columns += ", closed_at"
         values += (closed_at,)
@@ -1001,15 +1103,8 @@ def _reverse_closed_option_entries(cur, user_id, trade_id, *, contracts=None, de
 
 
 def record_closed_option(user_id: int, request, *, trade_id: int | None = None) -> dict:
-    from decimal import Decimal
-    from uuid import uuid4
-    from portfolio_models import ClosedOptionRequest, AccountingEntryRequest
-
+    from portfolio_models import ClosedOptionRequest
     request = ClosedOptionRequest.model_validate(request)
-    payload = request.model_dump(mode="json")
-    if payload.get("account") is None:
-        payload.pop("account", None)  # keeps retries of entries recorded before accounts existed comparable
-    source = "closed_option_import" if trade_id is None else "closed_option_edit"
     conn = get_db()
     try:
         cur = conn.cursor()
@@ -1017,57 +1112,7 @@ def record_closed_option(user_id: int, request, *, trade_id: int | None = None) 
             cur.execute(f"SELECT id FROM users WHERE id={PH} FOR UPDATE", (user_id,))
         else:
             cur.execute("BEGIN IMMEDIATE")
-        cur.execute(f"SELECT * FROM accounting_events WHERE user_id={PH} AND idempotency_key={PH}",
-                    (user_id, request.idempotency_key))
-        previous = _fetchone(cur)
-        if previous:
-            if previous["source"] != source or (trade_id is not None and previous["source_id"] != trade_id) or json.loads(previous["after_json"]) != payload:
-                raise ValueError("Request key already used for a different entry")
-            cur.execute(f"SELECT * FROM closed_options WHERE user_id={PH} AND id={PH}", (user_id, previous["source_id"]))
-            result = _fetchone(cur)
-            if result is None:
-                raise ValueError("This historical entry was already recorded and later removed")
-        else:
-            pnl = (request.close_premium - request.open_premium) * request.contracts * 100
-            if request.position == "short":
-                pnl = -pnl
-            pnl = pnl.quantize(Decimal("0.01"))
-            pnl_pct = (pnl / (request.open_premium * request.contracts * 100) * 100).quantize(Decimal("0.01"))
-            values = (request.ticker, request.option_type, request.position, float(request.strike),
-                      request.expiry.isoformat(), float(request.open_premium), float(request.close_premium),
-                      request.contracts, float(pnl), float(pnl_pct), request.opened_at.isoformat(),
-                      request.closed_at.isoformat(), request.notes, account_name(request.account))
-            if trade_id is None:
-                cur.execute(f"""INSERT INTO closed_options
-                    (user_id, ticker, option_type, position, strike, expiry, open_premium, close_premium,
-                     contracts, pnl, pnl_pct, opened_at, closed_at, notes, account)
-                    VALUES ({', '.join([PH] * 15)})""" + (" RETURNING id" if USE_PG else ""), (user_id, *values))
-                trade_id = _fetchone(cur)["id"] if USE_PG else cur.lastrowid
-            else:
-                cur.execute(f"""SELECT id FROM closed_options WHERE user_id={PH} AND id={PH}
-                    AND EXISTS (SELECT 1 FROM accounting_events WHERE user_id={PH} AND source_id={PH}
-                        AND source='closed_option_import')""", (user_id, trade_id, user_id, trade_id))
-                if not _fetchone(cur):
-                    raise LookupError("Manual closed option not found")
-                _reverse_closed_option_entries(cur, user_id, trade_id, contracts=request.contracts)
-                cur.execute(f"""UPDATE closed_options SET ticker={PH}, option_type={PH}, position={PH}, strike={PH}, expiry={PH},
-                    open_premium={PH}, close_premium={PH}, contracts={PH}, pnl={PH}, pnl_pct={PH}, opened_at={PH}, closed_at={PH}, notes={PH}, account={PH}
-                    WHERE user_id={PH} AND id={PH}""", (*values, user_id, trade_id))
-            cur.execute(f"SELECT id FROM accounting_events WHERE user_id={PH} AND source='closed_options' AND source_id={PH} AND operation='INSERT' ORDER BY id DESC",
-                        (user_id, trade_id))
-            event_id = _fetchone(cur)["id"]
-            if request.fees:
-                fee = AccountingEntryRequest(kind="fee", amount=request.fees,
-                    occurred_at=f"{request.closed_at.isoformat()}T00:00:00+00:00", event_id=event_id,
-                    note="Total recorded fees for historical option trade", idempotency_key=uuid4().hex)
-                cur.execute(f"""INSERT INTO accounting_events(user_id, source, source_id, operation, after_json, idempotency_key)
-                    VALUES ({PH}, 'manual', 0, 'FEE', {PH}, {PH})""",
-                    (user_id, json.dumps(fee.model_dump(mode="json")), fee.idempotency_key))
-            cur.execute(f"""INSERT INTO accounting_events(user_id, source, source_id, operation, after_json, idempotency_key)
-                VALUES ({PH}, {PH}, {PH}, {PH}, {PH}, {PH})""",
-                (user_id, source, trade_id, "IMPORT" if source == "closed_option_import" else "EDIT", json.dumps(payload), request.idempotency_key))
-            cur.execute(f"SELECT * FROM closed_options WHERE user_id={PH} AND id={PH}", (user_id, trade_id))
-            result = _fetchone(cur)
+        result = _record_closed_option(cur, user_id, request, trade_id=trade_id)
         conn.commit()
         return result
     except Exception:
@@ -1075,6 +1120,106 @@ def record_closed_option(user_id: int, request, *, trade_id: int | None = None) 
         raise
     finally:
         _release(conn)
+
+
+def record_closed_spread(user_id: int, request) -> dict:
+    """Record a completed vertical spread from the journal: both legs in one transaction, fees and notes on the leg
+    that defines the trade (the short leg of a credit spread, the long leg of a debit spread)."""
+    import hashlib
+    import spreads
+    from decimal import Decimal
+    from portfolio_models import ClosedOptionRequest, ClosedSpreadRequest
+    request = ClosedSpreadRequest.model_validate(request)
+    credit = spreads.KINDS[request.kind]["style"] == "credit"
+    common = {"ticker": request.ticker, "option_type": spreads.KINDS[request.kind]["type"], "expiry": request.expiry,
+              "contracts": request.contracts, "opened_at": request.opened_at, "closed_at": request.closed_at,
+              "account": request.account}
+    legs = []
+    for position, strike, opened, closed in (("short", request.short_strike, request.short_open, request.short_close),
+                                             ("long", request.long_strike, request.long_open, request.long_close)):
+        primary = (position == "short") == credit
+        legs.append(ClosedOptionRequest(**common, position=position, strike=strike, open_premium=opened, close_premium=closed,
+                                        fees=request.fees if primary else Decimal("0"), notes=request.notes if primary else "",
+                                        idempotency_key=f"{request.idempotency_key}-{position[0]}"))
+    spread_id = "j" + hashlib.sha256(f"{user_id}:{request.idempotency_key}".encode()).hexdigest()[:15]
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        if USE_PG:
+            cur.execute(f"SELECT id FROM users WHERE id={PH} FOR UPDATE", (user_id,))
+        else:
+            cur.execute("BEGIN IMMEDIATE")
+        rows = [_record_closed_option(cur, user_id, leg, spread_id=spread_id) for leg in legs]
+        conn.commit()
+        return {"spread_id": spread_id, "legs": rows, "pnl": round(sum(row["pnl"] for row in rows), 2)}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        _release(conn)
+
+
+def _record_closed_option(cur, user_id: int, request, *, trade_id: int | None = None, spread_id: str | None = None) -> dict:
+    from decimal import Decimal
+    from uuid import uuid4
+    from portfolio_models import AccountingEntryRequest
+
+    payload = request.model_dump(mode="json")
+    if payload.get("account") is None:
+        payload.pop("account", None)  # keeps retries of entries recorded before accounts existed comparable
+    source = "closed_option_import" if trade_id is None else "closed_option_edit"
+    cur.execute(f"SELECT * FROM accounting_events WHERE user_id={PH} AND idempotency_key={PH}",
+                (user_id, request.idempotency_key))
+    previous = _fetchone(cur)
+    if previous:
+        if previous["source"] != source or (trade_id is not None and previous["source_id"] != trade_id) or json.loads(previous["after_json"]) != payload:
+            raise ValueError("Request key already used for a different entry")
+        cur.execute(f"SELECT * FROM closed_options WHERE user_id={PH} AND id={PH}", (user_id, previous["source_id"]))
+        result = _fetchone(cur)
+        if result is None:
+            raise ValueError("This historical entry was already recorded and later removed")
+    else:
+        pnl = (request.close_premium - request.open_premium) * request.contracts * 100
+        if request.position == "short":
+            pnl = -pnl
+        pnl = pnl.quantize(Decimal("0.01"))
+        pnl_pct = (pnl / (request.open_premium * request.contracts * 100) * 100).quantize(Decimal("0.01"))
+        values = (request.ticker, request.option_type, request.position, float(request.strike),
+                  request.expiry.isoformat(), float(request.open_premium), float(request.close_premium),
+                  request.contracts, float(pnl), float(pnl_pct), request.opened_at.isoformat(),
+                  request.closed_at.isoformat(), request.notes, account_name(request.account))
+        if trade_id is None:
+            cur.execute(f"""INSERT INTO closed_options
+                (user_id, ticker, option_type, position, strike, expiry, open_premium, close_premium,
+                 contracts, pnl, pnl_pct, opened_at, closed_at, notes, account, spread_id)
+                VALUES ({', '.join([PH] * 16)})""" + (" RETURNING id" if USE_PG else ""), (user_id, *values, spread_id))
+            trade_id = _fetchone(cur)["id"] if USE_PG else cur.lastrowid
+        else:
+            cur.execute(f"""SELECT id FROM closed_options WHERE user_id={PH} AND id={PH}
+                AND EXISTS (SELECT 1 FROM accounting_events WHERE user_id={PH} AND source_id={PH}
+                    AND source='closed_option_import')""", (user_id, trade_id, user_id, trade_id))
+            if not _fetchone(cur):
+                raise LookupError("Manual closed option not found")
+            _reverse_closed_option_entries(cur, user_id, trade_id, contracts=request.contracts)
+            cur.execute(f"""UPDATE closed_options SET ticker={PH}, option_type={PH}, position={PH}, strike={PH}, expiry={PH},
+                open_premium={PH}, close_premium={PH}, contracts={PH}, pnl={PH}, pnl_pct={PH}, opened_at={PH}, closed_at={PH}, notes={PH}, account={PH}
+                WHERE user_id={PH} AND id={PH}""", (*values, user_id, trade_id))
+        cur.execute(f"SELECT id FROM accounting_events WHERE user_id={PH} AND source='closed_options' AND source_id={PH} AND operation='INSERT' ORDER BY id DESC",
+                    (user_id, trade_id))
+        event_id = _fetchone(cur)["id"]
+        if request.fees:
+            fee = AccountingEntryRequest(kind="fee", amount=request.fees,
+                occurred_at=f"{request.closed_at.isoformat()}T00:00:00+00:00", event_id=event_id,
+                note="Total recorded fees for historical option trade", idempotency_key=uuid4().hex)
+            cur.execute(f"""INSERT INTO accounting_events(user_id, source, source_id, operation, after_json, idempotency_key)
+                VALUES ({PH}, 'manual', 0, 'FEE', {PH}, {PH})""",
+                (user_id, json.dumps(fee.model_dump(mode="json")), fee.idempotency_key))
+        cur.execute(f"""INSERT INTO accounting_events(user_id, source, source_id, operation, after_json, idempotency_key)
+            VALUES ({PH}, {PH}, {PH}, {PH}, {PH}, {PH})""",
+            (user_id, source, trade_id, "IMPORT" if source == "closed_option_import" else "EDIT", json.dumps(payload), request.idempotency_key))
+        cur.execute(f"SELECT * FROM closed_options WHERE user_id={PH} AND id={PH}", (user_id, trade_id))
+        result = _fetchone(cur)
+    return result
 
 
 def get_closed_options(user_id: int) -> list[dict]:
@@ -1098,7 +1243,9 @@ def delete_closed_trade(user_id: int, trade_id: int) -> bool:
     return _run(f"DELETE FROM closed_trades WHERE id={PH} AND user_id={PH}", (trade_id, user_id)) > 0
 
 
-def delete_closed_option(user_id: int, trade_id: int) -> bool:
+def delete_closed_option(user_id: int, trade_id: int | list[int]) -> bool:
+    """Delete one closed option, or every leg of a closed spread when given its leg ids, in one transaction."""
+    ids = trade_id if isinstance(trade_id, list) else [trade_id]
     conn = get_db()
     try:
         cur = conn.cursor()
@@ -1106,15 +1253,16 @@ def delete_closed_option(user_id: int, trade_id: int) -> bool:
             cur.execute(f"SELECT id FROM users WHERE id={PH} FOR UPDATE", (user_id,))
         else:
             cur.execute("BEGIN IMMEDIATE")
-        cur.execute(f"SELECT id FROM closed_options WHERE user_id={PH} AND id={PH}", (user_id, trade_id))
-        if not _fetchone(cur):
-            conn.rollback()
-            return False
-        cur.execute(f"SELECT id FROM accounting_events WHERE user_id={PH} AND source_id={PH} AND source='closed_option_import'",
-                    (user_id, trade_id))
-        if _fetchone(cur):
-            _reverse_closed_option_entries(cur, user_id, trade_id, deleting=True)
-        cur.execute(f"DELETE FROM closed_options WHERE id={PH} AND user_id={PH}", (trade_id, user_id))
+        for leg_id in ids:
+            cur.execute(f"SELECT id FROM closed_options WHERE user_id={PH} AND id={PH}", (user_id, leg_id))
+            if not _fetchone(cur):
+                conn.rollback()
+                return False
+            cur.execute(f"SELECT id FROM accounting_events WHERE user_id={PH} AND source_id={PH} AND source='closed_option_import'",
+                        (user_id, leg_id))
+            if _fetchone(cur):
+                _reverse_closed_option_entries(cur, user_id, leg_id, deleting=True)
+            cur.execute(f"DELETE FROM closed_options WHERE id={PH} AND user_id={PH}", (leg_id, user_id))
         conn.commit()
         return True
     except Exception:

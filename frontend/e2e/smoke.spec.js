@@ -819,3 +819,52 @@ test('sub-tab strips hide the scrollbar and reveal overflowing tabs', async ({ p
   }).toBe(true);
   await page.locator('.tab-strip').first().screenshot({ path: testInfo.outputPath('tab-strip.png') });
 });
+test('spreads open, group their legs and close together without overflowing the screen', async ({ page }, testInfo) => {
+  let opened = null;
+  let closedWith = null;
+  const leg = { ticker: 'SPY', type: 'put', expiry: '2099-01-15', dte: 30, contracts: 2, current_price: 101, quoted: true, account: 'Default', spread_id: 'abc' };
+  await page.route('**/api/portfolio/options/summary', route => route.fulfill({ json: {
+    total_cost: 700, total_value: 400, total_pnl: 100, total_pnl_pct: 14,
+    options: [{ ...leg, id: 1, position: 'short', strike: 100, premium: 2.5, market_price: 1.5, pnl: 200 },
+      { ...leg, id: 2, position: 'long', strike: 95, premium: 1, market_price: 0.5, pnl: -100 }],
+    spreads: [{ spread_id: 'abc', kind: 'bull_put', label: 'Bull put', style: 'credit', ticker: 'SPY', type: 'put', expiry: '2099-01-15',
+      dte: 30, contracts: 2, long_strike: 95, short_strike: 100, net_open: 1.5, net_mark: 1, width: 5, max_profit: 300, max_loss: 700,
+      breakeven: 98.5, collateral: 1000, current_price: 101, account: 'Default', expired: false, pnl: 100, pnl_pct_of_risk: 14.3, leg_ids: [1, 2] }],
+  } }));
+  await page.route('**/api/portfolio/spreads', route => {
+    opened = route.request().postDataJSON();
+    return route.fulfill({ json: { label: 'Bear call', style: 'credit', net_open: 1.2 } });
+  });
+  await page.route('**/api/portfolio/spreads/abc/close', route => {
+    closedWith = route.request().postDataJSON();
+    return route.fulfill({ json: { pnl: 50 } });
+  });
+  await page.goto('/#portfolio');
+  await page.getByRole('button', { name: /Options/ }).click();
+  await expect(page.getByText('BULL PUT SPREAD')).toBeVisible();
+  await page.getByTitle('Show the two legs').click();
+  await expect(page.getByText('spread leg')).toHaveCount(2);
+  await page.getByLabel('Action', { exact: true }).selectOption('spread');
+  await page.getByLabel('Ticker', { exact: true }).fill('SPY');
+  await page.getByLabel('Expiry Date', { exact: true }).fill('2099-02-19');
+  await page.getByLabel('Spread', { exact: true }).selectOption('bear_call');
+  await page.getByLabel('Lower strike ($)').fill('110');
+  await page.getByLabel('Upper strike ($)').fill('115');
+  await page.getByLabel('Sell lower call ($/share)').fill('2');
+  await page.getByLabel('Buy upper call ($/share)').fill('0.8');
+  await expect(page.getByText(/breakeven \$111\.20/)).toBeVisible();
+  const form = page.locator('.portfolio-form.labeled-form').first();
+  expect(await form.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+  await form.screenshot({ path: testInfo.outputPath('spread-form.png') });
+  await page.getByRole('button', { name: 'Open spread' }).click();
+  await expect.poll(() => opened).toMatchObject({ kind: 'bear_call', long_strike: 115, short_strike: 110, long_premium: 0.8, short_premium: 2 });
+  await page.getByRole('button', { name: 'Close SPY spread' }).click();
+  const panel = page.getByRole('form', { name: 'Close spread' });
+  await panel.getByLabel('Buy back $100 put at ($/share)').fill('0.75');
+  await panel.getByLabel('Sell $95 put at ($/share)').fill('0.25');
+  expect(await panel.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+  await panel.getByRole('button', { name: 'Close spread' }).click();
+  await expect.poll(() => closedWith).toEqual({ long_premium: 0.25, short_premium: 0.75, contracts: 2 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('spreads.png'), fullPage: true });
+});

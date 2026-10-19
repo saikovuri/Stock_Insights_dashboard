@@ -2,6 +2,7 @@
 
 import json
 import logging
+from collections import defaultdict
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -70,10 +71,15 @@ def list_accounts(user_id: int) -> dict:
     cash = _cash(user_id)
     names |= set(cash)
     collateral = {}
+    by_account, holdings = defaultdict(list), defaultdict(list)
     for option in database.get_user_options(user_id):
-        if option["position"] == "short" and option["option_type"] == "put":
-            name = option.get("account") or database.DEFAULT_ACCOUNT
-            collateral[name] = collateral.get(name, 0) + option["strike"] * 100 * option["contracts"]
+        by_account[option.get("account") or database.DEFAULT_ACCOUNT].append(option)
+    for holding in database.get_user_holdings(user_id):
+        holdings[holding.get("account") or database.DEFAULT_ACCOUNT].append(holding)
+    from options_desk import capital_requirements
+    for name, options in by_account.items():
+        # Short puts reserve the strike; credit spreads reserve only their width (the long leg caps the loss)
+        collateral[name] = capital_requirements(options, holdings[name])["reserved_cash"]
     accounts = []
     for name in sorted(names, key=lambda n: (n != database.DEFAULT_ACCOUNT, n.lower())):
         entry = cash.get(name)

@@ -1384,6 +1384,13 @@ body {
   white-space: nowrap;
 }
 
+.spread-toggle { margin-right: 0.25rem; }
+.spread-leg-row { opacity: 0.85; }
+@media (min-width: 641px) {
+  .options-table .spread-leg-row td:first-child { padding-left: 2rem; }
+}
+.spread-preview { margin: 0; font-size: 0.85rem; line-height: 1.5; }
+
 .btn-icon {
   background: none;
   border: 1px solid var(--border);

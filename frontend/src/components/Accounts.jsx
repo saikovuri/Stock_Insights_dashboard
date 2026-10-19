@@ -84,10 +84,10 @@ export function AccountBar({ account, onChange, version, onCashSaved, compact = 
       {!data && !error && <div className="skeleton skeleton-line" aria-hidden="true" />}
       {data && (
         <div className="table-scroll"><table className="market-table account-table phone-cards">
-          <thead><tr><th>Account</th><th>Cash</th><th title="Strike × 100 × contracts for open short puts">Put collateral</th><th>Free cash</th><th>Cash updated</th></tr></thead>
+          <thead><tr><th>Account</th><th>Cash</th><th title="Short puts: strike × 100 × contracts. Credit spreads: strike width × 100 × contracts">Option collateral</th><th>Free cash</th><th>Cash updated</th></tr></thead>
           <tbody>{shown.map(a => (
             <tr key={a.name}>
-              <td><strong>{a.name}</strong></td><td data-label="Cash">{money(a.cash)}</td><td data-label="Put collateral">{money(a.put_collateral)}</td>
+              <td><strong>{a.name}</strong></td><td data-label="Cash">{money(a.cash)}</td><td data-label="Option collateral">{money(a.put_collateral)}</td>
               <td data-label="Free cash" className={a.free_cash != null && a.free_cash < 0 ? 'negative' : ''}>{a.cash == null
                 ? <button className="link-btn" onClick={() => onChange(a.name)} title={`Select ${a.name} to enter its cash balance`}>Enter cash</button>
                 : money(a.free_cash)}</td>

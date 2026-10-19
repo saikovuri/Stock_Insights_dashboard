@@ -52,6 +52,7 @@ export default function ExpiryLadder({ version }) {
           {row.cash_if_assigned != null && <span className="market-sub"> · {usd(row.cash_if_assigned)} if assigned
             {data.free_cash[row.account] != null && ` (free cash ${usd(data.free_cash[row.account])})`}</span>}
           {row.intrinsic_now != null && <span className="market-sub"> · worth {usd(row.intrinsic_now)} at expiry at today&apos;s price</span>}
+          {row.spread_note && <span className="trade-sub">{row.spread_note}</span>}
           {row.oldest_first && <LotPlan row={row} />}
         </li>)}</ul>
       </div>)}

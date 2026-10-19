@@ -114,6 +114,87 @@ class LifecycleRequest(BaseModel):
     cycle: str | None = Field(default=None, min_length=1, max_length=80)
 
 
+SpreadKind = Literal["bull_call", "bear_put", "bull_put", "bear_call"]
+
+
+def _spread_strikes(kind: str, long_strike, short_strike) -> None:
+    import spreads
+    spreads.validate_strikes(kind, float(long_strike), float(short_strike))
+
+
+class SpreadRequest(BaseModel):
+    """Open a two-leg vertical spread; premiums are the per-share fills of each leg."""
+    model_config = ConfigDict(allow_inf_nan=False, extra="forbid")
+    ticker: str = Field(min_length=1, max_length=20, pattern=r"^[A-Za-z^][A-Za-z0-9.^=-]*$")
+    kind: SpreadKind
+    expiry: str
+    long_strike: float = Field(gt=0)
+    long_premium: float = Field(ge=0)
+    short_strike: float = Field(gt=0)
+    short_premium: float = Field(ge=0)
+    contracts: int = Field(default=1, gt=0, le=10_000, strict=True)
+    account: str | None = Field(default=None, pattern=ACCOUNT_PATTERN)
+
+    @field_validator("expiry")
+    @classmethod
+    def valid_expiry(cls, value):
+        parsed = date.fromisoformat(value)
+        if parsed.isoformat() != value:
+            raise ValueError("Expiry must be YYYY-MM-DD")
+        return value
+
+    @model_validator(mode="after")
+    def valid_spread(self):
+        _spread_strikes(self.kind, self.long_strike, self.short_strike)
+        return self
+
+
+class SpreadCloseRequest(BaseModel):
+    """Close both legs: sell the long leg at long_premium and buy back the short leg at short_premium."""
+    model_config = ConfigDict(allow_inf_nan=False, extra="forbid")
+    long_premium: float = Field(ge=0)
+    short_premium: float = Field(ge=0)
+    contracts: int = Field(gt=0, strict=True)
+
+
+class ClosedSpreadRequest(BaseModel):
+    """A completed vertical spread logged after the fact, one fill per leg for opening and closing."""
+    model_config = ConfigDict(allow_inf_nan=False, extra="forbid")
+    ticker: str = Field(min_length=1, max_length=20, pattern=r"^[A-Za-z^][A-Za-z0-9.^=-]*$")
+    kind: SpreadKind
+    expiry: date
+    contracts: int = Field(gt=0, strict=True)
+    long_strike: Decimal = Field(gt=0, max_digits=16, decimal_places=6)
+    short_strike: Decimal = Field(gt=0, max_digits=16, decimal_places=6)
+    long_open: Decimal = Field(gt=0, max_digits=16, decimal_places=6)
+    short_open: Decimal = Field(gt=0, max_digits=16, decimal_places=6)
+    long_close: Decimal = Field(ge=0, max_digits=16, decimal_places=6)
+    short_close: Decimal = Field(ge=0, max_digits=16, decimal_places=6)
+    opened_at: date
+    closed_at: date
+    fees: Decimal = Field(default=Decimal("0"), ge=0, max_digits=14, decimal_places=2)
+    notes: str = Field(default="", max_length=1000)
+    # Each leg is stored under this key plus a 2-character suffix, within the 80-character ledger limit
+    idempotency_key: str = Field(min_length=8, max_length=78, pattern=r"^[A-Za-z0-9_-]+$")
+    account: str | None = Field(default=None, pattern=ACCOUNT_PATTERN)
+
+    @field_validator("ticker")
+    @classmethod
+    def normalize_ticker(cls, value):
+        return value.upper()
+
+    @model_validator(mode="after")
+    def valid_spread(self):
+        _spread_strikes(self.kind, self.long_strike, self.short_strike)
+        if self.opened_at > self.closed_at:
+            raise ValueError("Closing date cannot precede opening date")
+        if self.closed_at > datetime.now(timezone.utc).date():
+            raise ValueError("Completed trades cannot have future dates")
+        if self.closed_at > self.expiry:
+            raise ValueError("Closing date cannot be after expiry")
+        return self
+
+
 class AccountingEntryRequest(BaseModel):
     model_config = ConfigDict(allow_inf_nan=False, extra="forbid")
     kind: Literal["deposit", "withdrawal", "dividend", "fee", "valuation", "link", "reverse", "review"]

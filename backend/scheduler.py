@@ -231,7 +231,8 @@ def _journal_week(user_id: int, today) -> dict | None:
     """This week's closed trades, how many still lack a review, and the costliest habit tag so far."""
     from database import get_closed_options, get_closed_trades
     from journal import review_lessons, trade_net
-    trades = get_closed_options(user_id) + get_closed_trades(user_id)
+    from spreads import merge_closed
+    trades = merge_closed(get_closed_options(user_id)) + get_closed_trades(user_id)
     monday = (today - timedelta(days=today.weekday())).isoformat()
     week = [t for t in trades if monday <= str(t.get("closed_at") or "")[:10] <= today.isoformat()]
     habits = [g for g in review_lessons(trades) if g["key"].startswith("tag:") and g["good"] is False and g["net"] < 0]

@@ -152,6 +152,20 @@ def main():
     plan = trade_plans.save_plan(user, {"ticker": "AAPL", "thesis": "PG check", "max_loss": 100})
     assert [p["id"] for p in trade_plans.list_plans(user, "AAPL")] == [plan["id"]]
     assert not trade_plans.delete_plan(other, plan["id"]) and trade_plans.delete_plan(user, plan["id"])
+    import spreads
+    opened = database.add_user_spread(user, "SPY", "bull_put", "2099-01-15", 95, 1.0, 100, 2.5, 2, account="IRA")
+    assert database.close_user_spread(user, opened["spread_id"], 0.2, 0.7, 1)["pnl"] == 100
+    database.close_user_spread(user, opened["spread_id"], 0, 0, 1)
+    pg_spreads = [row for row in spreads.merge_closed(database.get_closed_options(user)) if row.get("spread")]
+    assert sorted(row["pnl"] for row in pg_spreads) == [100, 150], pg_spreads
+    journal_spread = database.record_closed_spread(user, {
+        "ticker": "SPY", "kind": "bull_call", "expiry": "2026-03-20", "contracts": 1, "long_strike": 500, "short_strike": 510,
+        "long_open": 6, "short_open": 2, "long_close": 9, "short_close": 1, "opened_at": "2026-03-02", "closed_at": "2026-03-09",
+        "fees": 1.3, "idempotency_key": uuid4().hex})
+    assert journal_spread["pnl"] == 400, journal_spread
+    leg_ids = [leg["id"] for leg in journal_spread["legs"]]
+    assert database.delete_closed_option(user, leg_ids)
+    assert not [row for row in database.get_closed_options(user) if row["id"] in leg_ids]
     conn = database.get_db()
     try:
         cursor = conn.cursor()

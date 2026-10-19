@@ -537,6 +537,18 @@ export const assignOption = (id, cycle = '') => sendJson(`${BASE}/portfolio/opti
 export const expireOption = (id, cycle = '') => sendJson(`${BASE}/portfolio/options/${id}/expire`, 'POST', cycle ? { cycle } : null, 'Could not record expiry');
 export const deleteClosedTrade = (id) => sendJson(`${BASE}/portfolio/closed/${id}`, 'DELETE', null, 'Failed to delete trade');
 export const deleteClosedOption = (id) => sendJson(`${BASE}/portfolio/options/closed/${id}`, 'DELETE', null, 'Failed to delete trade');
+// ── Vertical spreads (two linked legs) ───────────────────────────
+export const openSpread = (payload) => sendJson(`${BASE}/portfolio/spreads`, 'POST', payload, 'Failed to open spread');
+export const closeSpread = (spreadId, payload) =>
+  sendJson(`${BASE}/portfolio/spreads/${encodeURIComponent(spreadId)}/close`, 'POST', payload, 'Failed to close spread');
+export const expireSpread = (spreadId) =>
+  sendJson(`${BASE}/portfolio/spreads/${encodeURIComponent(spreadId)}/expire`, 'POST', null, 'Failed to settle spread');
+export const deleteSpread = (spreadId) =>
+  sendJson(`${BASE}/portfolio/spreads/${encodeURIComponent(spreadId)}`, 'DELETE', null, 'Failed to delete spread');
+export const logClosedSpread = (payload) =>
+  sendJson(`${BASE}/portfolio/options/closed/spread`, 'POST', payload, 'Failed to record closed spread');
+export const deleteClosedSpread = (tradeId) =>
+  sendJson(`${BASE}/portfolio/options/closed/spread/${tradeId}`, 'DELETE', null, 'Failed to delete spread');
 export const fetchPremiumIncome = () => getJson(`${BASE}/portfolio/premium-income`, 'Failed to load premium income', true);
 export const saveIncomeGoal = (goal) => sendJson(`${BASE}/portfolio/income-goal`, 'PUT', { goal }, 'Failed to save goal');
 export const importPortfolioCsv = (csv, commit, kind = 'positions', account = '', sourceAccount = '', mode = 'append') =>

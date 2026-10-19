@@ -197,8 +197,63 @@ def _actions(o: dict, S: float, c: dict, shares_held: float, earnings: dict, div
     return acts
 
 
+def _apply_spreads(rows: list[dict], pairs: dict) -> None:
+    """Judge each intact spread on its net value: the leg that defines the trade (short leg of a credit spread, long
+    leg of a debit spread) gets net-based stop/take-profit rules; leg-only rules that the other leg cancels are dropped."""
+    import spreads
+    by_id = {row["id"]: row for row in rows}
+    for spread_id, (long_leg, short_leg) in pairs.items():
+        long_row, short_row = by_id.get(long_leg["id"]), by_id.get(short_leg["id"])
+        if not long_row or not short_row:
+            continue
+        info = spreads.describe(long_leg, short_leg)
+        credit = info["style"] == "credit"
+        expired = any(a["code"] == "expired" for a in long_row["actions"] + short_row["actions"])
+        mark = None
+        if long_row["mid"] is not None and short_row["mid"] is not None and not expired:
+            mark = spreads.net_premium(info["kind"], long_row["mid"], short_row["mid"])
+        primary, other = (short_row, long_row) if credit else (long_row, short_row)
+        drop_primary = {"stop_loss", "take_profit", "naked"} if credit else {"take_profit", "decay"}
+        drop_other = {"take_profit", "decay"} if credit else {"stop_loss", "take_profit", "naked", "tested", "gamma", "roll_count"}
+        # Rolling one leg on its own would break the spread, so leg actions don't offer the single-option repair tool
+        primary["actions"] = [{k: v for k, v in a.items() if k != "repair"} for a in primary["actions"] if a["code"] not in drop_primary]
+        other["actions"] = [{k: v for k, v in a.items() if k != "repair"} for a in other["actions"] if a["code"] not in drop_other]
+        summary = {**info, "spread_id": spread_id, "net_mark": None if mark is None else round(mark, 2)}
+        primary["spread"], other["spread"] = {**summary, "role": "main"}, {**summary, "role": "hedge"}
+        net, name = info["net_open"], f"{info['label']} ${info['long_strike']:g}/${info['short_strike']:g}"
+        short_row["loss_multiple"] = short_row["profit_captured_pct"] = None
+        if mark is None or net <= 0:
+            continue
+        if credit:
+            multiple, captured = (mark - net) / net, (net - mark) / net
+            short_row["loss_multiple"], short_row["profit_captured_pct"] = round(multiple, 2), round(captured * 100)
+            if multiple >= STOP_MULTIPLE:
+                primary["actions"].append({"level": "act", "code": "stop_loss",
+                    "text": f"{name} spread: loss is {multiple:.1f}× the ${net:.2f} credit (spread mark ${mark:.2f}). "
+                            f"A common rule closes at a {STOP_MULTIPLE:g}× credit loss; the most it can lose is "
+                            f"${info['max_loss']:,.0f}. Close both legs together."})
+            if captured >= TAKE_PROFIT:
+                primary["actions"].append({"level": "act", "code": "take_profit",
+                    "text": f"{name} spread: {captured * 100:.0f}% of the ${net:.2f} credit is captured. Consider closing both "
+                            f"legs near ${mark:.2f}; the last part of the credit carries most of the risk."})
+        else:
+            gain, dte = (mark - net) / net, primary["dte"]
+            if mark >= 0.8 * info["width"] or gain >= 1:
+                primary["actions"].append({"level": "act", "code": "take_profit",
+                    "text": f"{name} spread is worth ${mark:.2f} of its ${info['width']:g} maximum (paid ${net:.2f}). "
+                            "The rest only comes from holding to expiry, with pin and assignment risk. Consider closing both legs."})
+            elif gain <= -0.5 and dte <= 21:
+                primary["actions"].append({"level": "warn", "code": "decay",
+                    "text": f"{name} spread is down {abs(gain) * 100:.0f}% with {dte} days left; time decay speeds up from here."})
+        for row in (primary, other):
+            row["actions"].sort(key=lambda a: _LEVEL[a["level"]])
+
+
 def position_actions(user_id: int) -> dict:
+    import spreads
     options = get_user_options(user_id)
+    pairs = spreads.pair_open(options)
+    in_spread = {leg["id"]: spread_id for spread_id, legs in pairs.items() for leg in legs}
     try:
         rolls = _roll_counts(user_id, options)
     except Exception as e:
@@ -210,8 +265,9 @@ def position_actions(user_id: int) -> dict:
     spots, earnings, divs, out = {}, {}, {}, []
     for o in options:
         t = o["ticker"]
-        coverage = min(shares[t], 100 * o["contracts"])
-        if o.get("position") == "short" and o["option_type"] == "call":
+        # A spread's short call is covered by its long call, so it neither needs nor uses up shares
+        coverage = 100 * o["contracts"] if o["id"] in in_spread else min(shares[t], 100 * o["contracts"])
+        if o.get("position") == "short" and o["option_type"] == "call" and o["id"] not in in_spread:
             shares[t] -= coverage
         S, c, acts = None, {}, []
         try:
@@ -247,8 +303,9 @@ def position_actions(user_id: int) -> dict:
             "iv_pct": None if not c.get("iv") else round(c["iv"] * 100, 1),
             "profit_captured_pct": round((o["premium"] - mid) / o["premium"] * 100) if short and mid is not None and o["premium"] else None,
             "pnl": None if mid is None else round(((o["premium"] - mid) if short else (mid - o["premium"])) * 100 * o["contracts"], 2),
-            "next_dividend": divs.get(t), "actions": acts,
+            "next_dividend": divs.get(t), "actions": acts, "spread_id": in_spread.get(o["id"]),
         })
+    _apply_spreads(out, pairs)
     out.sort(key=lambda p: (min((_LEVEL[a["level"]] for a in p["actions"]), default=9), p["dte"]))
     return {"positions": out, "counts": {lvl: sum(1 for p in out for a in p["actions"] if a["level"] == lvl) for lvl in _LEVEL},
             "as_of": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -318,16 +375,17 @@ def _spread_longs(opts: list[dict], closed: list[dict]) -> tuple[list[dict], lis
 
 
 def _put_capital(short: dict, longs: list[dict], remaining=None) -> float:
-    """Gross put collateral, allocating each protective contract at most once."""
+    """Gross put collateral, allocating each protective contract at most once. A long put at or above the short
+    strike (a bear put debit spread) covers assignment fully; a lower one (bull put credit spread) leaves the width."""
     if remaining is None:
         remaining = {index: leg["contracts"] for index, leg in enumerate(longs)}
     needed, capital = short["contracts"], 0.0
     wings = sorted(enumerate(longs), key=lambda item: item[1]["strike"], reverse=True)
     for index, leg in wings:
-        if _legs_key(leg) != _legs_key(short) or leg["strike"] >= short["strike"]:
+        if _legs_key(leg) != _legs_key(short):
             continue
         matched = min(needed, remaining[index])
-        capital += matched * (short["strike"] - leg["strike"]) * 100
+        capital += matched * max(short["strike"] - leg["strike"], 0) * 100
         needed -= matched
         remaining[index] -= matched
     return capital + needed * short["strike"] * 100
@@ -510,8 +568,13 @@ def _group(rows, key):
     return sorted(out, key=lambda x: x["pnl"], reverse=True)
 
 
+def _strategy(c: dict) -> str:
+    return f"{c['spread']['label'].lower()} spread" if c.get("spread") else f"{c['position']} {c['option_type']}"
+
+
 def options_review(user_id: int) -> dict:
-    closed = [{**trade, "pnl": trade.get("net_pnl", trade["pnl"])} for trade in get_closed_options(user_id)]
+    import spreads
+    closed = [{**trade, "pnl": trade.get("net_pnl", trade["pnl"])} for trade in spreads.merge_closed(get_closed_options(user_id))]
     if not closed:
         return {"stats": None, "breakdowns": {}}
     wins = [c for c in closed if c["pnl"] > 0]
@@ -526,7 +589,7 @@ def options_review(user_id: int) -> dict:
         "biggest_loss": round(min(c["pnl"] for c in closed), 2),
     }
     breakdowns = {
-        "strategy": _group(closed, lambda c: f"{c['position']} {c['option_type']}"),
+        "strategy": _group(closed, _strategy),
         "dte_at_open": _group(closed, _dte_bucket),
         "exit": _group(closed, lambda c: "zero-price close (reason unrecorded)" if (c["close_premium"] or 0) == 0 else "priced close"),
         "ticker": _group(closed, lambda c: c["ticker"])[:8],
@@ -541,9 +604,12 @@ def options_coach(user_id: int) -> dict:
         return {"ai": False, "summary": "Close at least 5 option trades to get a review.", "strengths": [], "leaks": [], "rules": []}
     if not llm.ai_enabled():
         return {"ai": False, "summary": "AI review needs an AI key on the server.", "strengths": [], "leaks": [], "rules": []}
-    closed = get_closed_options(user_id)
+    import spreads
+    closed = spreads.merge_closed(get_closed_options(user_id))
     recent = [{**{k: c.get(k) for k in ("ticker", "position", "option_type", "strike", "expiry", "opened_at", "open_premium",
                                          "close_premium", "contracts", "pnl", "fees", "net_pnl")},
+               **({"spread": f"{c['spread']['label']} ${c['spread']['long_strike']:g}/${c['spread']['short_strike']:g} "
+                             f"({c['spread']['style']}; premiums are net per share)"} if c.get("spread") else {}),
                **({"review": {k: c["review"].get(k) for k in ("exit_reason", "target_capture_pct", "followed_plan", "tags")}}
                   if c.get("review") else {})} for c in closed[:40]]
     from journal import review_lessons

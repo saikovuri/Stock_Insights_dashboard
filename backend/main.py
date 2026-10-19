@@ -11,7 +11,8 @@ import math
 import re
 from typing import Literal
 from pydantic import Field
-from portfolio_models import AccountingEntryRequest, HoldingRequest, HoldingUpdateRequest, OptionRequest, OptionUpdateRequest, ClosedOptionRequest, LifecycleRequest, TradePlanRequest, ACCOUNT_PATTERN
+from portfolio_models import AccountingEntryRequest, HoldingRequest, HoldingUpdateRequest, OptionRequest, OptionUpdateRequest, ClosedOptionRequest, LifecycleRequest, TradePlanRequest, ACCOUNT_PATTERN, \
+    SpreadRequest, SpreadCloseRequest, ClosedSpreadRequest
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from api_common import limiter, get_current_user, valid_ticker as _valid_ticker, upstream_error as _upstream_error
@@ -51,6 +52,7 @@ from database import (
     get_user_options, add_user_option, close_user_option, update_user_option, delete_user_option,
     assign_user_option, kv_set,
     get_user_transactions, get_user_watchlist, get_closed_trades, get_closed_options, delete_closed_trade, delete_closed_option, record_closed_option,
+    add_user_spread, close_user_spread, delete_user_spread, record_closed_spread,
     list_notifications, mark_notifications_read, get_ntfy_topic, set_ntfy_topic,
     get_trader_profile, set_trader_profile, list_user_alerts, add_user_alert, delete_user_alert,
     count_active_alerts, list_journal, add_journal, update_journal, delete_journal,
@@ -598,11 +600,32 @@ def closed_trades_endpoint(user: dict = Depends(get_current_user), account: Opti
 
 @app.get("/api/portfolio/options/closed")
 def closed_options_endpoint(user: dict = Depends(get_current_user), account: Optional[str] = None):
+    import spreads
     trades = [t for t in get_closed_options(user["user_id"]) if in_account(t, account)]
     total_pnl = sum(t["pnl"] for t in trades)
-    return {"total_realized_pnl": round(total_pnl, 2), "trades": trades,
+    return {"total_realized_pnl": round(total_pnl, 2), "trades": spreads.merge_closed(trades),
             "total_fees": round(sum(t["fees"] for t in trades), 2),
             "total_net_pnl": round(sum(t["net_pnl"] for t in trades), 2)}
+
+
+@app.post("/api/portfolio/options/closed/spread")
+def record_closed_spread_endpoint(req: ClosedSpreadRequest, user: dict = Depends(get_current_user)):
+    try:
+        return record_closed_spread(user["user_id"], req)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error))
+
+
+@app.delete("/api/portfolio/options/closed/spread/{trade_id}")
+def closed_spread_delete(trade_id: int, user: dict = Depends(get_current_user)):
+    """Delete one closed spread row (both legs of that close) from history, like deleting a single closed option.
+    trade_id is the row's id as listed; other partial closes of the same spread are kept."""
+    import spreads
+    uid = int(user["user_id"])
+    row = next((row for row in spreads.merge_closed(get_closed_options(uid)) if row["id"] == trade_id and row.get("spread")), None)
+    if row is None or not delete_closed_option(uid, row["spread"]["leg_ids"]):
+        raise HTTPException(status_code=404, detail="Closed spread not found")
+    return {"ok": True}
 
 
 @app.post("/api/portfolio/options/closed")
@@ -753,6 +776,7 @@ def options_summary_endpoint(user: dict = Depends(get_current_user), account: Op
             "est_value": round(market_price, 2) if quoted else None,
             "pnl": round(pnl, 2) if pnl is not None else None, "pnl_pct": round(pnl_pct, 2) if pnl_pct is not None else None,
             "account": o.get("account") or "Default", "expired": not options_analytics._live(o["expiry"]),
+            "spread_id": o.get("spread_id"),
         })
 
     total_cost = sum(d["cost"] for d in details)
@@ -766,8 +790,30 @@ def options_summary_endpoint(user: dict = Depends(get_current_user), account: Op
         "total_pnl_pct": None if incomplete else round((total_pnl / total_cost * 100) if total_cost else 0, 2),
         "incomplete": incomplete,
         "options": details,
+        "spreads": _spread_summaries(options, details),
         "as_of": as_of,
     }
+
+
+def _spread_summaries(options: list[dict], details: list[dict]) -> list[dict]:
+    """One row per intact spread: net entry, net mark, combined P&L and the payoff limits at expiry."""
+    import spreads
+    by_id = {d["id"]: d for d in details}
+    out = []
+    for spread_id, (long_leg, short_leg) in spreads.pair_open(options).items():
+        long_row, short_row = by_id[long_leg["id"]], by_id[short_leg["id"]]
+        info = spreads.describe(long_leg, short_leg)
+        quoted = long_row["quoted"] and short_row["quoted"]
+        mark = spreads.net_premium(info["kind"], long_row["market_price"], short_row["market_price"]) if quoted else None
+        pnl = round(long_row["pnl"] + short_row["pnl"], 2) if quoted else None
+        risk = info["max_loss"]
+        out.append({**info, "spread_id": spread_id, "ticker": long_leg["ticker"], "type": long_leg["option_type"],
+                    "expiry": long_leg["expiry"], "dte": long_row["dte"], "contracts": long_leg["contracts"],
+                    "current_price": long_row["current_price"], "account": long_row["account"], "expired": long_row["expired"],
+                    "net_mark": None if mark is None else round(mark, 2), "pnl": pnl,
+                    "pnl_pct_of_risk": round(pnl / risk * 100, 1) if pnl is not None and risk else None,
+                    "leg_ids": [short_leg["id"], long_leg["id"]]})
+    return sorted(out, key=lambda row: (row["expiry"], row["ticker"]))
 
 
 def _link_cycle(user_id: int, result: dict, cycle: str | None) -> dict:
@@ -786,6 +832,64 @@ def _link_cycle(user_id: int, result: dict, cycle: str | None) -> dict:
 def options_buy(req: OptionRequest, user: dict = Depends(get_current_user)):
     return add_user_option(user["user_id"], req.ticker, req.option_type, req.strike,
                           req.expiry, req.premium, req.contracts, req.position, account=req.account)
+
+
+@app.post("/api/portfolio/spreads")
+def spread_open(req: SpreadRequest, user: dict = Depends(get_current_user)):
+    try:
+        return add_user_spread(int(user["user_id"]), req.ticker, req.kind, req.expiry, req.long_strike, req.long_premium,
+                               req.short_strike, req.short_premium, req.contracts, account=req.account)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+
+
+@app.post("/api/portfolio/spreads/{spread_id}/close")
+def spread_close(spread_id: str, req: SpreadCloseRequest, user: dict = Depends(get_current_user)):
+    try:
+        return close_user_spread(int(user["user_id"]), spread_id, req.long_premium, req.short_premium, req.contracts)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error))
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+
+
+@app.post("/api/portfolio/spreads/{spread_id}/expire")
+def spread_expire(spread_id: str, user: dict = Depends(get_current_user)):
+    """Settle an expired spread at each leg's intrinsic value from the underlying's close on expiry day."""
+    import pandas as pd
+    import spreads
+    uid = int(user["user_id"])
+    pair = spreads.pair_open(get_user_options(uid)).get(spread_id)
+    if pair is None:
+        raise HTTPException(status_code=404, detail="Spread not found")
+    long_leg, short_leg = pair
+    if options_analytics._live(long_leg["expiry"]):
+        raise HTTPException(status_code=400, detail="This spread hasn't expired yet")
+    spot = None
+    try:
+        closes = get_stock_data(long_leg["ticker"], period="6mo", interval="1d")["Close"]
+        closes.index = pd.to_datetime(closes.index.date)
+        on = closes[closes.index == pd.Timestamp(long_leg["expiry"])]
+        spot = float(on.iloc[-1]) if len(on) and pd.notna(on.iloc[-1]) and on.iloc[-1] > 0 else None
+    except Exception as error:
+        log.info("Spread expiry close unavailable for %s: %s", long_leg["ticker"], error)
+    if spot is None:
+        raise HTTPException(status_code=503, detail="The expiry-day close is unavailable; close the spread at its settlement prices instead")
+    value = lambda leg: round(max(spot - leg["strike"], 0) if leg["option_type"] == "call" else max(leg["strike"] - spot, 0), 2)  # noqa: E731
+    try:
+        result = close_user_spread(uid, spread_id, value(long_leg), value(short_leg), long_leg["contracts"],
+                                   closed_at=f"{long_leg['expiry']} 20:00:00")
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error))
+    return {**result, "action": "EXPIRED", "settle_price": round(spot, 2)}
+
+
+@app.delete("/api/portfolio/spreads/{spread_id}")
+def spread_delete(spread_id: str, user: dict = Depends(get_current_user)):
+    result = delete_user_spread(int(user["user_id"]), spread_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Spread not found")
+    return result
 
 
 @app.post("/api/portfolio/options/close")

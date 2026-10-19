@@ -48,6 +48,8 @@ export function Today({ version, onRepair, onAssign }) {
         <div key={p.id} className="desk-item">
           <div className="desk-head">
             <strong>{p.ticker}</strong> {p.position} ${p.strike} {p.type} · {fmtDate(p.expiry)} ({p.dte}d)
+            {p.spread && <span className="account-badge" title={`Leg of a ${p.spread.label.toLowerCase()} spread ($${p.spread.long_strike}/$${p.spread.short_strike}); rules use the spread's net value${p.spread.net_mark != null ? ` (mark $${p.spread.net_mark})` : ''}`}>
+              {p.spread.label} spread{p.spread.role === 'hedge' ? ' · protective leg' : ''}</span>}
             <span className="market-sub desk-meta">
               <span className="desk-dot">{' '}· </span>stock ${p.spot}{p.mid != null && ` · mark $${p.mid}`}{p.delta != null && ` · Δ ${p.delta}`}
               {p.profit_captured_pct > 0 && ` · ${p.profit_captured_pct}% of max profit`}
@@ -63,7 +65,7 @@ export function Today({ version, onRepair, onAssign }) {
               </li>
             ))}
           </ul>
-          {p.position === 'short' && p.actions.some(a => CLOSE_CODES.has(a.code)) && <LimitHint bid={p.bid} ask={p.ask} side="buy" what="buy-back" />}
+          {p.position === 'short' && !p.spread && p.actions.some(a => CLOSE_CODES.has(a.code)) && <LimitHint bid={p.bid} ask={p.ask} side="buy" what="buy-back" />}
         </div>
       ))}
       {d.positions.length > busy.length && (
