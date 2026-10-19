@@ -7,7 +7,8 @@ import {
   editHolding, deleteHolding, editOption, deleteOption,
   fetchClosedTrades, fetchClosedOptions, assignOption, expireOption, deleteClosedTrade, deleteClosedOption, deleteClosedSpread,
 } from '../api/stockApi';
-import { StructureBuilder, SpreadRow, SpreadClosePanel, LinkSuggestions } from './SpreadPositions';
+import { StructureBuilder, SpreadRow, SpreadClosePanel, LinkSuggestions, netPaid } from './SpreadPositions';
+import { PayoffToggle } from './IdeaTrust';
 import PortfolioChart from './PortfolioChart';
 import SectorAllocation from './SectorAllocation';
 import PortfolioDoctor from './PortfolioDoctor';
@@ -433,7 +434,7 @@ export default function Portfolio() {
           <h3 id="position-alerts">Option alerts</h3><Today version={version} onRepair={repair} onAssign={id => { const option = options.find(item => item.id === id); if (option) handleAssign(option); }} />
           <h3 id="earnings-exposure">Earnings exposure</h3><Earnings version={version} />
           <h3 id="expiry-ladder">Expiration ladder</h3><ExpiryLadder version={version} />
-          <h3 id="stress-scenarios">Stress scenarios</h3><WhatIf options={options} holdings={holdings} />
+          <h3 id="stress-scenarios">Stress scenarios</h3><WhatIf options={options} holdings={holdings} spreads={optionsSummary?.spreads || []} />
           <div id="correlations">{holdings.length >= 2 ? <CorrelationHeatmap tickers={[...new Set(holdings.map(item => item.ticker))]} />
             : <p className="market-sub">Correlation needs at least two stocks.</p>}</div>
           <div id="sectors">{holdings.length > 0 && !portfolio?.incomplete ? <SectorAllocation holdings={holdings} />
@@ -800,10 +801,13 @@ export default function Portfolio() {
                     const legIds = new Set(spreadList.flatMap(s => s.leg_ids));
                     return [
                       ...spreadList.flatMap(s => [{ spread: s }, ...(openSpreadLegs[s.spread_id]
-                        ? s.leg_ids.map(id => optionsSummary.options.find(o => o.id === id)).filter(Boolean).map(o => ({ option: o, leg: true })) : [])]),
+                        ? [...s.leg_ids.map(id => optionsSummary.options.find(o => o.id === id)).filter(Boolean).map(o => ({ option: o, leg: true })), { chart: s }] : [])]),
                       ...optionsSummary.options.filter(o => !legIds.has(o.id)).map(o => ({ option: o })),
                     ];
                   })().map((item, i) => {
+                    if (item.chart) return <tr key={`chart-${item.chart.spread_id}`} className="spread-chart-row"><td colSpan={13}>
+                      <PayoffToggle multiExpiry={item.chart.multi_expiry} legs={item.chart.legs} net={netPaid(item.chart.legs)}
+                        units={item.chart.contracts} spot={item.chart.current_price} /></td></tr>;
                     if (item.spread) return <SpreadRow key={`spread-${item.spread.spread_id}`} spread={item.spread} account={account}
                       open={!!openSpreadLegs[item.spread.spread_id]} setMsg={setMsg}
                       onToggle={() => setOpenSpreadLegs(value => ({ ...value, [item.spread.spread_id]: !value[item.spread.spread_id] }))}

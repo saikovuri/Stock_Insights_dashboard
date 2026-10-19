@@ -498,6 +498,8 @@ def init_db():
     install_schema(conn, USE_PG)
     import accounts
     accounts.install_schema(conn, USE_PG)
+    import paper
+    paper.install_schema(conn, USE_PG)
     for column, datatype in {"cost_per_share": "DOUBLE PRECISION", "cost_model": "TEXT"}.items():
         if USE_PG:
             idx.execute(f"ALTER TABLE idea_log ADD COLUMN IF NOT EXISTS {column} {datatype}")

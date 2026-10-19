@@ -226,7 +226,7 @@ class StructureLedgerTests(unittest.TestCase):
             vertical_id = database.add_user_spread(1, "SPY", vertical("bull_put", 95, 100, 1.0, 2.5, past), 1)["spread_id"]
             calendar_id = database.add_user_spread(1, "SPY", [leg("short", "call", 100, 2.0, past), leg("long", "call", 100, 4.5, future)], 1)["spread_id"]
         closes = pd.DataFrame({"Close": [98.0, 120.0]}, index=pd.to_datetime([past, "2026-02-02"]))
-        with self.as_user(main), patch.object(main, "get_stock_data", return_value=closes):
+        with self.as_user(main), patch("stock_data.get_stock_data", return_value=closes):
             result = client.post(f"/api/portfolio/spreads/{vertical_id}/expire").json()
             self.assertEqual((result["settle_price"], result["pnl"], result["remaining_legs"]), (98.0, -50.0, 0))
             calendar = client.post(f"/api/portfolio/spreads/{calendar_id}/expire").json()

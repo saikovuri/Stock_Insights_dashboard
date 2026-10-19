@@ -851,6 +851,53 @@ def _link_cycle(user_id: int, result: dict, cycle: str | None) -> dict:
     return result
 
 
+class PaperLeg(BaseModel):
+    model_config = {"extra": "forbid"}
+    position: Literal["long", "short"]
+    option_type: Literal["call", "put"]
+    strike: float = Field(gt=0)
+    expiry: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    ratio: int = Field(default=1, ge=1, le=10)
+
+
+class PaperRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+    ticker: str = Field(min_length=1, max_length=20, pattern=r"^[A-Za-z^][A-Za-z0-9.^=-]*$")
+    legs: list[PaperLeg] = Field(min_length=1, max_length=4)
+    contracts: int = Field(default=1, ge=1, le=1000)
+    source: Optional[str] = Field(default=None, max_length=40)
+    label: Optional[str] = Field(default=None, max_length=80)
+
+
+@app.get("/api/paper")
+def paper_list(user: dict = Depends(get_current_user)):
+    import paper
+    return paper.list_trades(int(user["user_id"]))
+
+
+@app.post("/api/paper")
+@limiter.limit("30/minute")
+def paper_open(request: Request, req: PaperRequest, user: dict = Depends(get_current_user)):
+    import paper
+    return _spread_errors(lambda: paper.open_trade(int(user["user_id"]), req.ticker, [leg.model_dump() for leg in req.legs],
+                                                   req.contracts, req.source, req.label))
+
+
+@app.post("/api/paper/{trade_id}/close")
+@limiter.limit("30/minute")
+def paper_close(request: Request, trade_id: int, user: dict = Depends(get_current_user)):
+    import paper
+    return _spread_errors(lambda: paper.close_trade(int(user["user_id"]), trade_id))
+
+
+@app.delete("/api/paper/{trade_id}")
+def paper_delete(trade_id: int, user: dict = Depends(get_current_user)):
+    import paper
+    if not paper.delete_trade(int(user["user_id"]), trade_id):
+        raise HTTPException(status_code=404, detail="Paper trade not found")
+    return {"ok": True}
+
+
 @app.post("/api/portfolio/options/buy")
 def options_buy(req: OptionRequest, user: dict = Depends(get_current_user)):
     return add_user_option(user["user_id"], req.ticker, req.option_type, req.strike,
@@ -897,15 +944,8 @@ def spread_unlink(spread_id: str, user: dict = Depends(get_current_user)):
 
 
 def _close_on(ticker: str, day: str) -> float | None:
-    import pandas as pd
-    try:
-        closes = get_stock_data(ticker, period="2y", interval="1d")["Close"]
-        closes.index = pd.to_datetime(closes.index.date)
-        on = closes[closes.index == pd.Timestamp(day)]
-        return float(on.iloc[-1]) if len(on) and pd.notna(on.iloc[-1]) and on.iloc[-1] > 0 else None
-    except Exception as error:
-        log.info("Expiry close unavailable for %s %s: %s", ticker, day, error)
-        return None
+    from paper import expiry_close
+    return expiry_close(ticker, day)
 
 
 @app.post("/api/portfolio/spreads/{spread_id}/expire")
@@ -922,6 +962,9 @@ def spread_expire(spread_id: str, user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=400, detail="No leg of this spread has expired yet")
     day = min(leg["expiry"] for leg in expired)
     expired = [leg for leg in expired if leg["expiry"] == day]
+    from paper import settle_ready
+    if not settle_ready(day):
+        raise HTTPException(status_code=400, detail="The closing price is final after 4:15 PM ET; settle it then")
     spot = _close_on(legs[0]["ticker"], day)
     if spot is None:
         raise HTTPException(status_code=503, detail="The expiry-day close is unavailable; close the spread at its settlement prices instead")

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { fetchStructures } from '../api/stockApi';
 import PricedAt from './PricedAt';
 import Tip from './Tip';
+import { PastResults, PayoffToggle, PaperTradeButton } from './IdeaTrust';
 
 const RISKS = {
   extreme: { label: '⚡ Extreme', sub: '0–6 days', hint: '0DTE / this-week options: lottery-ticket odds, can go to zero in hours.' },
@@ -25,9 +26,14 @@ const fmtDate = d => {
   return dt.toLocaleDateString(undefined, opts);
 };
 
-function IdeaCard({ i, expiry, why }) {
+function IdeaCard({ i, expiry, why, data }) {
   const liq = LIQ[i.liquidity];
   const unit = i.qty === 1 ? i.unit : `${i.unit}s`;
+  const shares = i.kind === 'shares';
+  const legs = shares ? [{ position: 'long', option_type: 'stock', ratio: 1 }]
+    : i.legs.map(l => ({ position: l.action === 'BUY' ? 'long' : 'short', option_type: l.type, strike: l.strike, ratio: 1, expiry }));
+  const units = shares ? i.qty / 100 : i.qty;
+  const net = shares ? data.spot : i.cost / (i.qty * 100);
   return (
     <div className={`structure-card ${i.best ? 'structure-best' : ''}`}>
       <div className="structure-title">
@@ -66,6 +72,9 @@ function IdeaCard({ i, expiry, why }) {
         )}
       </div>
       <p className="structure-notes">{i.notes}</p>
+      {!shares && <PastResults kind={i.kind} label={`${data.risk} · ${data.direction}`} />}
+      <PayoffToggle legs={legs} net={net} units={units} spot={data.spot} />
+      {!shares && <PaperTradeButton ticker={data.ticker} legs={legs} contracts={i.qty} source="directional" label={`${i.title} · ${data.timeframe}`} />}
     </div>
   );
 }
@@ -168,7 +177,7 @@ export default function Structures({ ticker }) {
       {data && data.ideas.length > 0 && (
         <>
           <div className="structures-grid">
-            {data.ideas.map(i => <IdeaCard key={i.kind} i={i} expiry={data.expiry} why={data.best_why} />)}
+            {data.ideas.map(i => <IdeaCard key={i.kind} i={i} expiry={data.expiry} why={data.best_why} data={data} />)}
           </div>
           {direction === 'bear' && (
             <p className="ivrank-note">Shorting shares isn't suggested — its loss is unlimited. Puts and put spreads cap the risk at what you pay.</p>

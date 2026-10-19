@@ -19,6 +19,7 @@ This guide describes the implementation as inspected on October 5, 2026. It expl
 - [Macro calendar](#ideas-macro-calendar)
 - [Strategy Tester](#ideas-strategy-tester)
 - [Paper options track record](#ideas-options-track-record)
+- [Paper trades](#journal-paper-trades)
 - [Watchlist](#watchlist)
 - [Holdings](#portfolio-holdings)
 - [Portfolio Risk](#portfolio-portfolio-risk)
@@ -190,10 +191,10 @@ Among the surviving dates, standard monthly expirations are preferred over weekl
 - Analyze out-of-the-money puts for the selected expiry using the shared option-chain helpers.
 - Target approximately 0.15 absolute delta. Reject the selected contract if its delta exceeds 0.22.
 - Reject contracts classified as `thin` by the shared liquidity rule.
-- Require midpoint-based simple annualized premium of at least 7%.
+- Require simple annualized premium of at least 7%, priced at the expected fill (halfway between the midpoint and the bid), not the midpoint.
 - Use one standard contract as 100 shares; cash collateral is `strike * 100`.
 
-For stock price `S`, strike `K`, premium per share `M`, and calendar days `D`:
+For stock price `S`, strike `K`, premium per share `M` (the expected fill above; cards also show the midpoint), and calendar days `D`:
 
 | Display | Calculation |
 | --- | --- |
@@ -351,6 +352,17 @@ Default expiry targets about 35 DTE. It first seeks a liquid pre-earnings expiry
 
 Spread wing width starts with the largest value among $0.50, $1, $2.50, $5, $10, $25, $50 not exceeding 2.5% of spot, defaulting to $0.50. Wings near half to twice that width are preferred, with same-side farther-OTM fallback and OI preference. A valid midpoint credit must be positive and below the spread width. The "natural" estimate sells at bid and buys at ask; it is not a guaranteed fill.
 
+**Realistic fills.** Every income idea is priced at the **expected fill**, not the midpoint:
+- Single options are priced halfway between the midpoint and the bid.
+- Spreads and condors are priced halfway between the midpoint credit and the natural credit.
+
+Premium, return, annualized return, max loss, return on risk, breakevens and chance of profit all use that fill. Each card shows the expected fill with the midpoint and natural/bid beside it, and the limit-price steps still start at the midpoint. A spread or condor whose credit at the expected fill is under 10% of its width is not shown, and the page says how many were hidden for that expiry. Wheel candidates and the Wheel ladder use the same expected fill for premium, annualized return and cost if assigned (Wheel planning already uses the more conservative bid − $1).
+
+**On each card:**
+- **Past ideas like this** shows the Options Track Record for the same idea type and label across every ticker. For example, all Balanced put credit spreads, with settled count, win rate, average return on the amount at risk and the worst result. Under 10 settled ideas says there are too few to judge. Covered calls are not tracked, so they show none.
+- **📈 Profit/loss at expiry** opens a chart of P/L against the stock price at expiry, at the expected fill and the sized quantity (one when none is sized), with today's price marked. A covered call's chart counts 100 shares bought at today's price.
+- **📝 Paper trade** (signed in; cash-secured puts, put credit spreads and iron condors) records the idea as a practice position. See Journal → Paper trades.
+
 ### Safety Labels Versus Sizing
 
 Backend checks cover non-thin liquidity, strikes outside the expected move when available, spread credit at least 10% of width, earnings overlap, and expiry within six days. Zero failed checks produces `safer`, one `caution`, and two or more `risky`. Missing expected-move data means that check is not performed; a label is not comprehensive clearance.
@@ -371,7 +383,7 @@ For example, bid $0.32 and ask $0.40 give midpoint $0.36 and a 22.2% spread. Tha
 
 Premium and probability displays remain estimates. The user guidance about taking 50% profit or rolling is not an automatic trading rule. Defined-risk expiry formulas assume the specified legs are maintained; early assignment and execution risks remain.
 
-Source: [frontend/src/components/IncomeIdeas.jsx](frontend/src/components/IncomeIdeas.jsx).
+Source: [frontend/src/components/IncomeIdeas.jsx](frontend/src/components/IncomeIdeas.jsx), [frontend/src/components/IdeaTrust.jsx](frontend/src/components/IdeaTrust.jsx).
 
 ## Options Hub: Directional
 
@@ -401,6 +413,8 @@ The deterministic "best fit" order is:
 4. Patient: prefer a non-stretched long option; otherwise the spread; otherwise shares.
 5. Low: prefer non-stretched LEAPS; otherwise shares if available.
 6. Final fallback among eligible structures: spread, long option, shares.
+
+Option cards also show **Past ideas like this** (directional ideas with the same plan and direction, for example Patient · bull), **📈 Profit/loss at expiry**, and **📝 Paper trade** (signed in). Share cards show the payoff chart only.
 
 This comparison is a heuristic, not portfolio optimization or a validated expected-return ranking. An option's maximum loss can be the entire debit; a stop order cannot guarantee the quoted loss limit during a gap.
 
@@ -575,7 +589,8 @@ Source: [backend/backtester.py](backend/backtester.py).
 
 This tab is a **paper-idea log**, not the user's trade history. It records generated CSP, put-spread, iron-condor, Wheel-put, long-option and debit-spread observations; covered calls and share purchases are not included in this paper summary. Wheel recording uses up to the first 20 backend-ranked candidates, not only the 12 visible cards. Income recording occurs before frontend budget/display checks, so a logged idea does not imply the user could or should have sized it.
 
-- Entry is a hypothetical quoted midpoint observation. Stored legs, premium/debit, risk and cost assumptions determine the outcome.
+- Entry is a hypothetical quoted midpoint observation, kept even though idea cards now show the expected fill, so the history stays comparable over time; the frozen cost model below stands in for the fill. Stored legs, premium/debit, risk and cost assumptions determine the outcome.
+- The same groups appear on Income, Wheel and Directional idea cards as **Past ideas like this** (10 or more settled ideas needed before stats are shown).
 - Settlement uses the exact expiry-date underlying close and each leg's intrinsic payoff. Settlement runs only after the expiry close cutoff (4:15 p.m. Eastern for same-day settlement). A missing exact-date close leaves the observation unsettled, rather than substituting another date.
 - New ideas freeze a cost model of $1 commission per leg per side plus $0.01/share slippage per leg per side: $4 round trip per standard contract leg. Legacy observations without recorded costs are excluded from costed results.
 - Win rate means positive P&L after those modeled costs. Return on risk divides net P&L by the recorded risk plus modeled costs. "Expired worthless" uses the gross expiry payoff condition, not after-cost profit.
@@ -584,6 +599,20 @@ This tab is a **paper-idea log**, not the user's trade history. It records gener
 There is no simulation of early assignment, intraday management, actual order fills, reinvestment or portfolio capacity. Viewing a positive paper track record does not establish a tradable edge.
 
 Source: [backend/track_record.py](backend/track_record.py).
+
+## Journal: Paper Trades
+
+**📝 Paper trade** on an Income (cash-secured put, put credit spread, iron condor), Wheel or Directional option card records that idea as a practice position for the signed-in user. Paper trades live in their own table: they never touch holdings, options, cash, account value, alerts, collateral or real P&L.
+
+- **Entry** re-quotes every leg when you click: bought legs at halfway between midpoint and ask, sold legs halfway between midpoint and bid. A leg without a usable quote (or a sold leg with no bid) is refused. Legs must share one expiry that hasn't passed, and multi-leg ideas must be a supported structure.
+- **Journal → Paper trades** lists open trades marked at midpoints with open P&L, plus closed and expired ones. The summary shows open count, closed count, win rate, realized P&L and open P&L; open P&L is unavailable while any leg lacks a quote.
+- **Close now** exits at the same realistic fill (selling bought legs halfway to the bid, buying back sold legs halfway to the ask).
+- Trades past expiry settle when the list loads, once the close is final (4:15 p.m. Eastern on expiry day, like the track record), at each leg's intrinsic value from the underlying's close on the expiry date. Without that close they stay open.
+- **🗑** deletes a paper trade. At most 300 can be open at once.
+
+Fees, early assignment and intraday management are not modeled. Paper trades are not copied by Export/Import between logins.
+
+Source: [backend/paper.py](backend/paper.py), [frontend/src/components/PaperTrades.jsx](frontend/src/components/PaperTrades.jsx).
 
 ## Watchlist
 
@@ -721,11 +750,11 @@ The options table shows each intact structure as one row:
 - the nearest expiry, net entry and net mark (the legs at their midpoints; for credit structures, the cost to close);
 - combined P&L as a percentage of max loss. P&L is unavailable unless every leg has a usable quote.
 
-**▸** shows the legs underneath. Row actions:
+**▸** shows the legs underneath, with a **📈 Profit/loss at expiry** chart at the recorded fills (the builder shows the same chart once every leg is filled in; calendars and diagonals have none). Row actions:
 - **×** closes every leg together: enter each leg's fill, plus how many structures. A partial close keeps the rest of the structure intact, at its ratios.
 - **✏️** corrects strikes, expiries, fills or size in place (each leg keeps its id and open date). To change the structure type, delete it and open a new one.
 - **🔗** unlinks the legs so they become separate options again; nothing is closed.
-- **⌛** (once a leg has expired) settles the expired legs at their intrinsic value from the underlying's close on that expiry day (daily history), dated that day. If that close is unavailable it asks you to close at settlement prices. If a sold leg finished in the money it may have been assigned instead: open the legs and use 📥 on that leg. For a calendar, only the near leg settles and the later leg stays open.
+- **⌛** (once a leg has expired) settles the expired legs at their intrinsic value from the underlying's close on that expiry day (daily history), dated that day. It is refused until 4:15 p.m. Eastern on expiry day, when the close is final. If that close is unavailable it asks you to close at settlement prices. If a sold leg finished in the money it may have been assigned instead: open the legs and use 📥 on that leg. For a calendar, only the near leg settles and the later leg stays open.
 - **🗑** deletes a mistaken entry (every leg) without recording a close.
 
 **Legs closed separately.** Legs can still be closed, assigned, edited or deleted one at a time from the expanded rows. The structure then stops being intact, and the remaining legs show a **left from {structure}** badge. They are judged on their own (Option alerts adds an Info note), and their collateral reverts to single-option rules.
@@ -793,7 +822,7 @@ Under Suggested next steps, **My trading rules** stores optional personal limits
 | Minimum free cash % (0-100) | An account's free cash (cash minus short-put collateral) divided by cash plus its priced stock value is below it. Accounts without an entered cash balance are skipped. |
 | Take profit at % captured (1-100) | A short option's captured premium (from Option alerts' midpoint) reaches it. |
 | Stop at a multiple of the credit (0.5-10) | A short option's loss, (midpoint − opening premium) ÷ opening premium, reaches it. 2 means the option costs 3× what it was sold for. |
-| Never sell a call below my average cost | A short call's strike is below the average cost of the recorded shares of that ticker in the same account. |
+| Never sell a call below my average cost | A short call's strike is below the average cost of the recorded shares of that ticker in the same account. Sold calls inside a spread or condor are skipped, because their bought call covers them, not the shares. |
 | No short options through earnings | A short option has an earnings-before-expiry alert. |
 
 Rules are reminders you set for yourself. They do not block trades or change records.
@@ -908,7 +937,13 @@ What-if changes assumptions for held stocks/options and estimates resulting P&L;
 - Black-Scholes uses 4% interest and current quote anchoring; the current model/mark difference fades as time runs down. At expiry, scenario value becomes intrinsic. The unchanged scenario reproduces the current market mark.
 - Any required missing option/stock quote blocks the scenario instead of silently dropping that position. For options without a usable quote, the warning lists them and offers **Run without it/them**; the result then shows a "⚠ Left out (no quote)" banner naming those positions, with **Include them again**. The totals then exclude their risk. Results compare total scenario P&L with current P&L, not only the incremental future gain.
 
-**Exposure by industry** (below the scenario table) groups every held stock and option ticker by the provider's industry (Finnhub's industry, or Yahoo's when Finnhub is unavailable; "Unknown" when neither has one). Per industry it shows the tickers, shares value at current prices, short-put assignment value (`strike × 100 × contracts`, the cash needed if assigned), and that industry's share of the combined total; 40% or more is shown in red. Calls and long puts are listed under their industry but not counted in the dollar columns. **Stress this** switches the scenario to that industry. Industry and beta are cached for six hours. Provider industries can be broad (for example a chip designer filed under Technology), so check the ticker list.
+**Exposure by industry** (below the scenario table) groups every held stock and option ticker by the provider's industry (Finnhub's industry, or Yahoo's when Finnhub is unavailable; "Unknown" when neither has one). Per industry it shows:
+- the tickers;
+- shares value at current prices;
+- **option collateral**: a short put counts `strike × 100 × contracts`, the cash needed if assigned. Each intact spread, condor or butterfly counts once, at the most its legs can owe at expiry (a credit spread's width, nothing for a debit spread);
+- that industry's share of the combined total, in red at 40% or more.
+
+Other calls and long puts are listed under their industry but not counted in the dollar columns. **Stress this** switches the scenario to that industry. Industry and beta are cached for six hours. Provider industries can be broad (for example a chip designer filed under Technology), so check the ticker list.
 
 The correlation heatmap uses three-month daily log returns, aligned on matching start/end date pairs, with at least five common observations and nonzero variance required. It is distinct from Doctor's one-year data and the Wheel planner's six-month check. Correlation is not a permanent relationship or proof of diversification. Sector allocation is based on recorded stock exposure. Missing marks prevent complete stock-value charts; no chart can infer unrecorded accounts or positions.
 
@@ -983,7 +1018,7 @@ Sources: [backend/account_transfer.py](backend/account_transfer.py), [backend/ma
 
 ### Premium Cash Flow
 
-Displays twelve monthly buckets of premium collected, premium paid, net cash flow and realized option P&L. Short opening premiums are collected at opening; buybacks are paid at close. Long purchases are paid at opening and sale proceeds collected at close. If a legacy close lacks its opening date, the close month is used. Goal progress compares this month's **realized** result with the recorded monthly goal, not merely cash received. The three-month average uses the previous three completed months.
+Displays twelve monthly buckets of premium collected, premium paid, net cash flow and realized option P&L. Short opening premiums are collected at opening; buybacks are paid at close. Long purchases are paid at opening and sale proceeds collected at close. If a legacy close lacks its opening date, the close month is used. Goal progress compares this month's **realized** result with the recorded monthly goal, not merely cash received. The three-month average uses the previous three completed months. The trade count counts each sold option once, except that a multi-leg structure counts once per month however many legs it sells (an iron condor is one trade); premium amounts still include every leg.
 
 ### vs S&P 500
 
@@ -1422,7 +1457,7 @@ WHERE oid = 'public.idea_log'::regclass;
 
 Expect `true`, `false`, `false`, then rerun Supabase's Security Advisor and check the backend's options-track-record view. The transaction preserves records and blocks public-role table access even if legacy RLS policies remain. If the backend uses a non-owner role without `BYPASSRLS`, configure a narrowly scoped backend policy before enabling RLS rather than granting access to browser roles. The broader [Supabase RLS script](deploy/supabase_rls.sql) covers the other named StockPilot tables; verify their status separately. A warning alone does not establish that data was accessed: inspect available API/database logs to assess past exposure. Local tests do not verify production grants, policies, or historical access.
 
-The `account_cash`, `nav_snapshots`, `applied_splits`, `watchlist_lists`, `watchlist_groups`, `applied_actions`, `user_rules`, `buy_zones` and `trade_plans` tables are created with RLS enabled and public-role grants revoked at PostgreSQL startup, and are included in the RLS script.
+The `account_cash`, `nav_snapshots`, `applied_splits`, `watchlist_lists`, `watchlist_groups`, `applied_actions`, `user_rules`, `buy_zones`, `trade_plans` and `paper_trades` tables are created with RLS enabled and public-role grants revoked at PostgreSQL startup, and are included in the RLS script.
 
 ### Route Notes
 

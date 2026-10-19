@@ -152,6 +152,16 @@ def main():
     plan = trade_plans.save_plan(user, {"ticker": "AAPL", "thesis": "PG check", "max_loss": 100})
     assert [p["id"] for p in trade_plans.list_plans(user, "AAPL")] == [plan["id"]]
     assert not trade_plans.delete_plan(other, plan["id"]) and trade_plans.delete_plan(user, plan["id"])
+    import pandas as pd
+    import paper
+    pg_chain = pd.DataFrame([{"strike": 100.0, "bid": 1.9, "ask": 2.1, "openInterest": 500}])
+    with patch("options_analytics._chain", return_value=(pg_chain.iloc[0:0], pg_chain)):
+        pg_paper = paper.open_trade(user, "SPY", [{"position": "short", "option_type": "put", "strike": 100, "expiry": "2099-01-15"}],
+                                    1, "wheel", None)
+        assert pg_paper["entry"] == -1.95, pg_paper
+        assert paper.list_trades(other)["trades"] == []
+        assert paper.close_trade(user, pg_paper["id"])["pnl"] == -10.0
+    assert paper.delete_trade(user, pg_paper["id"])
     import spreads
     put_legs = [dict(position="long", option_type="put", strike=95, expiry="2099-01-15", premium=1.0, ratio=1),
                 dict(position="short", option_type="put", strike=100, expiry="2099-01-15", premium=2.5, ratio=1)]
@@ -189,6 +199,8 @@ def main():
         assert cursor.fetchone()[0], "Startup left idea_log exposed without RLS"
         cursor.execute("SELECT relrowsecurity FROM pg_class WHERE oid='public.trade_plans'::regclass")
         assert cursor.fetchone()[0], "Startup left trade_plans exposed without RLS"
+        cursor.execute("SELECT relrowsecurity FROM pg_class WHERE oid='public.paper_trades'::regclass")
+        assert cursor.fetchone()[0], "Startup left paper_trades exposed without RLS"
         for statement in ("UPDATE accounting_events SET operation='changed'", "DELETE FROM accounting_events", "TRUNCATE accounting_events"):
             try:
                 cursor.execute(statement)

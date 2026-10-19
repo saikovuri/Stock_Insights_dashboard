@@ -1,9 +1,12 @@
 import { useState } from 'react';
 import { openSpread, editSpread, closeSpread, expireSpread, deleteSpread, linkSpread, unlinkSpread } from '../api/stockApi';
 import { STRUCTURES, legName, structureName, previewStructure, templateLegs } from '../spreads';
+import { PayoffToggle } from './IdeaTrust';
 
 const usd = value => `${value < 0 ? '-' : ''}$${Math.abs(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const sign = l => (l.position === 'long' ? 1 : -1);
+/** Per-share amount paid for one structure at the given leg premiums (a credit is negative). */
+export const netPaid = legs => legs.reduce((sum, l) => sum + sign(l) * Number(l.ratio || 1) * Number(l.premium), 0);
 
 /** One fieldset per leg: strike, expiry (calendars/diagonals) and the price fields given as [key, label, aria name]. */
 export function LegsEditor({ legs, onChange, multi, prices, idPrefix }) {
@@ -77,6 +80,8 @@ export function StructureBuilder({ ticker, account, spread, onDone, onCancel, se
     <LegsEditor legs={legs} multi={multi} idPrefix={editing ? 'spread-edit' : 'spread'} prices={[['premium', 'Fill ($/share)', 'fill']]}
       onChange={(i, patch) => setLegs(list => list.map((l, j) => (j === i ? { ...l, ...patch } : l)))} />
     <p className="form-field-wide spread-preview" role="status"><PreviewLine preview={preview} kind={kind} /></p>
+    {valid && <div className="form-field-wide spread-preview"><PayoffToggle multiExpiry={multi} spot={spread?.current_price}
+      legs={effective.map(l => ({ ...l, strike: Number(l.strike), ratio: Number(l.ratio) }))} net={netPaid(effective)} units={count} /></div>}
   </>;
   if (!editing) return <>{fields}<div className="form-actions">
     <button className="btn-primary" onClick={submit} disabled={!valid || busy}>{busy ? 'Opening…' : 'Open spread'}</button></div></>;

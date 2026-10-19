@@ -5354,3 +5354,16 @@ button.signal-chip { cursor: pointer; }
   .structures-dir-row:has(.structures-risk-btn) { flex-wrap: wrap; }
   .structures-dir-row .structures-risk-btn { flex: 1 1 28%; min-width: 0; }
 }
+
+/* Trust aids on idea cards: past results, payoff chart, paper trade */
+.past-results { font-size: 0.78rem; margin: 0.5rem 0 0.25rem; line-height: 1.45; }
+.payoff-toggle { margin-top: 0.4rem; font-size: 0.8rem; }
+.payoff-toggle > summary { cursor: pointer; color: var(--accent); }
+.payoff-chart { margin-top: 0.4rem; width: 100%; min-width: 0; }
+.paper-trade { margin-top: 0.45rem; font-size: 0.78rem; }
+.income-pricing { margin-top: 0.6rem; }
+.options-table .spread-chart-row td { padding-top: 0; }
+@media (max-width: 640px) {
+  .phone-cards tr.spread-chart-row, .options-table tr.spread-chart-row { display: block; }
+  .options-table tr.spread-chart-row > td { display: block; width: auto; }
+}

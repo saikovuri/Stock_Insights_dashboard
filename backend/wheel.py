@@ -89,7 +89,8 @@ def _candidate(r: dict, S: float, earnings: str | None, short_dated: bool = Fals
     if liq == "thin":
         return None
     K, mid = p["strike"], p["mid"]
-    ann = mid / K * 365 / d * 100
+    fill = oa._sell_fill(mid, p["bid"])
+    ann = fill / K * 365 / d * 100
     if ann < MIN_ANNUALIZED:
         return None
     atm = oa._atm_iv(t, exp, S)
@@ -115,8 +116,8 @@ def _candidate(r: dict, S: float, earnings: str | None, short_dated: bool = Fals
         "r12m": r.get("r12m"),
         "expiry": exp, "dte": oa._dte(exp), "monthly": oa._is_monthly(exp),
         "strike": K, "delta": round(p["delta"], 2), "bid": round(p["bid"], 2), "ask": round(p["ask"], 2),
-        "premium": round(mid * 100, 2), "annualized_pct": round(ann, 1), "return_pct": round(mid / K * 100, 2),
-        "cushion_pct": round((S - K) / S * 100, 1), "breakeven": round(K - mid, 2),
+        "mid": round(mid, 2), "premium": round(fill * 100, 2), "annualized_pct": round(ann, 1), "return_pct": round(fill / K * 100, 2),
+        "cushion_pct": round((S - K) / S * 100, 1), "breakeven": round(K - fill, 2),
         "capital": round(K * 100), "prob_assigned_pct": round(p["p_itm"] * 100),
         "open_interest": p["oi"], "liquidity": liq,
         "iv_pct": None if not atm else round(atm * 100, 1), "rv_pct": round(rv * 100, 1), "iv_rich": iv_rich,
@@ -371,9 +372,10 @@ def _quality_checks(r: dict) -> list[dict]:
 
 def _ladder_row(p: dict, S: float, d: int) -> dict:
     K, mid = p["strike"], p["mid"]
-    return {"strike": K, "delta": round(p["delta"], 2), "mid": round(mid, 2), "premium": round(mid * 100, 2),
-            "annualized_pct": round(mid / K * 365 / d * 100, 1), "cushion_pct": round((S - K) / S * 100, 1),
-            "breakeven": round(K - mid, 2), "capital": round(K * 100), "prob_assigned_pct": round(p["p_itm"] * 100),
+    fill = oa._sell_fill(mid, p["bid"])
+    return {"strike": K, "delta": round(p["delta"], 2), "mid": round(mid, 2), "premium": round(fill * 100, 2),
+            "annualized_pct": round(fill / K * 365 / d * 100, 1), "cushion_pct": round((S - K) / S * 100, 1),
+            "breakeven": round(K - fill, 2), "capital": round(K * 100), "prob_assigned_pct": round(p["p_itm"] * 100),
             "open_interest": p["oi"], "liquidity": oa._liquidity(p["oi"], oa._spread_pct(p["bid"], p["ask"]))}
 
 

@@ -100,6 +100,11 @@ export function AuthProvider({ children }) {
   );
 }
 
+/** Signed-in state, or null outside an AuthProvider (for widgets that are optional for guests). */
+export function useOptionalAuth() {
+  return useContext(AuthContext);
+}
+
 export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error('useAuth must be used within AuthProvider');

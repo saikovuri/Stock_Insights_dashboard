@@ -539,6 +539,15 @@ def premium_income(user_id: int, months: int = 12) -> dict:
     opts, closed = get_user_options(user_id), get_closed_options(user_id)
     m = defaultdict(lambda: {"collected": 0.0, "paid": 0.0, "realized": 0.0, "trades": 0})
     key = lambda d: d.strftime("%Y-%m") if d else None
+    counted = set()  # a multi-leg structure is one trade however many legs it sells
+
+    def count(month, row):
+        tag = row.get("spread_id")
+        if tag is None or (tag, month) not in counted:
+            m[month]["trades"] += 1
+            if tag is not None:
+                counted.add((tag, month))
+
     for o in opts:
         k = key(_d(o.get("date_added")))
         if not k:
@@ -546,7 +555,7 @@ def premium_income(user_id: int, months: int = 12) -> dict:
         amt = o["premium"] * 100 * o["contracts"]
         if o.get("position") == "short":
             m[k]["collected"] += amt
-            m[k]["trades"] += 1
+            count(k, o)
         else:
             m[k]["paid"] += amt
     for c in closed:
@@ -554,7 +563,7 @@ def premium_income(user_id: int, months: int = 12) -> dict:
         opened, done = key(_d(c.get("opened_at")) or _d(c.get("closed_at"))), key(_d(c.get("closed_at")))
         if c["position"] == "short":
             m[opened]["collected"] += c["open_premium"] * n
-            m[opened]["trades"] += 1
+            count(opened, c)
             m[done]["paid"] += (c["close_premium"] or 0) * n
         else:
             m[opened]["paid"] += c["open_premium"] * n

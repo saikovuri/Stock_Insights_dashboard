@@ -5,6 +5,7 @@ import WheelManager from './WheelManager';
 import WheelAsk from './WheelAsk';
 import { usePortfolioFit, FitBadge } from './PortfolioFit';
 import { AssignmentShare, LimitHint, PostEarningsBadge, useAccountValue } from './TradeSizing';
+import { PastResults, PayoffToggle, PaperTradeButton } from './IdeaTrust';
 
 const LIQ = { good: ['Liquid', 'positive'], ok: ['OK liquidity', ''], thin: ['Thin', 'negative'] };
 const money = v => `$${Math.round(v).toLocaleString()}`;
@@ -23,7 +24,7 @@ function WheelCard({ c, onSelect, onManage, fit, account }) {
       {fit && <FitBadge fit={fit} detailed />}
       <div className="structure-legs">
         <div className="structure-leg leg-sell">
-          SELL ${c.strike} put · {fmtDate(c.expiry)}{c.monthly ? ' (monthly)' : ''} · {c.dte}d @ ${((c.bid + c.ask) / 2).toFixed(2)}
+          SELL ${c.strike} put · {fmtDate(c.expiry)}{c.monthly ? ' (monthly)' : ''} · {c.dte}d @ ${(c.premium / 100).toFixed(2)}
           <span className="structure-leg-oi"> · OI {c.open_interest.toLocaleString()}</span>
         </div>
       </div>
@@ -52,6 +53,10 @@ function WheelCard({ c, onSelect, onManage, fit, account }) {
       </ul>
       <AssignmentShare amount={c.capital} account={account} />
       <LimitHint bid={c.bid} ask={c.ask} />
+      <p className="market-sub">Premium is the expected fill, halfway between the midpoint (${c.mid ?? ((c.bid + c.ask) / 2).toFixed(2)}) and the bid.</p>
+      <PastResults kind="wheel" />
+      <PayoffToggle legs={[{ position: 'short', option_type: 'put', strike: c.strike, ratio: 1 }]} net={-c.premium / 100} spot={c.price} />
+      <PaperTradeButton ticker={c.ticker} legs={[{ position: 'short', option_type: 'put', strike: c.strike, expiry: c.expiry }]} source="wheel" label="Wheel candidate" />
       <div className="wheel-actions">
         <button className="link-btn" onClick={() => onManage({
           mode: 'repair', ticker: c.ticker, strike: c.strike, expiry: c.expiry, credit: +(c.premium / 100).toFixed(2),

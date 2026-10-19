@@ -914,3 +914,39 @@ test('directional plans offer a 2-6 month horizon and fit the screen', async ({ 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
   await controls.screenshot({ path: testInfo.outputPath('directional-controls.png') });
 });
+
+test('income cards show past results and a payoff chart, and paper trades fit the screen', async ({ page }, testInfo) => {
+  await page.route('**/api/ideas/track-record', route => route.fulfill({ json: { groups: [
+    { kind: 'pcs', label: 'Balanced', ideas: 23, win_rate: 78, avg_return_on_risk_pct: -2.1, worst_pct: -100 }] } }));
+  await page.route('**/api/stock/PYPL/metrics', route => route.fulfill({ json: { ticker: 'PYPL', name: 'PayPal', price: 52.8 } }));
+  await page.route('**/api/stock/PYPL/history?*', route => route.fulfill({ json: [] }));
+  await page.route('**/api/stock/PYPL/income*', route => route.fulfill({ json: {
+    ticker: 'PYPL', spot: 52.8, expiry: '2026-11-20', dte: 32, earnings_date: '2026-12-01', expirations: [{ date: '2026-11-20', dte: 32, monthly: true }],
+    pricing: 'Premiums use a realistic fill.', skipped_low_credit: {},
+    put_credit_spreads: [{ label: 'Balanced', short_strike: 50, long_strike: 48, width: 2, credit: 0.4, mid_credit: 0.45, natural_credit: 0.35,
+      premium: 40, max_loss: 160, return_on_risk_pct: 25, breakeven: 49.6, breakeven_pct: 6, prob_profit_pct: 80, prob_max_profit_pct: 75,
+      delta: 0.16, open_interest: 900, liquidity: 'good', safety: 'safer', checks: [] }],
+  } }));
+  await page.route('**/api/paper', route => route.fulfill({ json: { note: 'Practice positions.',
+    stats: { open: 1, closed: 0, wins: 0, win_rate: null, realized: 0, unrealized: 80 },
+    trades: [{ id: 7, ticker: 'SPY', structure: 'Bull put', strikes: '$95/$100', contracts: 2, entry: -1.4, style: 'credit',
+      opened_at: '2026-10-19T15:00:00Z', expiry: '2099-01-15', status: 'open', mark: -1.0, unrealized: 80, label: 'Put Credit Spreads · Balanced' }] } }));
+  await page.goto('/#dashboard');
+  await page.getByRole('combobox', { name: 'Ticker or company name' }).fill('PYPL');
+  await page.getByRole('button', { name: 'Analyze', exact: true }).click();
+  await page.getByRole('button', { name: /Analysis/, exact: false }).click();
+  await page.getByRole('button', { name: /Sell premium|💵 Income/ }).first().click();
+  const income = page.locator('.income-ideas');
+  await income.getByRole('button', { name: 'Put Credit Spreads', exact: true }).click();
+  await expect(income.getByText(/23 settled/)).toBeVisible();
+  await income.getByText('📈 Profit/loss at expiry').click();
+  await expect(income.locator('.payoff-chart svg')).toBeVisible();
+  expect(await income.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+  await income.locator('.structure-card').first().screenshot({ path: testInfo.outputPath('income-trust-card.png') });
+  await page.goto('/#journal');
+  await page.getByRole('button', { name: 'Paper trades' }).click();
+  const table = page.getByRole('table', { name: 'Paper trades' });
+  await expect(table.getByText('$80.00')).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('paper-trades.png'), fullPage: true });
+});

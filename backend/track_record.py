@@ -50,18 +50,22 @@ def record_income(d: dict) -> None:
         rows.append(_row("csp", i["label"], t, exp, [_leg("sell", "put", i["strike"])], i["mid"],
                          i["strike"] - i["mid"], S, i["delta"]))
     for i in d.get("put_credit_spreads", []):
+        # The track record keeps its own entry rule (midpoint less a frozen cost model) so its history stays comparable
+        credit = i.get("mid_credit", i["credit"])
         rows.append(_row("pcs", i["label"], t, exp, [_leg("sell", "put", i["short_strike"]), _leg("buy", "put", i["long_strike"])],
-                         i["credit"], i["width"] - i["credit"], S, i["delta"]))
+                         credit, i["width"] - credit, S, i["delta"]))
     for i in d.get("iron_condors", []):
         legs = [_leg("buy", "put", i["put_long"]), _leg("sell", "put", i["put_short"]),
                 _leg("sell", "call", i["call_short"]), _leg("buy", "call", i["call_long"])]
-        rows.append(_row("ic", i["label"], t, exp, legs, i["credit"], i["width"] - i["credit"], S, i["delta"]))
+        credit = i.get("mid_credit", i["credit"])
+        rows.append(_row("ic", i["label"], t, exp, legs, credit, i["width"] - credit, S, i["delta"]))
     _save_async(rows)
 
 
 def record_wheel(rows: list[dict]) -> None:
     _save_async([_row("wheel", None, c["ticker"], c["expiry"], [_leg("sell", "put", c["strike"])],
-                      c["premium"] / 100, c["strike"] - c["premium"] / 100, c["price"], c["delta"]) for c in rows])
+                      c.get("mid", c["premium"] / 100), c["strike"] - c.get("mid", c["premium"] / 100), c["price"], c["delta"])
+                 for c in rows])
 
 
 def record_directional(d: dict) -> None:

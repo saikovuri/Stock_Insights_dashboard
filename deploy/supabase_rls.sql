@@ -105,7 +105,8 @@ BEGIN
         'closed_options', 'refresh_tokens', 'notifications', 'iv_history',
         'user_alerts', 'journal', 'kv_cache', 'theses', 'idea_log',
         'accounting_events', 'universe_snapshots', 'account_cash', 'nav_snapshots', 'applied_splits',
-        'watchlist_lists', 'watchlist_groups', 'applied_actions', 'user_rules', 'buy_zones', 'trade_plans'
+        'watchlist_lists', 'watchlist_groups', 'applied_actions', 'user_rules', 'buy_zones', 'trade_plans',
+        'paper_trades'
       ])
   LOOP
     EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', r.policyname, r.tablename);
@@ -124,7 +125,8 @@ BEGIN
     'closed_options', 'refresh_tokens', 'notifications', 'iv_history',
     'user_alerts', 'journal', 'kv_cache', 'theses', 'idea_log',
     'accounting_events', 'universe_snapshots', 'account_cash', 'nav_snapshots', 'applied_splits',
-    'watchlist_lists', 'watchlist_groups', 'applied_actions', 'user_rules', 'buy_zones', 'trade_plans'
+    'watchlist_lists', 'watchlist_groups', 'applied_actions', 'user_rules', 'buy_zones', 'trade_plans',
+    'paper_trades'
   ] LOOP
     IF to_regclass('public.' || t) IS NULL THEN
       RAISE NOTICE 'Skipping missing table %', t;

@@ -4,6 +4,7 @@ import PricedAt from './PricedAt';
 import Tip from './Tip';
 import RollRepair from './RollRepair';
 import { AssignmentShare, LimitHint, PostEarningsBadge, useAccountValue } from './TradeSizing';
+import { PastResults, PayoffToggle, PaperTradeButton } from './IdeaTrust';
 
 const SAFETY = {
   safer: { text: '🛡 Passes checks', cls: 'safety-ok' },
@@ -122,12 +123,13 @@ function CandidateStatus({ assessment }) {
   );
 }
 
-function SpreadCard({ i, mode, expiry, assessment, account }) {
+function SpreadCard({ i, mode, expiry, assessment, account, ticker, spot }) {
   const n = assessment.contracts;
   const legs = mode === 'ic'
     ? [['BUY', i.put_long, 'put'], ['SELL', i.put_short, 'put'], ['SELL', i.call_short, 'call'], ['BUY', i.call_long, 'call']]
     : [['SELL', i.short_strike, 'put'], ['BUY', i.long_strike, 'put']];
   const liq = LIQ[i.liquidity] || { text: 'Liquidity unavailable', cls: 'rvol-warm' };
+  const payoffLegs = legs.map(([action, strike, kind]) => ({ position: action === 'BUY' ? 'long' : 'short', option_type: kind, strike, ratio: 1 }));
   return (
     <div className={`structure-card safety-${assessment.safety}`}>
       <div className="structure-title">
@@ -153,11 +155,15 @@ function SpreadCard({ i, mode, expiry, assessment, account }) {
       </div>
       <Checks i={i} />
       <AssignmentShare amount={i.max_loss * Math.max(n, 1)} account={account} label={n > 1 ? `Max loss on ${n}` : 'Max loss'} />
-      <LimitHint bid={i.natural_credit} ask={2 * i.credit - i.natural_credit} what="credit" />
+      <LimitHint bid={i.natural_credit} ask={2 * (i.mid_credit ?? i.credit) - i.natural_credit} what="credit" />
       <p className="structure-notes">
-        Midpoint ${i.credit} net credit (natural ${i.natural_credit} <Tip term="natural_credit" />) · ${i.width} wide · OI {i.open_interest?.toLocaleString() ?? 'Unavailable'} ·{' '}
+        Expected fill ${i.credit} net credit (midpoint ${i.mid_credit ?? i.credit}, natural ${i.natural_credit} <Tip term="natural_credit" />) · ${i.width} wide · OI {i.open_interest?.toLocaleString() ?? 'Unavailable'} ·{' '}
         <span className={liq.cls}>{liq.text}</span>
       </p>
+      <PastResults kind={mode} label={i.label} />
+      <PayoffToggle legs={payoffLegs} net={-i.credit} units={Math.max(n, 1)} spot={spot} />
+      <PaperTradeButton ticker={ticker} legs={payoffLegs.map(l => ({ ...l, expiry }))} contracts={Math.max(n, 1)}
+        source="income" label={`${MODES[mode].label} · ${i.label}`} />
     </div>
   );
 }
@@ -291,7 +297,7 @@ export default function IncomeIdeas({ ticker }) {
           {ideas.map(i => {
             const assessment = assessIncomeIdea(i, settings);
             if (spread) {
-              return <SpreadCard key={i.label} i={i} mode={mode} expiry={data.expiry} assessment={assessment} account={account} />;
+              return <SpreadCard key={i.label} i={i} mode={mode} expiry={data.expiry} assessment={assessment} account={account} ticker={ticker} spot={data.spot} />;
             }
             const contracts = assessment.contracts;
             const liq = LIQ[i.liquidity] || { text: 'Liquidity unavailable', cls: 'rvol-warm' };
@@ -328,15 +334,25 @@ export default function IncomeIdeas({ ticker }) {
                   label={contracts > 1 ? `If all ${contracts} are assigned` : 'If assigned'} />}
                 <LimitHint bid={i.bid} ask={i.ask} />
                 <p className="structure-notes">
-                  Midpoint ${i.mid} (bid {i.bid == null ? 'Unavailable' : `$${i.bid}`} / ask {i.ask == null ? 'Unavailable' : `$${i.ask}`}) · OI {i.open_interest?.toLocaleString() ?? 'Unavailable'} ·{' '}
+                  Expected fill ${i.fill ?? i.mid} (midpoint ${i.mid}, bid {i.bid == null ? 'Unavailable' : `$${i.bid}`} / ask {i.ask == null ? 'Unavailable' : `$${i.ask}`}) · OI {i.open_interest?.toLocaleString() ?? 'Unavailable'} ·{' '}
                   <span className={liq.cls}>{liq.text}</span>
                 </p>
+                {mode === 'csp' && <PastResults kind="csp" label={i.label} />}
+                <PayoffToggle spot={data.spot} units={Math.max(contracts, 1)}
+                  legs={mode === 'cc' ? [{ position: 'long', option_type: 'stock', ratio: 1 }, { position: 'short', option_type: 'call', strike: i.strike, ratio: 1 }]
+                    : [{ position: 'short', option_type: 'put', strike: i.strike, ratio: 1 }]}
+                  net={mode === 'cc' ? data.spot - (i.fill ?? i.mid) : -(i.fill ?? i.mid)} />
+                {mode === 'cc' && <p className="market-sub">The chart counts 100 shares bought at today&apos;s ${data.spot} per call.</p>}
+                {mode === 'csp' && <PaperTradeButton ticker={ticker} contracts={Math.max(contracts, 1)} source="income" label={`Cash-secured put · ${i.label}`}
+                  legs={[{ position: 'short', option_type: 'put', strike: i.strike, expiry: data.expiry }]} />}
               </div>
             );
           })}
         </div>
       )}
 
+      {data?.pricing && <p className="market-sub income-pricing">{data.pricing}
+        {spread && data.skipped_low_credit?.[MODES[mode].key] > 0 && <> <strong>{data.skipped_low_credit[MODES[mode].key]} hidden for this expiry.</strong></>}</p>}
       {data && (
         <ul className="ivrank-help">
           {(data.tips?.[mode] || []).map((t, k) => <li key={k}>{t}</li>)}

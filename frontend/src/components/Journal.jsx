@@ -8,6 +8,7 @@ import WheelCycles from './WheelCycles';
 import Skeleton from './Skeleton';
 import TabStrip from './TabStrip';
 import PnlCalendar from './PnlCalendar';
+import PaperTrades from './PaperTrades';
 import {
   fetchJournal, addJournalEntry, updateJournalEntry, deleteJournalEntry, fetchJournalCoach, fetchClosedTrades, fetchClosedOptions, logClosedOption, updateClosedOption, deleteClosedOption,
   recordAccountingEntry, fetchTradePlans, logClosedSpread, deleteClosedSpread, updateClosedSpread,
@@ -765,11 +766,11 @@ function JournalViews({ onSignIn, onSelect }) {
 
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
   const navigation = <TabStrip label="Journal views" activeKey={view}>
-    {[['history', 'Trade history'], ['journal', 'Manual journal'], ['options', 'Options review'], ['cycles', 'Wheel cycles']].map(([id, label]) =>
+    {[['history', 'Trade history'], ['journal', 'Manual journal'], ['options', 'Options review'], ['cycles', 'Wheel cycles'], ['paper', 'Paper trades']].map(([id, label]) =>
       <button key={id} className={`sub-tab ${view === id ? 'active' : ''}`} onClick={() => setView(id)}>{label}</button>)}
   </TabStrip>;
   if (view !== 'journal') return <div className="journal portfolio-workspace">{navigation}
-    {view === 'history' ? <RecordedHistory /> : view === 'cycles' ? <WheelCycles /> : <Review version={user.id} />}
+    {view === 'history' ? <RecordedHistory /> : view === 'cycles' ? <WheelCycles /> : view === 'paper' ? <PaperTrades /> : <Review version={user.id} />}
   </div>;
 
   const save = async () => {

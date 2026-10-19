@@ -151,8 +151,9 @@ export function scopedMove(scope, profiles, move) {
   return () => move;
 }
 
-/** Shares value and short-put assignment value per industry, largest first. */
-export function industryExposure(options, holdings, profiles) {
+/** Shares value and option collateral per industry, largest first: short puts at strike × 100 × contracts, and each
+ * intact spread/condor/butterfly once at the most its legs can owe at expiry (its own collateral, e.g. a credit spread's width). */
+export function industryExposure(options, holdings, profiles, spreads = []) {
   const groups = new Map();
   const add = (ticker, key, value) => {
     const industry = profiles[ticker]?.industry || 'Unknown';
@@ -162,7 +163,9 @@ export function industryExposure(options, holdings, profiles) {
     groups.set(industry, group);
   };
   holdings.forEach(h => add(h.ticker, 'stocks', h.current_price > 0 ? h.shares * h.current_price : 0));
-  options.forEach(o => add(o.ticker, 'puts', o.position === 'short' && o.type === 'put' ? o.strike * 100 * o.contracts : 0));
+  const inStructure = new Set(spreads.flatMap(s => s.leg_ids || []));
+  options.forEach(o => add(o.ticker, 'puts', !inStructure.has(o.id) && o.position === 'short' && o.type === 'put' ? o.strike * 100 * o.contracts : 0));
+  spreads.forEach(s => add(s.ticker, 'puts', s.collateral || 0));
   const rows = [...groups.values()].map(group => ({ ...group, tickers: [...group.tickers].sort(), total: group.stocks + group.puts }));
   const total = rows.reduce((sum, group) => sum + group.total, 0);
   return rows.map(group => ({ ...group, pct: total ? group.total / total * 100 : 0 })).sort((a, b) => b.total - a.total);
@@ -199,7 +202,7 @@ export function pnlAt(options, holdings, move, ivChg, days, withStocks) {
   return { total, rows };
 }
 
-export function WhatIf({ options: allOptions, holdings: allHoldings }) {
+export function WhatIf({ options: allOptions, holdings: allHoldings, spreads = [] }) {
   const [move, setMove] = useState(0);
   const [ivChg, setIvChg] = useState(0);
   const [days, setDays] = useState(0);
@@ -217,7 +220,7 @@ export function WhatIf({ options: allOptions, holdings: allHoldings }) {
   }, [tickerKey]);
   const known = useMemo(() => profiles || {}, [profiles]);
   const moveFor = useCallback(m => scopedMove(scope, known, m), [scope, known]);
-  const exposure = useMemo(() => (profiles ? industryExposure(allOptions, allHoldings, known) : []), [profiles, allOptions, allHoldings, known]);
+  const exposure = useMemo(() => (profiles ? industryExposure(allOptions, allHoldings, known, spreads) : []), [profiles, allOptions, allHoldings, known, spreads]);
   const group = scope.startsWith('group:') ? scope.slice(6) : null;
   const scopeLabel = scope === 'beta' ? 'S&P 500' : group ? group : 'Stocks';
   const missing = useMemo(() => [
@@ -294,17 +297,17 @@ export function WhatIf({ options: allOptions, holdings: allHoldings }) {
       {exposure.length > 0 && <>
         <h4 className="sub-chart-title">Exposure by industry</h4>
         <table className="market-table phone-cards" aria-label="Exposure by industry">
-          <thead><tr><th>Industry</th><th>Shares value</th><th>Short-put assignment</th><th>Share of total</th><th><span className="sr-only">Action</span></th></tr></thead>
+          <thead><tr><th>Industry</th><th>Shares value</th><th>Option collateral</th><th>Share of total</th><th><span className="sr-only">Action</span></th></tr></thead>
           <tbody>{exposure.map(g => <tr key={g.industry}>
             <td><strong>{g.industry}</strong><div className="market-sub">{g.tickers.join(', ')}</div></td>
             <td data-label="Shares value">{usd(g.stocks)}</td>
-            <td data-label="Short-put assignment">{usd(g.puts)}</td>
+            <td data-label="Option collateral">{usd(g.puts)}</td>
             <td data-label="Share of total" className={g.pct >= 40 ? 'negative' : ''}>{g.pct.toFixed(0)}%</td>
             <td><button className="btn-secondary btn-sm" aria-label={`Stress only ${g.industry}`} disabled={scope === `group:${g.industry}`}
               onClick={() => setScope(`group:${g.industry}`)}>Stress this</button></td>
           </tr>)}</tbody>
         </table>
-        <p className="ivrank-note">Short-put assignment = strike × 100 × contracts, the cash needed if assigned. Industries come from the market-data provider and can be broad or missing (Unknown).
+        <p className="ivrank-note">Option collateral: a short put counts strike × 100 × contracts, the cash needed if assigned; a spread, condor or butterfly counts the most its legs can owe at expiry (a credit spread&apos;s width), once. Industries come from the market-data provider and can be broad or missing (Unknown).
           Calls and long puts are listed under their industry but not counted in these dollar columns.</p>
       </>}
       <p className="ivrank-note">
@@ -455,7 +458,7 @@ export function PremiumIncome({ version }) {
 const TABS = [['today', '🛠 Today'], ['income', '💵 Premium income'], ['earnings', '📅 Earnings ahead'], ['whatif', '🎚 What-if'],
   ['ledger', '🎡 Wheel ledger'], ['review', '🧠 Options review']];
 
-export default function OptionsDesk({ options, holdings, closedCount, onRepair, onAssign }) {
+export default function OptionsDesk({ options, holdings, spreads, closedCount, onRepair, onAssign }) {
   const [tab, setTab] = useState(options.length ? 'today' : 'earnings');
   const version = JSON.stringify([options, holdings, closedCount]);
   return (
@@ -468,7 +471,7 @@ export default function OptionsDesk({ options, holdings, closedCount, onRepair, 
       {tab === 'today' && <Today version={version} onRepair={onRepair} onAssign={onAssign} />}
       {tab === 'income' && <PremiumIncome version={version} />}
       {tab === 'earnings' && <Earnings version={version} />}
-      {tab === 'whatif' && <WhatIf options={options} holdings={holdings} />}
+      {tab === 'whatif' && <WhatIf options={options} holdings={holdings} spreads={spreads} />}
       {tab === 'ledger' && <Ledger version={version} />}
       {tab === 'review' && <Review version={version} />}
     </div>

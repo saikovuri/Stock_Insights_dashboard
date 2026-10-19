@@ -531,6 +531,11 @@ export const fetchWheelLedger = () => getJson(`${BASE}/portfolio/wheel-ledger`, 
 export const fetchOptionsReview = () => getJson(`${BASE}/portfolio/options/review`, 'Failed to load review', true);
 export const fetchOptionsCoach = () => getJson(`${BASE}/portfolio/options/coach`, 'Failed to load AI review', true);
 export const fetchTrackRecord = () => getJson(`${BASE}/ideas/track-record`, 'Failed to load track record');
+// ── Paper trades (practice positions, separate from real holdings) ──
+export const fetchPaperTrades = () => getJson(`${BASE}/paper`, 'Failed to load paper trades', true);
+export const openPaperTrade = (payload) => sendJson(`${BASE}/paper`, 'POST', payload, 'Failed to record paper trade');
+export const closePaperTrade = (id) => sendJson(`${BASE}/paper/${id}/close`, 'POST', null, 'Failed to close paper trade');
+export const deletePaperTrade = (id) => sendJson(`${BASE}/paper/${id}`, 'DELETE', null, 'Failed to delete paper trade');
 export const fetchWheelPlan = (capital, maxPct, maxPerSector, shortDated = false) =>
   getJson(`${BASE}/ideas/wheel/plan?capital=${capital}&max_pct=${maxPct}&max_per_sector=${maxPerSector}&short_dated=${shortDated}`, 'Failed to build plan', true);
 export const assignOption = (id, cycle = '') => sendJson(`${BASE}/portfolio/options/${id}/assign`, 'POST', cycle ? { cycle } : null, 'Could not record assignment');

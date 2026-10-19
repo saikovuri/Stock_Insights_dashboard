@@ -452,6 +452,11 @@ _MAX_SPREAD_PCT = 25
 _MIN_CREDIT_RATIO = 0.10  # spread credit vs width; below this you risk >9x what you can make
 
 
+def _sell_fill(mid: float, bid: float) -> float:
+    """Expected price when selling: halfway between the midpoint and the bid, a fill you can usually get."""
+    return (mid + bid) / 2 if bid > 0 else mid
+
+
 def _spread_width(S: float) -> float:
     """Standard wing width: the largest round size within ~2.5% of spot."""
     return max((w for w in _WIDTHS if w <= S * 0.025), default=_WIDTHS[0])
@@ -540,11 +545,12 @@ def income_ideas(ticker: str, expiry: str | None = None) -> dict:
             tips[k].append("Take profit at ~50% of the premium and re-sell; if the strike is breached, roll out for a "
                            "credit (see Roll / repair below) rather than paying to escape.")
 
+        skipped = {}
         ideas = {
             "covered_calls": _ideas(call_rows, "call", S, d),
             "cash_secured_puts": _ideas(put_rows, "put", S, d),
-            "put_credit_spreads": _put_credit_spreads(put_rows, put_q, S, T, em_range),
-            "iron_condors": _iron_condors(put_rows, put_q, call_rows, call_q, S, T, em_range),
+            "put_credit_spreads": _put_credit_spreads(put_rows, put_q, S, T, em_range, skipped),
+            "iron_condors": _iron_condors(put_rows, put_q, call_rows, call_q, S, T, em_range, skipped),
         }
         for key, kind in (("covered_calls", "call"), ("cash_secured_puts", "put"),
                           ("put_credit_spreads", "put"), ("iron_condors", "ic")):
@@ -557,13 +563,17 @@ def income_ideas(ticker: str, expiry: str | None = None) -> dict:
             "expected_move": None if not em else {"move": round(em, 2), "low": round(em_range[0], 2),
                                                   "high": round(em_range[1], 2)},
             **ideas,
+            "skipped_low_credit": skipped,
+            "pricing": "Premiums, returns, max loss and breakevens use a realistic fill: halfway between the midpoint and "
+                       "the natural price (sell at the bid, buy at the ask). Spreads whose credit at that fill is under "
+                       f"{_MIN_CREDIT_RATIO:.0%} of the width are not shown.",
             "tips": tips,
             "as_of": _now_iso(),
         }
         track_record.record_income(result)
         return result
 
-    return get_or_fetch(f"income:{ticker}:{expiry or 'auto'}", _fetch, ttl=300)
+    return get_or_fetch(f"income-v2:{ticker}:{expiry or 'auto'}", _fetch, ttl=300)
 
 
 def _otm_rows(df, kind: str, S: float, T: float, otm_only: bool = True) -> list[dict]:
@@ -642,20 +652,23 @@ def _vertical(short: dict, quotes: dict, kind: str, S: float) -> dict | None:
     liquid = [k for k in wings if quotes[k]["oi"] >= _MIN_OI]
     L = max(liquid or wings, key=lambda k: 0.3 * _oi_score(quotes[k]["oi"]) - abs(k - goal) / w)
     long = quotes[L]
-    width, credit = abs(K - L), short["mid"] - long["mid"]
-    if credit <= 0 or credit >= width:
+    width, mid_credit = abs(K - L), short["mid"] - long["mid"]
+    natural = short["bid"] - long["ask"]
+    # Scored at a realistic fill: halfway between the midpoint credit and the natural one (sell at bid, buy at ask)
+    credit = (mid_credit + min(natural, mid_credit)) / 2
+    if mid_credit <= 0 or credit <= 0 or mid_credit >= width:
         return None
     worst_spread = max(_spread_pct(short["bid"], short["ask"]) or 0,
                        _spread_pct(long["bid"], long["ask"]) or (100 if long["bid"] <= 0 else 0))
-    return {"short": K, "long": L, "width": width, "credit": credit,
-            "natural": max(short["bid"] - long["ask"], 0), "oi": min(short["oi"], long["oi"]),
+    return {"short": K, "long": L, "width": width, "credit": credit, "mid_credit": mid_credit,
+            "natural": max(natural, 0), "oi": min(short["oi"], long["oi"]),
             "liquidity": _liquidity(min(short["oi"], long["oi"]), worst_spread)}
 
 
 _LIQ_RANK = {"good": 0, "ok": 1, "thin": 2}
 
 
-def _put_credit_spreads(rows, quotes, S, T, em_range) -> list[dict]:
+def _put_credit_spreads(rows, quotes, S, T, em_range, skipped=None) -> list[dict]:
     out, used = [], set()
     for label, target in _TARGETS:
         short = _pick(rows, target, used)
@@ -664,11 +677,15 @@ def _put_credit_spreads(rows, quotes, S, T, em_range) -> list[dict]:
             continue
         used.add(short["strike"])
         credit, width = v["credit"], v["width"]
+        if credit / width < _MIN_CREDIT_RATIO:
+            if skipped is not None:
+                skipped["put_credit_spreads"] = skipped.get("put_credit_spreads", 0) + 1
+            continue
         be = short["strike"] - credit
         out.append({
             "label": label,
             "short_strike": v["short"], "long_strike": v["long"], "width": round(width, 2),
-            "credit": round(credit, 2), "natural_credit": round(v["natural"], 2),
+            "credit": round(credit, 2), "mid_credit": round(v["mid_credit"], 2), "natural_credit": round(v["natural"], 2),
             "premium": round(credit * 100, 2), "max_loss": round((width - credit) * 100, 2),
             "return_on_risk_pct": round(credit / (width - credit) * 100, 1),
             "breakeven": round(be, 2), "breakeven_pct": round((S - be) / S * 100, 1),
@@ -681,7 +698,7 @@ def _put_credit_spreads(rows, quotes, S, T, em_range) -> list[dict]:
     return out
 
 
-def _iron_condors(put_rows, put_q, call_rows, call_q, S, T, em_range) -> list[dict]:
+def _iron_condors(put_rows, put_q, call_rows, call_q, S, T, em_range, skipped=None) -> list[dict]:
     out, used_p, used_c = [], set(), set()
     for label, target in _CONDOR_TARGETS:
         ps, cs = _pick(put_rows, target, used_p), _pick(call_rows, target, used_c)
@@ -692,6 +709,10 @@ def _iron_condors(put_rows, put_q, call_rows, call_q, S, T, em_range) -> list[di
         credit, width = pv["credit"] + cv["credit"], max(pv["width"], cv["width"])
         if credit >= width:
             continue
+        if credit / width < _MIN_CREDIT_RATIO:
+            if skipped is not None:
+                skipped["iron_condors"] = skipped.get("iron_condors", 0) + 1
+            continue
         used_p.add(ps["strike"])
         used_c.add(cs["strike"])
         lo, hi = ps["strike"] - credit, cs["strike"] + credit
@@ -701,7 +722,8 @@ def _iron_condors(put_rows, put_q, call_rows, call_q, S, T, em_range) -> list[di
             "label": label,
             "put_long": pv["long"], "put_short": pv["short"], "call_short": cv["short"], "call_long": cv["long"],
             "width": round(width, 2),
-            "credit": round(credit, 2), "natural_credit": round(pv["natural"] + cv["natural"], 2),
+            "credit": round(credit, 2), "mid_credit": round(pv["mid_credit"] + cv["mid_credit"], 2),
+            "natural_credit": round(pv["natural"] + cv["natural"], 2),
             "premium": round(credit * 100, 2), "max_loss": round((width - credit) * 100, 2),
             "return_on_risk_pct": round(credit / (width - credit) * 100, 1),
             "breakeven_low": round(lo, 2), "breakeven_high": round(hi, 2),
@@ -724,13 +746,14 @@ def _ideas(rows: list[dict], kind: str, S: float, dte: int) -> list[dict]:
             continue
         K, mid, bid, ask, iv, p_itm, oi, delta = (p[k] for k in ("strike", "mid", "bid", "ask", "iv", "p_itm", "oi", "delta"))
         used.add(K)
-        premium = mid * 100
+        fill = _sell_fill(mid, bid)
+        premium = fill * 100
         spread_pct = _spread_pct(bid, ask)
         liquidity = _liquidity(oi, spread_pct)
         idea = {
             "label": label,
             "strike": K,
-            "bid": round(bid, 2), "ask": round(ask, 2), "mid": round(mid, 2),
+            "bid": round(bid, 2), "ask": round(ask, 2), "mid": round(mid, 2), "fill": round(fill, 2),
             "premium": round(premium, 2),
             "delta": round(delta, 2),
             "iv_pct": round(iv * 100, 1),
@@ -741,21 +764,21 @@ def _ideas(rows: list[dict], kind: str, S: float, dte: int) -> list[dict]:
             "liquidity": liquidity,
         }
         if kind == "call":
-            ret = mid / S
+            ret = fill / S
             idea.update({
                 "return_pct": round(ret * 100, 2),
                 "annualized_pct": round(ret * 365 / dte * 100, 1),
-                "if_called_pct": round((K - S + mid) / S * 100, 2),
-                "downside_breakeven": round(S - mid, 2),
+                "if_called_pct": round((K - S + fill) / S * 100, 2),
+                "downside_breakeven": round(S - fill, 2),
             })
         else:
-            ret = mid / K
+            ret = fill / K
             idea.update({
                 "capital_required": round(K * 100, 2),
                 "return_pct": round(ret * 100, 2),
                 "annualized_pct": round(ret * 365 / dte * 100, 1),
-                "effective_buy_price": round(K - mid, 2),
-                "discount_pct": round((S - (K - mid)) / S * 100, 1),
+                "effective_buy_price": round(K - fill, 2),
+                "discount_pct": round((S - (K - fill)) / S * 100, 1),
             })
         out.append(idea)
     return out

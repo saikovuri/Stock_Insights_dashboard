@@ -64,13 +64,17 @@ def violations(rules: dict, holdings: list[dict], options: list[dict], prices: d
                                      for p in hits[:5]],
                           "detail": "Your rule is to buy to close here rather than roll and hope.", "link": {"kind": "alerts"}})
     if rules.get("no_calls_below_cost"):
+        import spreads
+        # A spread's sold call is covered by its bought call, not by shares, so assignment wouldn't sell them
+        in_structure = {leg["id"] for legs in spreads.group_open(options).values() for leg in legs}
         cost, shares = defaultdict(float), defaultdict(float)
         for h in holdings:
             cost[(acct(h), h["ticker"])] += h["shares"] * h["buy_price"]
             shares[(acct(h), h["ticker"])] += h["shares"]
         for o in options:
             key = (acct(o), o["ticker"])
-            if o["position"] == "short" and o["option_type"] == "call" and shares[key] and o["strike"] < cost[key] / shares[key]:
+            if (o["position"] == "short" and o["option_type"] == "call" and o.get("id") not in in_structure
+                    and shares[key] and o["strike"] < cost[key] / shares[key]):
                 avg = cost[key] / shares[key]
                 items.append({"level": "warn", "code": "rule_call_below_cost", "account": key[0], "ticker": o["ticker"],
                               "title": f"Rule: {o['ticker']} ${o['strike']:g} call is below your ${avg:,.2f} average cost",
