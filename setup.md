@@ -14,12 +14,12 @@ None of these items are in GitHub. Keep them somewhere safe, such as a password 
 
 | Save | Where it is now | Why you need it |
 | --- | --- | --- |
-| Every value in `backend/.env` (`JWT_SECRET`, `GROQ_API_KEY`, `GEMINI_API_KEY`, `FINNHUB_API_KEY`, `TWELVEDATA_API_KEY`, `SEC_USER_AGENT`, `CORS_ORIGINS`, ...) | `backend/.env` on this machine | Without these the app has no AI or real-time data. Keep the **same `JWT_SECRET`** if you want old account-transfer files to import. |
+| Every value in `backend/.env` (`JWT_SECRET`, `GROQ_API_KEY`, `GEMINI_API_KEY`, `FINNHUB_API_KEY`, `TWELVEDATA_API_KEY`, `ALPACA_API_KEY_ID`, `ALPACA_API_SECRET_KEY`, `SEC_USER_AGENT`, `CORS_ORIGINS`, ...) | `backend/.env` on this machine | Without these the app has no AI or real-time data. Keep the **same `JWT_SECRET`** if you want old account-transfer files to import. |
 | Your local data | `backend/stockinsights.db` (SQLite). The E*TRADE imports you tested locally live here, **not** in production. | Run `.venv\Scripts\python.exe backend\backup_sqlite.py` and copy the file from `backups\`. Or use **Portfolio → Holdings → Data tools → Export data to another login** to get a JSON file. |
 | SSH access to the production laptop | Key `~/.ssh/stockpilot_laptop` on this machine. The laptop (`sai-kovouri@192.168.87.20`) only accepts SSH from its home network (or through Tailscale if you add your PC to the tailnet). | You can also just use the laptop's own keyboard and screen. |
 | The production `backend/.env` on the laptop, including `DATABASE_URL` | `~/stock-insights/backend/.env` on the laptop | On the laptop: `cat ~/stock-insights/backend/.env`, and store the output in your password manager. A rebuild needs it (`deploy/laptop-setup.sh` asks for it). |
 | `BACKUP_PASSPHRASE` | A GitHub secret (set 2026-10-12; first backup succeeded that day), and your password manager | Without it the weekly database backups cannot be decrypted. |
-| Logins for GitHub, Vercel, Supabase, Tailscale, Groq, Google AI Studio, Finnhub, Twelve Data, Sentry (if used), ntfy topic | Your accounts | Every service is on a free tier, but you must be able to sign in to each one. |
+| Logins for GitHub, Vercel, Supabase, Tailscale, Groq, Google AI Studio, Finnhub, Twelve Data, Alpaca (if used), Sentry (if used), ntfy topic | Your accounts | Every service is on a free tier, but you must be able to sign in to each one. |
 
 Finally, run `git status` and push anything that isn't pushed yet.
 
@@ -91,6 +91,7 @@ Paste the values you saved in section 1. If you are starting fresh, every key be
 | `OPENAI_API_KEY`, `OPENAI_MODEL` | Optional | Only if `AI_PROVIDER=openai`. |
 | `FINNHUB_API_KEY` | Recommended | Real-time quotes, news and earnings (https://finnhub.io/register). Without it the app falls back to Yahoo. `FINNHUB_RATE_PER_MIN` defaults to 55. |
 | `TWELVEDATA_API_KEY` | Optional | Price-history fallback. |
+| `ALPACA_API_KEY_ID`, `ALPACA_API_SECRET_KEY` | Optional | Free Alpaca market data: backup for stock history and quotes when Yahoo or Finnhub fail. Create a free account (a paper account is enough) and generate keys under API Keys. |
 | `SEC_USER_AGENT` | Yes | `StockPilot your@email.com`. SEC requires a contact address. |
 | `SCHEDULER_ENABLED` | Optional | `1` (default) runs the alert scan and morning briefing. Use `0` for one-off scripts. |
 | `ALERT_SCAN_MINUTES`, `BRIEFING_HOUR_ET`, `PRICE_CHANGE_ALERT`, `VOLUME_SPIKE_ALERT` | Optional | Alert timing and thresholds. |

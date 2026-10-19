@@ -7,6 +7,7 @@ import numpy as np
 from cache import get_or_fetch
 from providers import (
     finnhub_enabled, finnhub_quote, finnhub_profile, finnhub_basic_financials, twelvedata_history,
+    alpaca_history, alpaca_quote,
 )
 
 log = logging.getLogger(__name__)
@@ -18,7 +19,7 @@ HISTORY_TTL = 120    # 2 minutes
 
 def get_stock_data(ticker: str, period: str = "6mo", interval: str = "1d",
                    prepost: bool = False) -> pd.DataFrame:
-    """Fetch historical OHLCV data: Yahoo first, Twelve Data fallback (cached, deduplicated)."""
+    """Fetch historical OHLCV data: Yahoo first, then Alpaca, then Twelve Data (cached, deduplicated)."""
     key = f"history:{ticker}:{period}:{interval}:{prepost}"
 
     def _fetch():
@@ -27,6 +28,8 @@ def get_stock_data(ticker: str, period: str = "6mo", interval: str = "1d",
         except Exception as e:
             log.warning("yfinance history failed for %s: %s", ticker, e)
             df = None
+        if df is None or df.empty:
+            df = alpaca_history(ticker, period, interval, prepost)
         if df is None or df.empty:
             df = twelvedata_history(ticker, period, interval)
         if df is not None and not df.empty:
@@ -181,13 +184,31 @@ def _finnhub_metrics(ticker: str) -> dict | None:
     return out
 
 
+def _alpaca_metrics(ticker: str) -> dict | None:
+    """Price-only metrics from Alpaca when Finnhub and Yahoo both fail; fundamentals stay empty."""
+    q = alpaca_quote(ticker)
+    if not q:
+        return None
+    return {"name": ticker, "sector": "N/A", "industry": "N/A", "price": q["c"], "previous_close": q.get("pc") or 0,
+            "change": round(q.get("d") or 0, 2), "change_pct": round(q.get("dp") or 0, 2), "open": q.get("o") or 0,
+            "day_high": q.get("h") or 0, "day_low": q.get("l") or 0, "volume": 0, "avg_volume": 0, "market_cap": 0,
+            "pe_ratio": None, "forward_pe": None, "eps": None, "dividend_yield": None, "52w_high": 0, "52w_low": 0,
+            "50d_avg": 0, "200d_avg": 0, "beta": None, "price_source": q["source"]}
+
+
 def get_key_metrics(ticker: str) -> dict:
     """Key metrics: Finnhub (real-time, reliable) with yfinance fallback. Cached 5 min."""
     def _fetch():
         metrics = None
         if finnhub_enabled():
             metrics = _finnhub_metrics(ticker)
-        metrics = metrics or _yf_metrics(ticker)
+        if not metrics:
+            try:
+                metrics = _yf_metrics(ticker)
+            except Exception as error:
+                metrics = _alpaca_metrics(ticker)
+                if not metrics:
+                    raise error
         # Provider 52-week ranges can lag today's session; today's trading must stay inside the range.
         session = [v for v in (metrics.get("price"), metrics.get("day_high"), metrics.get("day_low")) if v]
         if session:
@@ -208,6 +229,10 @@ def get_quote(ticker: str) -> dict:
         p = finnhub_profile(ticker) or {}
         return {"ticker": ticker, "name": p.get("name", ticker), "price": q["c"],
                 "change_pct": round(q.get("dp") or 0, 2), "previous_close": q.get("pc")}
+    a = alpaca_quote(ticker)
+    if a:
+        return {"ticker": ticker, "name": ticker, "price": a["c"], "change_pct": round(a.get("dp") or 0, 2),
+                "previous_close": a.get("pc")}
     m = get_key_metrics(ticker)
     return {"ticker": ticker, "name": m.get("name", ticker), "price": m.get("price"),
             "change_pct": m.get("change_pct"), "previous_close": m.get("previous_close")}

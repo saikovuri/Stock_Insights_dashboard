@@ -70,6 +70,9 @@ FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "")
 FINNHUB_RATE_PER_MIN = int(os.getenv("FINNHUB_RATE_PER_MIN", "55"))
 # Twelve Data: OHLCV history fallback when Yahoo fails
 TWELVEDATA_API_KEY = os.getenv("TWELVEDATA_API_KEY", "")
+# Alpaca market data (free Basic plan): backup for stock history and quotes when Yahoo or Finnhub fail
+ALPACA_API_KEY_ID = os.getenv("ALPACA_API_KEY_ID", "")
+ALPACA_API_SECRET_KEY = os.getenv("ALPACA_API_SECRET_KEY", "")
 # SEC EDGAR requires a descriptive User-Agent with contact info
 SEC_USER_AGENT = os.getenv("SEC_USER_AGENT", "StockPilot/2.0 admin@example.com")
 

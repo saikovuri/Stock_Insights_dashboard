@@ -404,7 +404,7 @@ The one new risk compared with a cloud VM: the server now sits **inside your hom
 1. Tailscale admin console → Machines → stockpilot → **Remove** (the public address stops working).
 2. Change the Supabase database password (Project settings → Database → Reset password) and put the new URL into the next server's `.env` and the GitHub `DATABASE_URL` secret (session pooler, port 5432).
 3. Generate a new `JWT_SECRET` (everyone signs in again; old transfer files stop importing).
-4. Regenerate the API keys in `.env` (Groq, Gemini, Finnhub, Twelve Data) on each provider's site.
+4. Regenerate the API keys in `.env` (Groq, Gemini, Finnhub, Twelve Data, Alpaca) on each provider's site.
 
 The disk isn't encrypted in this guide on purpose: encryption asks for a passphrase at every boot, so the laptop couldn't restart by itself after a power cut. The steps above are the trade-off.
 

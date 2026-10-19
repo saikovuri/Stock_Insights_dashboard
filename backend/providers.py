@@ -1,4 +1,4 @@
-"""Free-tier market data providers: Finnhub, Twelve Data, SEC EDGAR.
+"""Free-tier market data providers: Finnhub, Alpaca, Twelve Data, SEC EDGAR.
 
 Every function returns None / [] on failure so callers can fall back to yfinance.
 """
@@ -14,7 +14,7 @@ import pandas as pd
 import requests
 
 from cache import get_or_fetch
-from config import FINNHUB_API_KEY, FINNHUB_RATE_PER_MIN, TWELVEDATA_API_KEY, SEC_USER_AGENT
+from config import ALPACA_API_KEY_ID, ALPACA_API_SECRET_KEY, FINNHUB_API_KEY, FINNHUB_RATE_PER_MIN, TWELVEDATA_API_KEY, SEC_USER_AGENT
 
 log = logging.getLogger(__name__)
 _session = requests.Session()
@@ -209,6 +209,93 @@ def twelvedata_history(ticker: str, period: str, interval: str) -> pd.DataFrame 
     except Exception as e:
         log.warning("Twelve Data history failed for %s: %s", ticker, e)
         return None
+
+
+# ── Alpaca (free Basic plan: full-market history up to 15 minutes ago, real-time IEX quotes) ──
+
+_ALPACA_TIMEFRAMES = {
+    "1m": "1Min", "5m": "5Min", "15m": "15Min", "30m": "30Min", "1h": "1Hour", "60m": "1Hour",
+    "1d": "1Day", "1wk": "1Week", "1mo": "1Month",
+}
+# Calendar days to look back for each yfinance-style period
+_ALPACA_PERIOD_DAYS = {"1d": 4, "5d": 9, "1mo": 32, "3mo": 95, "6mo": 185, "1y": 370, "2y": 735, "5y": 1830, "10y": 3660, "max": 3660}
+_ALPACA_URL = "https://data.alpaca.markets/v2"
+_alpaca_bucket = _TokenBucket(180)  # Basic plan allows 200 requests a minute
+
+
+def alpaca_enabled() -> bool:
+    return bool(ALPACA_API_KEY_ID and ALPACA_API_SECRET_KEY)
+
+
+def _alpaca(path: str, params: dict) -> tuple[int, dict | None]:
+    if not alpaca_enabled() or not _alpaca_bucket.take():
+        return 0, None
+    try:
+        resp = _session.get(f"{_ALPACA_URL}{path}", params=params, timeout=10,
+                            headers={"APCA-API-KEY-ID": ALPACA_API_KEY_ID, "APCA-API-SECRET-KEY": ALPACA_API_SECRET_KEY})
+        if resp.status_code != 200:
+            log.warning("Alpaca %s -> %s", path, resp.status_code)
+            return resp.status_code, None
+        return 200, resp.json()
+    except Exception as e:
+        log.warning("Alpaca %s failed: %s", path, e)
+        return 0, None
+
+
+def alpaca_history(ticker: str, period: str, interval: str, prepost: bool = False) -> pd.DataFrame | None:
+    """Split- and dividend-adjusted bars in New York time, shaped like yfinance history. Uses the full-market (SIP)
+    feed, which the free plan serves up to 15 minutes ago, and falls back to IEX if SIP is refused."""
+    timeframe = _ALPACA_TIMEFRAMES.get(interval)
+    if not timeframe or not alpaca_enabled() or not _is_plain_equity(ticker):
+        return None
+    start = (pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=_ALPACA_PERIOD_DAYS.get(period, 185))).strftime("%Y-%m-%dT%H:%M:%SZ")
+    for feed in ("sip", "iex"):
+        rows, token = [], None
+        for _ in range(20):
+            params = {"timeframe": timeframe, "start": start, "adjustment": "all", "feed": feed, "limit": 10000}
+            if token:
+                params["page_token"] = token
+            status, data = _alpaca(f"/stocks/{ticker}/bars", params)
+            if data is None:
+                break
+            rows += data.get("bars") or []
+            token = data.get("next_page_token")
+            if not token:
+                break
+        if status in (401, 429) or (status == 200 and not rows):
+            return None
+        if status == 200 and rows:
+            break
+    else:
+        return None
+    df = pd.DataFrame(rows)
+    df.index = pd.to_datetime(df["t"], utc=True).dt.tz_convert("America/New_York")
+    df.index.name = "Date"
+    out = pd.DataFrame({"Open": df["o"].astype(float), "High": df["h"].astype(float), "Low": df["l"].astype(float),
+                        "Close": df["c"].astype(float), "Volume": df["v"].astype(float)}).sort_index()
+    if timeframe.endswith(("Min", "Hour")) and not prepost:
+        minutes = out.index.hour * 60 + out.index.minute
+        out = out[(minutes >= 570) & (minutes < 960)]
+    return out if not out.empty else None
+
+
+def alpaca_quote(ticker: str) -> dict | None:
+    """Latest price from the free real-time IEX feed with the day's change versus the previous full-market close."""
+    if not alpaca_enabled() or not _is_plain_equity(ticker):
+        return None
+
+    def _fetch():
+        _, data = _alpaca(f"/stocks/{ticker}/snapshot", {"feed": "iex"})
+        trade = (data or {}).get("latestTrade") or {}
+        price = trade.get("p")
+        if not price:
+            raise LookupError(ticker)
+        day, prev = data.get("dailyBar") or {}, data.get("prevDailyBar") or {}
+        pc = prev.get("c")
+        return {"c": price, "pc": pc, "d": price - pc if pc else None, "dp": (price / pc - 1) * 100 if pc else None,
+                "o": day.get("o"), "h": day.get("h"), "l": day.get("l"), "t": trade.get("t"), "source": "Alpaca (IEX)"}
+
+    return _cached(f"alpaca:quote:{ticker}", 30, _fetch, None)
 
 
 # ── CBOE delayed options (free, no key; fallback when Yahoo blocks the host) ──

@@ -13,7 +13,8 @@ from cache import get_or_fetch
 
 STARTED_AT = datetime.now(timezone.utc)
 _SECRETS = [v for v in (config.FINNHUB_API_KEY, config.TWELVEDATA_API_KEY, config.GROQ_API_KEY,
-                        config.GEMINI_API_KEY, config.OPENAI_API_KEY) if v]
+                        config.GEMINI_API_KEY, config.OPENAI_API_KEY, config.ALPACA_API_KEY_ID,
+                        config.ALPACA_API_SECRET_KEY) if v]
 
 
 def _version() -> str | None:
@@ -72,8 +73,17 @@ def _yahoo():
     return True, f"SPY daily bars to {df.index[-1].date()}"
 
 
+def _alpaca():
+    from providers import alpaca_enabled, alpaca_history
+    if not alpaca_enabled():
+        return None, "Not configured (optional backup for stock history and quotes). Set ALPACA_API_KEY_ID and ALPACA_API_SECRET_KEY."
+    df = alpaca_history("SPY", "5d", "1d")
+    return (True, f"SPY daily bars to {df.index[-1].date()}") if df is not None else (False, "No bars returned (keys invalid or rate-limited?)")
+
+
 def _checks() -> list[dict]:
-    return [_check("Database", _database), _check("Finnhub quotes", _finnhub), _check("Yahoo price history", _yahoo)]
+    return [_check("Database", _database), _check("Finnhub quotes", _finnhub), _check("Yahoo price history", _yahoo),
+            _check("Alpaca backup", _alpaca)]
 
 
 def report() -> dict:

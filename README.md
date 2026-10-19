@@ -93,6 +93,7 @@ Run `python backend/research_universe.py snapshots.json` with the intended datab
 | `GROQ_API_KEY` or `GEMINI_API_KEY` | [Groq](https://console.groq.com/keys) / [Google AI Studio](https://aistudio.google.com/apikey) | AI brief, chat, sentiment, portfolio doctor, briefing |
 | `FINNHUB_API_KEY` | [Finnhub](https://finnhub.io/register) | Real-time quotes, company news, analyst trends, peers, earnings calendar |
 | `TWELVEDATA_API_KEY` | [Twelve Data](https://twelvedata.com/pricing) | Price-history fallback when Yahoo fails |
+| `ALPACA_API_KEY_ID`, `ALPACA_API_SECRET_KEY` | [Alpaca](https://alpaca.markets/data) (free Basic plan) | Backup stock history and quotes when Yahoo or Finnhub fail |
 | `SEC_USER_AGENT` | (no key) | SEC EDGAR filings — just set a contact email |
 
 Yahoo Finance (`yfinance`) is still used for price history, options chains, financial statements and ownership, with the providers above as primary/fallback sources.
@@ -104,7 +105,7 @@ Keyless free sources: CBOE delayed option quotes, FINRA short interest, Nasdaq e
 ```
 backend/
   main.py              API routes
-  providers.py         Finnhub, Twelve Data, SEC EDGAR clients
+  providers.py         Finnhub, Alpaca, Twelve Data, SEC EDGAR clients
   stock_data.py        Quotes, history, indicators (with provider fallbacks)
   news_sentiment.py    News + AI/VADER sentiment
   llm.py               OpenAI-compatible LLM wrapper (Groq/Gemini/OpenAI)

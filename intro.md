@@ -1374,6 +1374,7 @@ Sources: [backend/news_sentiment.py](backend/news_sentiment.py), [backend/ai_bri
 | Information | Main source/path |
 | --- | --- |
 | Quotes, OHLC, option chains, dividends, many company fields | Yahoo Finance/yfinance, with provider fallbacks where implemented. |
+| Backup stock prices (optional) | When Alpaca keys are set, the backup chains are:<br>• **price history:** Yahoo → Alpaca → Twelve Data. Alpaca bars are split- and dividend-adjusted, from the full-market feed up to 15 minutes ago (IEX-only if that is refused), with intraday bars limited to 9:30–4:00 ET unless extended hours were asked for;<br>• **quotes:** Finnhub → Alpaca → Yahoo. Alpaca's free real-time quote is from the IEX exchange only (about 2.5% of volume), so it can differ slightly from the consolidated price;<br>• **company metrics:** if both Finnhub and Yahoo fail, the price comes from Alpaca and fundamentals stay empty.<br>Option chains still come from Yahoo/CBOE: Alpaca's free option feed is indicative (modified quotes), not real bid/ask. |
 | News, analyst data, earnings calendars | Finnhub and Yahoo depending on feature/configuration. Options earnings uses the combined canonical helper; not every narrative calendar has identical coverage. |
 | Annual fundamentals, insider transactions, fund disclosures | SEC EDGAR/XBRL/Form 4/13F; reporting delays and amendments matter. |
 | Scanner membership | Current S&P 500 and Nasdaq-100 Wikipedia constituent lists, independently cached and deduplicated; point-in-time research requires separately configured membership history. |
@@ -1410,7 +1411,7 @@ Implementation references throughout the guide are the best starting point when 
 
 Signed-in users have a **System status** link in the footer that opens a read-only diagnostic panel (`GET /api/status`, login required, 10 requests/minute). It shows:
 - the deployed version (git commit) and uptime;
-- live checks of the database, Finnhub quotes and Yahoo price history (cached for 5 minutes, with response times);
+- live checks of the database, Finnhub quotes, Yahoo price history and the optional Alpaca backup (cached for 5 minutes, with response times);
 - whether AI providers, Twelve Data, Sentry and ntfy are configured;
 - the scheduler heartbeat, when each background job last ran, and the last scheduler error type.
 
