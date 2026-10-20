@@ -20,9 +20,12 @@ This guide describes the implementation as inspected on October 5, 2026. It expl
 - [Strategy Tester](#ideas-strategy-tester)
 - [Paper options track record](#ideas-options-track-record)
 - [Paper trades](#journal-paper-trades)
+- [Trading vs S&P 500 scorecard](#journal-trading-vs-sp-500)
 - [Watchlist](#watchlist)
 - [Holdings](#portfolio-holdings)
 - [Portfolio Risk](#portfolio-portfolio-risk)
+- [Risk guard](#risk-guard)
+- [Long-term plan](#portfolio-long-term-plan)
 - [Income & Performance](#portfolio-income--performance)
 - [Long-term criteria](#fundamentals-long-term-criteria)
 - [Journal and planning tools](#journal-and-trade-planning)
@@ -600,6 +603,21 @@ There is no simulation of early assignment, intraday management, actual order fi
 
 Source: [backend/track_record.py](backend/track_record.py).
 
+## Journal: Trading vs S&P 500
+
+Journal → **vs S&P 500** answers "would I have done better just holding SPY?" for your closed trades. Each closed trade is compared with the money it tied up, held in SPY from the day it opened to the day it closed (daily closes, without dividends):
+- stocks: purchase cost;
+- sold puts: strike cash;
+- spreads, condors and other structures: their max loss;
+- bought options: the premium;
+- covered and other sold calls: nothing extra.
+
+Your side is net P&L after recorded fees, with spreads counted once. It shows totals, a plain verdict, win rate, and breakdowns by strategy (worst first) and by closing month (last 24). Under 20 trades it warns that the sample is too small to tell skill from luck. Trades without an open date (for example old imports) are skipped and counted.
+
+Choose trading accounts (default), long-term accounts or all. Idle time between trades is not counted, which flatters trading, because buy-and-hold SPY earns then too.
+
+Source: [backend/investing.py](backend/investing.py), [frontend/src/components/Scorecard.jsx](frontend/src/components/Scorecard.jsx).
+
 ## Journal: Paper Trades
 
 **📝 Paper trade** on an Income (cash-secured put, put credit spread, iron condor), Wheel or Directional option card records that idea as a practice position for the signed-in user. Paper trades live in their own table: they never touch holdings, options, cash, account value, alerts, collateral or real P&L.
@@ -662,6 +680,14 @@ Select an account to enter its **cash balance** (or choose **Enter cash** in its
 ### Stocks
 
 Record ticker, shares, entry cost/date; edit lots or record a sale. When signed in, editing a lot also lets you correct its **Purchase date** (not in the future), for example after an import that had no dates. The change is audited, and it can make an earlier stock split applicable to that lot. Selling from a chosen lot uses that lot; a ticker-level sale consumes lots FIFO. Closing more shares than recorded is rejected. Sold/Closed shows recorded realized trades, distinct from open mark-to-market P&L. Multiple purchases remain separate lots rather than silently overwriting acquisition history. Each ticker row shows unrealized P/L with its market value and its percentage of all stock holdings shown beneath it. In the Options table, moneyness colours reflect risk to you: a short contract in the money is red and out of the money is green; a long contract in the money is green and out of the money is neutral.
+
+**Stop and risk check (signed in).** Buying shows an optional **Stop ($)** field. A stop entered there is saved for that ticker in that account (see Risk guard) after the purchase is recorded. If only the stop fails to save, the purchase still counts and the message says to set the stop in Risk guard. While you fill in ticker, shares and price, a **🛡 Risk** line shows:
+- the trade's risk: to the stop, or the whole amount without one;
+- that risk as a % of trading capital;
+- open risk before → after the trade;
+- any rule it would break (per-trade risk with the size your limit allows, total open risk, one-stock concentration, an active circuit breaker).
+
+The Buy button then reads **Buy anyway**: nothing is blocked. Buy to open / Sell to open options and the spread builder show the same line (**… anyway** on the button). Purchases into a long-term account skip the risk limits and say so.
 
 Guest stock holdings live only in browser storage; signed-in holdings are account data. This is a record keeper, not a broker connection. Entering a buy/sell does not place an order, and omitting a real position makes downstream analytics incomplete.
 
@@ -806,6 +832,9 @@ The top of Portfolio Risk gathers open issues and opportunities into one list, o
 | Uncommitted cash | Free cash of at least $5,000 after option collateral. Points to cash-secured put ideas. | Opens Ideas → Wheel. |
 | Covered-call capacity | Each account/ticker with at least one 100-share block not already covered by a recorded short call. The short call of a bear call spread does not use up shares. The top five by cost are shown. | Opens the covered-call finder inline for that ticker, average cost and uncovered shares. |
 | Tax-loss review | Lots down at least 10% from cost, largest losses first. | Opens Income & Performance → Tax. |
+| Risk-guard rules | Circuit breaker on, open risk over your limit, trading stocks at or below their stop, trading stocks without a stop, uncovered calls (see My trading rules). | Opens Risk guard. |
+| Monthly plan | On or after your plan day, while part of this month's amount is not yet invested: the amount left and what to buy. | Opens Long-term plan. |
+| Profit sweep / split drift | Last month's trading profit to move, or trading 5+ points above your target share. | Opens Long-term plan. |
 | Turning long-term | Profitable short-term lots that turn long-term within 60 days. | Opens Income & Performance → Tax. |
 
 Covered-call capacity counts recorded shares per account and does not see shares pledged elsewhere at the broker. Lots dated on the import day make the long-term check wrong until corrected.
@@ -824,8 +853,33 @@ Under Suggested next steps, **My trading rules** stores optional personal limits
 | Stop at a multiple of the credit (0.5-10) | A short option's loss, (midpoint − opening premium) ÷ opening premium, reaches it. 2 means the option costs 3× what it was sold for. |
 | Never sell a call below my average cost | A short call's strike is below the average cost of the recorded shares of that ticker in the same account. Sold calls inside a spread or condor are skipped, because their bought call covers them, not the shares. |
 | No short options through earnings | A short option has an earnings-before-expiry alert. |
+| **Risk guard:** risk at most % per trade (0.1-25) | Checked before you record a trade (warning, with the size the limit allows). With this rule set, trading stock positions without a stop are also listed as a Warn item. |
+| Keep total open risk under % (1-100) | Open risk in trading accounts exceeds it (Act). Also checked before each new trade. |
+| Stop opening trades after losing % in a month (0.5-50) | This calendar month's realized net P&L in trading accounts is a loss of at least that % of trading capital. The circuit breaker stays on until the 1st of next month. |
+| Cool down after N losing trades in a row (2-10), cooldown days (1-30, default 2) | The most recent N closed trading-account trades (a spread counts once) all lost money; the circuit breaker stays on for the cooldown days after the last loss. A winning trade resets the streak. |
+| **Long-term vs trading:** keep trading at % of the total (0-100) | Trading accounts hold 5 or more points above the target share (Warn). |
+| Each month, move % of the trading profit to long-term (1-100) | Last month's trading net was positive: an Idea item suggests the amount (see Long-term plan). |
 
-Rules are reminders you set for yourself. They do not block trades or change records.
+Risk-guard rules apply only to trading accounts. Uncovered short calls with unlimited risk always show an Act item once any risk-guard rule is set. Rules are reminders you set for yourself. They do not block trades or change records.
+
+### Risk Guard
+
+Below Suggested next steps, **Risk guard** measures how much your open trades can lose if their planned exits are hit:
+
+| Position | Risk |
+| --- | --- |
+| Stock | Down to your stop for that ticker in that account, from the latest quote (cost if no quote); without a stop, the whole position. Set, change or clear stops in the table. If the price is already at or below the stop, the whole position counts, it is flagged and Next steps shows a **Rule: stocks at or below your stop** Act item. A stop is deleted once that account holds no shares of the ticker (after a sale, lot delete, assignment or merger), so buying it again starts without one. |
+| Bought option | The premium paid. |
+| Spread, condor, butterfly, calendar | Its max loss (a bound for calendars/diagonals). |
+| Sold put on its own | Your stop-loss multiple of the credit when that rule is set; otherwise its loss if assigned and the stock went to zero. |
+| Covered call | Nothing extra: the shares carry the risk. Each 100 shares cover one sold call; the pre-trade check for a new call only counts shares not already covering another. |
+| Uncovered sold call | Your stop-loss multiple of the credit when set; otherwise unlimited, flagged and left out of the total. |
+
+**Open risk** (often called portfolio heat) is the total, shown in dollars and as a % of **trading capital**: stock value plus entered cash in trading accounts. Option values are not included, and accounts without cash entered understate capital, which is noted. It turns amber at 80% of your limit and red above it.
+
+The summary also shows realized net P&L this month and the current losing streak. When the **circuit breaker** is on (monthly loss limit or losing-streak cooldown), a banner says until when. The same status appears as an Act item in Next steps, in the daily rule notification and in every pre-trade risk check. Long-term accounts are left out: they are managed by allocation in Long-term plan. Risk is not broker margin, and stops are reminders, not orders at your broker.
+
+Source: [backend/risk_guard.py](backend/risk_guard.py), [frontend/src/components/RiskGuard.jsx](frontend/src/components/RiskGuard.jsx).
 
 ### Trim Planner
 
@@ -948,6 +1002,33 @@ Other calls and long puts are listed under their industry but not counted in the
 The correlation heatmap uses three-month daily log returns, aligned on matching start/end date pairs, with at least five common observations and nonzero variance required. It is distinct from Doctor's one-year data and the Wheel planner's six-month check. Correlation is not a permanent relationship or proof of diversification. Sector allocation is based on recorded stock exposure. Missing marks prevent complete stock-value charts; no chart can infer unrecorded accounts or positions.
 
 Sources: [backend/next_steps.py](backend/next_steps.py), [backend/options_desk.py](backend/options_desk.py), [backend/portfolio_doctor.py](backend/portfolio_doctor.py), [backend/market.py](backend/market.py), [frontend/src/components/NextSteps.jsx](frontend/src/components/NextSteps.jsx), [frontend/src/components/OptionsDesk.jsx](frontend/src/components/OptionsDesk.jsx), [frontend/src/components/Portfolio.jsx](frontend/src/components/Portfolio.jsx).
+
+## Portfolio: Long-term Plan
+
+For moving from trading toward long-term investing. Signed in only.
+
+**Long-term vs trading.** Each account is marked **Trading** (the default) or **Long-term**. App accounts are labels, so one brokerage account can be split into a long-term and a trading label. The card shows:
+- each side's value (stock value at the latest quote, else cost, plus entered cash; options not included) and its share;
+- realized net P&L this year per side;
+- your target trading share (rule) and how far you are from it. At 2 points or more off target, it shows the dollar amount to move. At 5 points or more over target, Next steps shows a Warn item.
+
+Long-term accounts are left out of open risk, per-trade risk checks and the circuit breaker.
+
+**Monthly investing plan.** Set:
+- the account (a long-term one is suggested);
+- the monthly amount and day of the month (1-28);
+- target holdings with percentages that must add up to 100;
+- an optional goal and an assumed yearly return (default 7%).
+
+Each month it shows what is invested so far: stock lots recorded in the plan account this month, at cost. It also shows what is left and suggested buys that fill the most underweight targets first, with approximate (fractional) shares at the latest price. Holdings in that account outside the plan are listed separately.
+
+A projection table compounds monthly at 4%, 7%, 10% and your assumed rate, from today's account value (holdings plus cash): the value in 5, 10 and 20 years and the years to your goal. These are assumptions, not forecasts. Next steps reminds you while money is left to invest that month, with one notification a month.
+
+**Move trading profits to long-term.** With the sweep rule set, the card shows last month's trading net P&L and the share to move. **Record the move** subtracts it from the chosen trading account's entered cash and adds it to the long-term account's, and marks the month done. Cash changes only when both accounts have an entered balance; otherwise the month is just marked done, and the message says so. Each month can be recorded once. It does not move money at your broker.
+
+Account roles, stops and the plan are not copied by Export/Import between logins.
+
+Source: [backend/investing.py](backend/investing.py), [frontend/src/components/LongTermPlan.jsx](frontend/src/components/LongTermPlan.jsx).
 
 ## Portfolio: Income & Performance
 
@@ -1458,7 +1539,7 @@ WHERE oid = 'public.idea_log'::regclass;
 
 Expect `true`, `false`, `false`, then rerun Supabase's Security Advisor and check the backend's options-track-record view. The transaction preserves records and blocks public-role table access even if legacy RLS policies remain. If the backend uses a non-owner role without `BYPASSRLS`, configure a narrowly scoped backend policy before enabling RLS rather than granting access to browser roles. The broader [Supabase RLS script](deploy/supabase_rls.sql) covers the other named StockPilot tables; verify their status separately. A warning alone does not establish that data was accessed: inspect available API/database logs to assess past exposure. Local tests do not verify production grants, policies, or historical access.
 
-The `account_cash`, `nav_snapshots`, `applied_splits`, `watchlist_lists`, `watchlist_groups`, `applied_actions`, `user_rules`, `buy_zones`, `trade_plans` and `paper_trades` tables are created with RLS enabled and public-role grants revoked at PostgreSQL startup, and are included in the RLS script.
+The `account_cash`, `nav_snapshots`, `applied_splits`, `watchlist_lists`, `watchlist_groups`, `applied_actions`, `user_rules`, `buy_zones`, `trade_plans`, `paper_trades`, `account_roles`, `position_stops` and `invest_plans` tables are created with RLS enabled and public-role grants revoked at PostgreSQL startup, and are included in the RLS script.
 
 ### Route Notes
 

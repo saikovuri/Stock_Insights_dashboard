@@ -179,7 +179,15 @@ def build(user_id: int, option_actions: dict, account: str | None = None) -> dic
     account_rows = [a for a in accounts.list_accounts(user_id)["accounts"] if account is None or a["name"] == account]
     prices = _prices(sorted({h["ticker"] for h in holdings}))
     rules = trading_rules.get_rules(user_id)
-    items = (_option_items(option_actions) + _cash_items(user_id, account)
+    import investing
+    import risk_guard
+    extra = []
+    for builder in (risk_guard.next_step_items, investing.next_step_items):
+        try:
+            extra += builder(user_id, rules)
+        except Exception as error:
+            log.info("%s failed for user %s: %s", builder.__module__, user_id, error)
+    items = (_option_items(option_actions) + _cash_items(user_id, account) + extra
              + _concentration_items(holdings, prices, rules.get("max_position_pct"))
              + trading_rules.violations(rules, holdings, options, prices, option_actions, account_rows)
              + _earnings_items(holdings) + _covered_call_items(holdings, options) + _tax_items(holdings, prices))

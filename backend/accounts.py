@@ -41,9 +41,17 @@ def install_schema(conn, postgres=False):
         id {"SERIAL PRIMARY KEY" if postgres else "INTEGER PRIMARY KEY AUTOINCREMENT"},
         user_id INTEGER NOT NULL REFERENCES users(id), ticker TEXT NOT NULL, plan TEXT NOT NULL, created_at TEXT NOT NULL)""")
     cursor.execute("CREATE INDEX IF NOT EXISTS trade_plans_user_ticker ON trade_plans(user_id, ticker)")
+    cursor.execute("""CREATE TABLE IF NOT EXISTS account_roles (
+        user_id INTEGER NOT NULL REFERENCES users(id), account TEXT NOT NULL, role TEXT NOT NULL,
+        updated_at TEXT NOT NULL, PRIMARY KEY(user_id, account))""")
+    cursor.execute(f"""CREATE TABLE IF NOT EXISTS position_stops (
+        user_id INTEGER NOT NULL REFERENCES users(id), account TEXT NOT NULL, ticker TEXT NOT NULL, stop {real} NOT NULL,
+        updated_at TEXT NOT NULL, PRIMARY KEY(user_id, account, ticker))""")
+    cursor.execute("""CREATE TABLE IF NOT EXISTS invest_plans (
+        user_id INTEGER PRIMARY KEY REFERENCES users(id), plan TEXT NOT NULL, updated_at TEXT NOT NULL)""")
     if postgres:
         for table in ("account_cash", "nav_snapshots", "applied_splits", "watchlist_lists", "watchlist_groups", "applied_actions",
-                      "user_rules", "buy_zones", "trade_plans"):
+                      "user_rules", "buy_zones", "trade_plans", "account_roles", "position_stops", "invest_plans"):
             cursor.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
             for role in ("anon", "authenticated"):
                 cursor.execute("SELECT 1 FROM pg_roles WHERE rolname=%s", (role,))
@@ -89,6 +97,32 @@ def list_accounts(user_id: int) -> dict:
                          "put_collateral": reserved,
                          "free_cash": round(balance - reserved, 2) if balance is not None else None})
     return {"accounts": accounts, "default": database.DEFAULT_ACCOUNT}
+
+
+ROLES = ("long_term", "trading")
+
+
+def get_roles(user_id: int) -> dict[str, str]:
+    """Account label -> 'long_term' or 'trading'. Accounts without a role count as trading."""
+    import database
+    rows = database._run(f"SELECT account, role FROM account_roles WHERE user_id={database.PH}", (user_id,), "all")
+    return {r["account"]: r["role"] for r in rows}
+
+
+def role_of(roles: dict, account: str | None) -> str:
+    import database
+    return roles.get(account or database.DEFAULT_ACCOUNT, "trading")
+
+
+def set_role(user_id: int, account: str, role: str) -> dict:
+    import database
+    if role not in ROLES:
+        raise ValueError("Role must be long_term or trading")
+    name = database.account_name(account) or database.DEFAULT_ACCOUNT
+    database._run(f"""INSERT INTO account_roles (user_id, account, role, updated_at) VALUES ({', '.join([database.PH] * 4)})
+        ON CONFLICT (user_id, account) DO UPDATE SET role=excluded.role, updated_at=excluded.updated_at""",
+                  (user_id, name, role, _now()))
+    return {"account": name, "role": role}
 
 
 def set_cash(user_id: int, account: str, cash: float) -> dict:

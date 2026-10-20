@@ -531,6 +531,17 @@ export const fetchWheelLedger = () => getJson(`${BASE}/portfolio/wheel-ledger`, 
 export const fetchOptionsReview = () => getJson(`${BASE}/portfolio/options/review`, 'Failed to load review', true);
 export const fetchOptionsCoach = () => getJson(`${BASE}/portfolio/options/coach`, 'Failed to load AI review', true);
 export const fetchTrackRecord = () => getJson(`${BASE}/ideas/track-record`, 'Failed to load track record');
+// ── Risk guard and long-term investing ──
+export const fetchRiskHeat = () => getJson(`${BASE}/risk/heat`, 'Failed to load open risk', true);
+export const setRiskStop = (ticker, stop, account = '') =>
+  sendJson(`${BASE}/risk/stop`, 'PUT', { ticker, stop, ...(account ? { account } : {}) }, 'Failed to save stop');
+export const checkTradeRisk = (payload) => sendJson(`${BASE}/risk/check`, 'POST', payload, 'Risk check failed');
+export const setAccountRole = (account, role) => sendJson(`${BASE}/invest/role`, 'PUT', { account, role }, 'Failed to save account role');
+export const fetchInvestOverview = () => getJson(`${BASE}/invest/overview`, 'Failed to load long-term plan', true);
+export const saveInvestPlan = (plan) => sendJson(`${BASE}/invest/plan`, 'PUT', plan, 'Failed to save plan');
+export const deleteInvestPlan = () => sendJson(`${BASE}/invest/plan`, 'DELETE', null, 'Failed to delete plan');
+export const recordSweep = (payload) => sendJson(`${BASE}/invest/sweep`, 'POST', payload, 'Failed to record transfer');
+export const fetchScorecard = (scope = 'trading') => getJson(`${BASE}/invest/scorecard?scope=${scope}`, 'Failed to load scorecard', true);
 // ── Paper trades (practice positions, separate from real holdings) ──
 export const fetchPaperTrades = () => getJson(`${BASE}/paper`, 'Failed to load paper trades', true);
 export const openPaperTrade = (payload) => sendJson(`${BASE}/paper`, 'POST', payload, 'Failed to record paper trade');

@@ -5367,3 +5367,25 @@ button.signal-chip { cursor: pointer; }
   .phone-cards tr.spread-chart-row, .options-table tr.spread-chart-row { display: block; }
   .options-table tr.spread-chart-row > td { display: block; width: auto; }
 }
+
+/* Risk guard and long-term plan */
+.risk-check { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.82rem; padding: 0.45rem 0.6rem; border-radius: 8px;
+  background: rgba(52, 211, 153, 0.08); grid-column: 1 / -1; flex: 1 1 100%; }
+.risk-check-warn { background: rgba(248, 113, 113, 0.1); }
+.stop-editor { display: flex; gap: 0.3rem; align-items: center; flex-wrap: wrap; }
+.stop-editor .tool-input { width: 6.5rem; }
+.rules-heading { margin: 0.8rem 0 0.2rem; font-size: 0.85rem; color: var(--accent); }
+.long-term-plan { display: grid; gap: 1rem; }
+.split-bar, .plan-progress { display: flex; height: 10px; border-radius: 999px; overflow: hidden; background: var(--border); margin: 0.5rem 0; }
+.split-long { background: #34d399; }
+.split-trading { background: #7c6cf0; }
+.plan-progress > span { background: #34d399; }
+.plan-target { display: flex; gap: 0.4rem; align-items: center; margin-bottom: 0.35rem; }
+.plan-target .tool-input:first-child { width: 7rem; }
+.plan-target .tool-input:nth-child(2) { width: 5rem; }
+.projection-main td { font-weight: 600; }
+.scorecard-verdict { font-size: 1rem; margin: 0.6rem 0; }
+@media (max-width: 640px) {
+  .long-term-plan .phone-cards td[data-label="Role"] { grid-column: 1 / -1; }
+  .long-term-plan .phone-cards td[data-label="Role"] select { width: 100%; }
+}

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { fetchTradingRules, saveTradingRules, fetchTrimPlan } from '../api/stockApi';
 
 const usd = v => v == null ? '—' : `${v < 0 ? '-' : ''}$${Math.abs(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
@@ -7,6 +7,13 @@ const NUMBER_RULES = [
   ['min_free_cash_pct', 'Keep at least this % of each account as free cash', 0, 100],
   ['take_profit_pct', 'Take profit on short options at % of premium captured', 1, 100],
   ['stop_loss_multiple', 'Close short options when the loss reaches this multiple of the credit (e.g. 2)', 0.5, 10],
+  ['max_trade_risk_pct', 'Risk at most this % of trading capital on one trade (e.g. 1–2)', 0.1, 25, 'Risk guard (trading accounts)'],
+  ['max_open_risk_pct', 'Keep total open risk under this % of trading capital (e.g. 6–10)', 1, 100],
+  ['max_monthly_loss_pct', 'Stop opening trades after losing this % in a month (e.g. 5)', 0.5, 50],
+  ['loss_streak', 'Cool down after this many losing trades in a row (e.g. 3)', 2, 10],
+  ['cooldown_days', 'Cooldown length in days (default 2)', 1, 30],
+  ['target_trading_pct', 'Keep trading money at this % of the total; the rest long-term (e.g. 20)', 0, 100, 'Long-term vs trading'],
+  ['profit_sweep_pct', 'Each month, move this % of the trading profit to long-term (e.g. 25)', 1, 100],
 ];
 
 export function TradingRules({ onSaved }) {
@@ -32,9 +39,12 @@ export function TradingRules({ onSaved }) {
   };
   return <form className="trading-rules" onSubmit={save} aria-label="My trading rules">
     <p className="structures-intro">Rules you set for yourself. Leave a number blank to turn that rule off.</p>
-    {NUMBER_RULES.map(([key, label, min, max]) => <label key={key}>{label}
-      <input className="tool-input" type="number" min={min} max={max} step="any" value={form[key] ?? ''}
-        onChange={e => setForm({ ...form, [key]: e.target.value })} placeholder="off" /></label>)}
+    {NUMBER_RULES.map(([key, label, min, max, heading]) => <Fragment key={key}>
+      {heading && <h4 className="rules-heading">{heading}</h4>}
+      <label>{label}
+        <input className="tool-input" type="number" min={min} max={max} step="any" value={form[key] ?? ''}
+          onChange={e => setForm({ ...form, [key]: e.target.value })} placeholder="off" /></label>
+    </Fragment>)}
     <label className="checkbox-row"><input type="checkbox" checked={!!form.no_calls_below_cost}
       onChange={e => setForm({ ...form, no_calls_below_cost: e.target.checked })} /> Never sell a call below my average cost</label>
     <label className="checkbox-row"><input type="checkbox" checked={!!form.no_short_through_earnings}

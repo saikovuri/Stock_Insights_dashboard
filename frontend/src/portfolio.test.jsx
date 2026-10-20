@@ -524,7 +524,8 @@ test('trading rules save blanks as off, and the trim planner shows the sale step
   fireEvent.click(screen.getByLabelText('Never sell a call below my average cost'));
   fireEvent.click(screen.getByRole('button', { name: 'Save rules' }));
   await waitFor(() => expect(save).toHaveBeenCalledWith({ max_position_pct: 30, min_free_cash_pct: null, take_profit_pct: 60,
-    stop_loss_multiple: 2, no_calls_below_cost: true, no_short_through_earnings: false }));
+    stop_loss_multiple: 2, no_calls_below_cost: true, no_short_through_earnings: false, max_trade_risk_pct: null, max_open_risk_pct: null,
+    max_monthly_loss_pct: null, loss_streak: null, cooldown_days: null, target_trading_pct: null, profit_sweep_pct: null }));
   expect(saved).toHaveBeenCalled();
   cleanup();
   const plan = vi.spyOn(stockApi, 'fetchTrimPlan').mockResolvedValue({ ticker: 'AMD', price: 640, shares_held: 600, current_pct: 74,

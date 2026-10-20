@@ -176,6 +176,7 @@ app.add_middleware(
 
 import routes_accounts
 import routes_auth
+import routes_invest
 import routes_research
 import routes_watchlist
 
@@ -183,6 +184,7 @@ app.include_router(routes_auth.router)
 app.include_router(routes_watchlist.router)
 app.include_router(routes_accounts.router)
 app.include_router(routes_research.router)
+app.include_router(routes_invest.router)
 
 
 @app.get("/api/cache/stats")
@@ -479,7 +481,16 @@ def portfolio_sell(req: HoldingRequest, user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=400, detail=str(error))
     if result is None:
         raise HTTPException(status_code=404, detail=f"{req.ticker} not found in portfolio")
+    _prune_stops(user["user_id"])
     return result
+
+
+def _prune_stops(user_id: int) -> None:
+    try:
+        import risk_guard
+        risk_guard.prune_stops(user_id)
+    except Exception:
+        log.exception("Stop cleanup failed")
 
 
 @app.post("/api/portfolio/sell-lot/{holding_id}")
@@ -490,6 +501,7 @@ def portfolio_sell_lot(holding_id: int, req: HoldingRequest, user: dict = Depend
         raise HTTPException(status_code=400, detail=str(error))
     if result is None:
         raise HTTPException(status_code=404, detail="Lot not found")
+    _prune_stops(user["user_id"])
     return result
 
 
@@ -508,6 +520,7 @@ def portfolio_delete(holding_id: int, user: dict = Depends(get_current_user)):
     result = delete_user_holding(user["user_id"], holding_id)
     if result is None:
         raise HTTPException(status_code=404, detail="Holding not found")
+    _prune_stops(user["user_id"])
     return result
 
 
@@ -1456,6 +1469,13 @@ class TradingRulesRequest(BaseModel):
     stop_loss_multiple: Optional[float] = Field(None, ge=0.5, le=10)
     no_calls_below_cost: bool = False
     no_short_through_earnings: bool = False
+    max_trade_risk_pct: Optional[float] = Field(None, ge=0.1, le=25)
+    max_open_risk_pct: Optional[float] = Field(None, ge=1, le=100)
+    max_monthly_loss_pct: Optional[float] = Field(None, ge=0.5, le=50)
+    loss_streak: Optional[int] = Field(None, ge=2, le=10)
+    cooldown_days: Optional[int] = Field(None, ge=1, le=30)
+    target_trading_pct: Optional[float] = Field(None, ge=0, le=100)
+    profit_sweep_pct: Optional[float] = Field(None, ge=1, le=100)
 
 
 @app.get("/api/rules")

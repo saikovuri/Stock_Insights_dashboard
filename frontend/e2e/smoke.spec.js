@@ -950,3 +950,45 @@ test('income cards show past results and a payoff chart, and paper trades fit th
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath('paper-trades.png'), fullPage: true });
 });
+
+test('risk guard, entry risk check and long-term plan fit the screen', async ({ page }, testInfo) => {
+  await page.route('**/api/risk/heat', route => route.fulfill({ json: {
+    total_risk: 1300, trading_value: 10000, pct: 13, limit_pct: 8, over_limit: true, unlimited: 0, no_stop: 1, roles_set: true, cash_missing: false, note: 'Risk note.',
+    positions: [{ kind: 'stock', account: 'Default', ticker: 'AAPL', label: '5 shares', risk: 1000, basis: 'no stop: the whole position', flags: ['no_stop'], stop: null },
+      { kind: 'structure', account: 'Default', ticker: 'SPY', label: 'Bull put $580/$590 × 1', risk: 300, basis: 'its max loss', flags: [] }],
+    circuit: { active: true, until: '2026-11-01', reasons: ['Down 6% of trading capital this month (your limit 5%)'], month_net: -600, monthly_limit_pct: 5, streak: 2, streak_limit: 3 } } }));
+  await page.route('**/api/risk/check', route => route.fulfill({ json: { risk: 500, basis: 'down to a $190 stop', risk_pct: 2.5, heat_pct_before: 13,
+    heat_pct_after: 18, notes: [], warnings: [{ code: 'trade_risk', text: 'Risks 2.5% of trading capital; your limit is 1%. That limit allows about 20 shares.' }] } }));
+  await page.route('**/api/invest/overview', route => route.fulfill({ json: {
+    split: { total: 10000, by_role: { long_term: 5000, trading: 5000 }, trading_pct: 50, target_trading_pct: 20, drift_pct: 30,
+      rebalance: { from: 'trading', to: 'long_term', amount: 3000 }, realized_this_year: { trading: -200, long_term: 400 }, roles_set: true, note: 'Split note.',
+      accounts: [{ account: 'Default', role: 'trading', role_set: true, value: 5000, cash: 1000 }, { account: 'Roth IRA', role: 'long_term', role_set: true, value: 5000, cash: null }] },
+    sweep: { month: '2026-09', trading_net: 800, pct: 25, amount: 200, done: false },
+    plan: { plan: { monthly: 500, day: 1, goal: 100000, assumed_return_pct: 7, targets: [{ ticker: 'VOO', pct: 60 }, { ticker: 'QQQ', pct: 40 }] },
+      account: 'Roth IRA', role: 'long_term', month: '2026-10', invested_this_month: 300, remaining: 200, due: true, start_value: 5000, outside_plan: { AAPL: 900 },
+      note: 'Plan note.', buys: [{ ticker: 'VOO', target_pct: 60, value: 3000, current_pct: 60, buy: 120, price: 500, shares: 0.24 },
+        { ticker: 'QQQ', target_pct: 40, value: 2000, current_pct: 40, buy: 80, price: 400, shares: 0.2 }],
+      projection: [{ rate_pct: 4, years: { 5: 40000, 10: 80000, 20: 190000 }, years_to_goal: 12.5 }, { rate_pct: 7, years: { 5: 42000, 10: 93000, 20: 260000 }, years_to_goal: 10.2 },
+        { rate_pct: 10, years: { 5: 44000, 10: 105000, 20: 380000 }, years_to_goal: 8.9 }] } } }));
+  await page.goto('/#portfolio');
+  await page.getByLabel('Ticker', { exact: true }).fill('AAPL');
+  await page.getByLabel('Shares', { exact: true }).fill('50');
+  await page.getByLabel('Price ($)', { exact: true }).fill('200');
+  await page.getByLabel('Stop ($, optional)').fill('190');
+  await expect(page.getByRole('status', { name: 'Risk check' })).toContainText('2.5%');
+  await expect(page.getByRole('button', { name: 'Buy anyway' })).toBeVisible();
+  const form = page.locator('.portfolio-form.labeled-form').first();
+  expect(await form.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+  await form.screenshot({ path: testInfo.outputPath('stock-risk-check.png') });
+  await page.getByRole('button', { name: 'Portfolio Risk' }).click();
+  await expect(page.getByText(/Circuit breaker on until 2026-11-01/)).toBeVisible();
+  await expect(page.getByRole('table', { name: 'Open risk by position' })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+  await page.locator('.risk-guard').screenshot({ path: testInfo.outputPath('risk-guard.png') });
+  await page.getByRole('button', { name: 'Long-term plan' }).click();
+  await expect(page.getByText(/moving about/)).toBeVisible();
+  await expect(page.getByRole('table', { name: 'Projection' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Record the move' })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('long-term-plan.png'), fullPage: true });
+});

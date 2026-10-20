@@ -427,16 +427,21 @@ def _run_rule_checks() -> None:
     import next_steps
     import options_desk
     import trading_rules
+    import database
     day = datetime.now(ET).date().isoformat()
-    for uid in trading_rules.user_ids():
+    planners = [r["user_id"] for r in database._run("SELECT user_id FROM invest_plans", (), "all")]
+    for uid in sorted(set(trading_rules.user_ids()) | set(planners)):
         try:
-            items = [i for i in next_steps.build(uid, options_desk.position_actions(uid))["items"] if i["code"].startswith("rule_")]
+            items = [i for i in next_steps.build(uid, options_desk.position_actions(uid))["items"]
+                     if i["code"].startswith("rule_") or i["code"] in ("plan_due", "sweep_due")]
         except Exception as e:
             log.info("Rule check failed for user %s: %s", uid, e)
             continue
         for item in items:
             body = "; ".join(item.get("points") or []) or item["detail"]
-            key = f"rule:{day}:{item['code']}:{item.get('account') or ''}:{item.get('ticker') or ''}"
+            # Plan and sweep reminders are pushed once a month; broken rules once a day
+            when = day[:7] if item["code"] in ("plan_due", "sweep_due") else day
+            key = f"rule:{when}:{item['code']}:{item.get('account') or ''}:{item.get('ticker') or ''}"
             if add_notification(uid, "position", f"📏 {item['title']}", body, key, ticker=item.get("ticker")):
                 push_ntfy(get_ntfy_topic(uid), item["title"], body, tags="straight_ruler")
 

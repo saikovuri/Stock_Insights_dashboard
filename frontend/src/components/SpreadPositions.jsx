@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { openSpread, editSpread, closeSpread, expireSpread, deleteSpread, linkSpread, unlinkSpread } from '../api/stockApi';
 import { STRUCTURES, legName, structureName, previewStructure, templateLegs } from '../spreads';
 import { PayoffToggle } from './IdeaTrust';
+import { RiskCheck } from './RiskGuard';
 
 const usd = value => `${value < 0 ? '-' : ''}$${Math.abs(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const sign = l => (l.position === 'long' ? 1 : -1);
@@ -47,6 +48,7 @@ export function StructureBuilder({ ticker, account, spread, onDone, onCancel, se
   const [expiry, setExpiry] = useState(editing ? initialLegs[0].expiry : '');
   const [legs, setLegs] = useState(initialLegs);
   const [busy, setBusy] = useState(false);
+  const [risk, setRisk] = useState(null);
   const multi = editing ? spread.multi_expiry : Boolean(STRUCTURES[kind].multi);
   const effective = legs.map(l => ({ ...l, expiry: multi ? l.expiry : expiry }));
   const preview = previewStructure(effective, units, editing ? null : kind);
@@ -83,8 +85,11 @@ export function StructureBuilder({ ticker, account, spread, onDone, onCancel, se
     {valid && <div className="form-field-wide spread-preview"><PayoffToggle multiExpiry={multi} spot={spread?.current_price}
       legs={effective.map(l => ({ ...l, strike: Number(l.strike), ratio: Number(l.ratio) }))} net={netPaid(effective)} units={count} /></div>}
   </>;
-  if (!editing) return <>{fields}<div className="form-actions">
-    <button className="btn-primary" onClick={submit} disabled={!valid || busy}>{busy ? 'Opening…' : 'Open spread'}</button></div></>;
+  if (!editing) return <>{fields}
+    <RiskCheck onResult={setRisk} proposal={valid ? { kind: 'structure', ticker: ticker.trim().toUpperCase(), contracts: count,
+      legs: effective.map(toPayloadLeg), ...(account ? { account } : {}) } : null} />
+    <div className="form-actions">
+    <button className="btn-primary" onClick={submit} disabled={!valid || busy}>{busy ? 'Opening…' : risk?.warnings?.length ? 'Open spread anyway' : 'Open spread'}</button></div></>;
   return <form className="card roll-panel spread-close" id="spread-edit-panel" onSubmit={submit} aria-label="Edit spread">
     <div className="ivrank-header">
       <h3 style={{ margin: 0 }}>Edit {spread.ticker} {structureName(spread).toLowerCase()}</h3>

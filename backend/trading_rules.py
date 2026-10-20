@@ -7,7 +7,12 @@ from datetime import datetime, timezone
 import database
 
 DEFAULTS = {"max_position_pct": None, "min_free_cash_pct": None, "take_profit_pct": None, "stop_loss_multiple": None,
-            "no_calls_below_cost": False, "no_short_through_earnings": False}
+            "no_calls_below_cost": False, "no_short_through_earnings": False,
+            # Risk guard (trading accounts only)
+            "max_trade_risk_pct": None, "max_open_risk_pct": None, "max_monthly_loss_pct": None, "loss_streak": None,
+            "cooldown_days": None,
+            # Long-term vs trading
+            "target_trading_pct": None, "profit_sweep_pct": None}
 
 
 def get_rules(user_id: int) -> dict:

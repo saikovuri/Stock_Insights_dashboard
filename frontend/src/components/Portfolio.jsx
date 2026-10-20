@@ -6,9 +6,12 @@ import {
   fetchOptionsSummary, buyOption, closeOption,
   editHolding, deleteHolding, editOption, deleteOption,
   fetchClosedTrades, fetchClosedOptions, assignOption, expireOption, deleteClosedTrade, deleteClosedOption, deleteClosedSpread,
+  setRiskStop,
 } from '../api/stockApi';
 import { StructureBuilder, SpreadRow, SpreadClosePanel, LinkSuggestions, netPaid } from './SpreadPositions';
 import { PayoffToggle } from './IdeaTrust';
+import { RiskGuard, RiskCheck } from './RiskGuard';
+import LongTermPlan from './LongTermPlan';
 import PortfolioChart from './PortfolioChart';
 import SectorAllocation from './SectorAllocation';
 import PortfolioDoctor from './PortfolioDoctor';
@@ -78,6 +81,8 @@ export default function Portfolio() {
   const [expanded, setExpanded] = useState({});         // { ticker: true/false } for collapsibles
   const [repairOpt, setRepairOpt] = useState(null);     // short option position open in Roll / repair
   const [closingSpread, setClosingSpread] = useState(null);
+  const [stockRisk, setStockRisk] = useState(null);
+  const [optionRisk, setOptionRisk] = useState(null);
   const [editingSpread, setEditingSpread] = useState(null);
   const [openSpreadLegs, setOpenSpreadLegs] = useState({}); // { spread_id: true } shows that spread's two legs
   const validOptionPremium = String(optForm.premium).trim() !== ''
@@ -160,10 +165,17 @@ export default function Portfolio() {
 
     try {
       await buyStock(ticker, form.shares, form.price, account);
-      setMsg(`Bought ${form.shares} shares of ${ticker}`);
-      setForm({ ticker: '', shares: 1, price: 100 });
-      loadStocks();
-    } catch (e) { setMsg(e.message); }
+    } catch (e) { setMsg(e.message); return; }
+    const stop = Number(form.stop);
+    let note = '';
+    if (form.stop !== '' && form.stop != null && stop > 0) {
+      // The purchase is already recorded: a failed stop must not look like a failed buy (and invite a duplicate lot)
+      try { await setRiskStop(ticker, stop, account); note = ` · stop $${stop}`; }
+      catch (e) { note = `, but the stop wasn't saved (${e.message}); set it in Portfolio Risk → Risk guard`; }
+    }
+    setMsg(`Bought ${form.shares} shares of ${ticker}${note}`);
+    setForm({ ticker: '', shares: 1, price: 100 });
+    loadStocks();
   };
 
   const handleSell = async () => {
@@ -404,7 +416,7 @@ export default function Portfolio() {
   return (
     <div className="portfolio-workspace">
       <TabStrip label="Portfolio views" activeKey={section}>
-        {[['holdings', 'Holdings'], ['risk', 'Portfolio Risk'], ['performance', 'Income & Performance']].map(([id, label]) =>
+        {[['holdings', 'Holdings'], ['risk', 'Portfolio Risk'], ['plan', 'Long-term plan'], ['performance', 'Income & Performance']].map(([id, label]) =>
           <button key={id} className={`sub-tab ${section === id ? 'active' : ''}`} onClick={() => setSection(id)}>{label}</button>)}
       </TabStrip>
       {!isGuest && <AccountBar account={account} onChange={setAccount} version={version} compact={section !== 'holdings'} />}
@@ -416,7 +428,7 @@ export default function Portfolio() {
         {isGuest ? <p>Sign in to review portfolio risk.</p> : <>
           <nav className="jump-menu" aria-label="Portfolio Risk sections">
             <span className="market-sub">Jump to:</span>
-            {[['next-steps', 'Next steps'], ['trading-rules', 'Rules'], ['trim-planner', 'Trim'], ['position-alerts', 'Option alerts'],
+            {[['next-steps', 'Next steps'], ['risk-guard', 'Risk guard'], ['trading-rules', 'Rules'], ['trim-planner', 'Trim'], ['position-alerts', 'Option alerts'],
               ['earnings-exposure', 'Earnings'], ['expiry-ladder', 'Expiry ladder'], ['stress-scenarios', 'Stress test'],
               ['correlations', 'Correlation'], ['sectors', 'Sectors']].map(([id, label]) => (
               <button key={id} type="button" className="jump-chip" onClick={() => jumpTo(id)}>{label}</button>
@@ -427,7 +439,10 @@ export default function Portfolio() {
           <NextSteps version={`${version}:${rulesRevision}`} account={account} onRepair={repair}
             onShowAlerts={() => document.getElementById('position-alerts')?.scrollIntoView({ behavior: 'smooth' })}
             onShowTax={() => { setInsightsTab('tax'); setSection('performance'); }}
-            onTrim={ticker => { setTrimTicker(ticker); setTimeout(() => document.getElementById('trim-planner')?.scrollIntoView({ behavior: 'smooth' }), 0); }} />
+            onTrim={ticker => { setTrimTicker(ticker); setTimeout(() => document.getElementById('trim-planner')?.scrollIntoView({ behavior: 'smooth' }), 0); }}
+            onShowRiskGuard={() => jumpTo('risk-guard')} onShowPlan={() => setSection('plan')} />
+          <h3 id="risk-guard">Risk guard</h3>
+          <RiskGuard version={`${version}:${rulesRevision}`} onChanged={() => setRulesRevision(value => value + 1)} />
           <details className="risk-tool" id="trading-rules"><summary><h3>My trading rules</h3></summary><TradingRules onSaved={() => setRulesRevision(value => value + 1)} /></details>
           <h3 id="trim-planner">Trim planner</h3>
           <TrimPlanner tickers={[...new Set(holdings.map(item => item.ticker))].sort()} initialTicker={trimTicker} />
@@ -440,6 +455,9 @@ export default function Portfolio() {
           <div id="sectors">{holdings.length > 0 && !portfolio?.incomplete ? <SectorAllocation holdings={holdings} />
             : <p className="market-sub">Sector allocation needs priced holdings.</p>}</div>
         </>}
+      </section>}
+      {section === 'plan' && <section className="portfolio-section">
+        {isGuest ? <p>Sign in to plan long-term investing.</p> : <LongTermPlan version={`${version}:${rulesRevision}`} onChanged={() => { loadStocks(); setTransferRevision(value => value + 1); }} />}
       </section>}
       {section === 'performance' && <section className="portfolio-section">
         {!isGuest && <NavHistory account={account} />}
@@ -516,6 +534,18 @@ export default function Portfolio() {
               <input id="stock-price" type="number" placeholder="Per share" value={form.price} min={0.01} step={0.5}
                 onChange={(e) => setForm({ ...form, price: parseFloat(e.target.value) || 0 })} />
             </div>
+            {editIdx === null && sellLotId === null && !isGuest && (
+              <div className="form-field">
+                <label htmlFor="stock-stop">Stop ($, optional)</label>
+                <input id="stock-stop" type="number" placeholder="Exit price" value={form.stop ?? ''} min={0.01} step="any"
+                  onChange={(e) => setForm({ ...form, stop: e.target.value })} />
+              </div>
+            )}
+            {editIdx === null && sellLotId === null && !isGuest && (
+              <RiskCheck onResult={setStockRisk} proposal={form.ticker.trim() && form.shares > 0 && form.price > 0
+                ? { kind: 'stock', ticker: form.ticker.trim().toUpperCase(), shares: form.shares, price: form.price,
+                  ...(Number(form.stop) > 0 ? { stop: Number(form.stop) } : {}), ...(account ? { account } : {}) } : null} />
+            )}
             {editIdx !== null && !isGuest && (
               <div className="form-field">
                 <label htmlFor="stock-acquired">Purchase date</label>
@@ -536,7 +566,7 @@ export default function Portfolio() {
                 </>
               ) : (
                 <>
-                  <button className="btn-primary" onClick={handleBuy}>Buy</button>
+                  <button className="btn-primary" onClick={handleBuy}>{stockRisk?.warnings?.length ? 'Buy anyway' : 'Buy'}</button>
                   <button className="btn-secondary" onClick={handleSell}>Sell</button>
                 </>
               )}
@@ -735,6 +765,12 @@ export default function Portfolio() {
               <input id="opt-contracts" type="number" placeholder="Qty" value={optForm.contracts} min={1} step={1}
                 onChange={(e) => setOptForm({ ...optForm, contracts: parseInt(e.target.value) || 1 })} />
             </div>
+            {['bto', 'sto'].includes(optForm.action) && editOptIdx === null && (
+              <RiskCheck onResult={setOptionRisk} proposal={optForm.ticker.trim() && optForm.expiry && optForm.strike > 0 && validOptionPremium && optForm.contracts > 0
+                ? { kind: 'option', ticker: optForm.ticker.trim().toUpperCase(), position: optForm.action === 'bto' ? 'long' : 'short',
+                  option_type: optForm.type, strike: optForm.strike, premium: Number(optForm.premium), contracts: optForm.contracts,
+                  ...(account ? { account } : {}) } : null} />
+            )}
             {['btc', 'stc'].includes(optForm.action) && editOptIdx === null && (
               <div className="form-field">
                 <label htmlFor="opt-cycle">Wheel cycle (optional)</label>
@@ -752,6 +788,7 @@ export default function Portfolio() {
                 <button className="btn-primary" onClick={handleOptionSubmit} disabled={!validOptionPremium}>
                   {optForm.action === 'bto' ? 'Buy to Open' : optForm.action === 'sto' ? 'Sell to Open'
                     : optForm.action === 'stc' ? 'Sell to Close' : 'Buy to Close'}
+                  {['bto', 'sto'].includes(optForm.action) && optionRisk?.warnings?.length ? ' anyway' : ''}
                 </button>
               )}
             </div>
