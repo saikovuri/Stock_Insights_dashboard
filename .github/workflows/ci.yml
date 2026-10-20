@@ -9,26 +9,19 @@ on:
 jobs:
   postgres:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        # Official image via ECR Public; Docker Hub rate-limits shared runner IPs
-        image: public.ecr.aws/docker/library/postgres:16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: disposable-ci-only
-          POSTGRES_DB: stockpilot_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d stockpilot_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+      # The runner's preinstalled PostgreSQL: service-container pulls hit Docker Hub / ECR rate limits on shared runner IPs
+      - name: Start PostgreSQL
+        timeout-minutes: 3
+        run: |
+          sudo systemctl start postgresql.service
+          until pg_isready -h localhost -p 5432; do sleep 1; done
+          sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'disposable-ci-only'"
+          sudo -u postgres createdb stockpilot_test
       - run: pip install -r backend/requirements.txt
       - run: python backend/tests/postgres_checks.py
         env:
