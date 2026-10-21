@@ -36,6 +36,8 @@ import { BuyZones, EventWeek } from './components/WatchlistExtras';
 import SinceLastLook from './components/SinceLastLook';
 import CommandPalette from './components/CommandPalette';
 import { ProfileProvider, useProfile, PROFILES, ALL_OPTION_TABS } from './ProfileContext';
+import { useUiMode, setUiMode, hiddenInSimple, SIMPLE } from './uiMode';
+import { ModeToggle, SimpleNote } from './components/ModeToggle';
 import { fetchMetrics, fetchHistory, fetchNews, fetchAlerts, fetchEvents } from './api/stockApi';
 
 const VALID_TABS = ['dashboard', 'ideas', 'watchlist', 'portfolio', 'journal'];
@@ -68,6 +70,7 @@ function AppShell() {
   }, []);
   const { theme, toggle: toggleTheme } = useTheme();
   const { profile, setProfile, config } = useProfile();
+  const { simple } = useUiMode();
   const [activeTab, setActiveTab] = useState(getInitialTab);
   const [showLogin, setShowLogin] = useState(false);
   const [tourOpen, setTourOpen] = useState(() => { try { return !localStorage.getItem(TOUR_KEY); } catch { return false; } });
@@ -184,6 +187,8 @@ function AppShell() {
     if (go.action === 'theme') return toggleTheme();
     if (go.action === 'status') return setStatusOpen(true);
     if (go.ticker) return openTicker(go.ticker);
+    // Opening a tool that Simple mode hides switches to Advanced so it can be shown
+    if (simple && hiddenInSimple(go)) setUiMode('advanced');
     if (go.ideasTab) sessionStorage.setItem('ideas_tab', go.ideasTab);
     if (go.section) sessionStorage.setItem('portfolio_section', go.section);
     handleTabClick(go.tab);
@@ -212,8 +217,11 @@ function AppShell() {
   const SUB_CARDS = {
     overview: ['thesis'], analysis: ['rs'], fundamentals: ['longterm', 'ownership', 'financials'], news: [],
   };
-  const show = (id) => showAll || !config.hide.includes(id);
-  const hiddenHere = (SUB_CARDS[subTab] || []).filter(id => config.hide.includes(id)).length;
+  const simpleHidden = simple ? SIMPLE.cards[subTab] || [] : [];
+  const show = (id) => (showAll || !config.hide.includes(id)) && !simpleHidden.includes(id);
+  const hiddenHere = (SUB_CARDS[subTab] || []).filter(id => config.hide.includes(id) && !simpleHidden.includes(id)).length;
+  const CARD_NAMES = { rs: 'relative strength', smartmoney: 'short interest & smart money', peers: 'peer comparison',
+    ownership: 'ownership', financials: 'raw financial statements' };
   const optionTabs = showAll ? ALL_OPTION_TABS : config.options;
 
   return (
@@ -229,6 +237,7 @@ function AppShell() {
                 {Object.entries(PROFILES).map(([k, p]) => <option key={k} value={k}>{p.icon} {p.label}</option>)}
               </select>
             </span>
+            <ModeToggle />
             <button className="btn-theme btn-palette" onClick={() => setPaletteOpen(true)} title="Jump to a ticker, tab or tool (Ctrl+K)" aria-label="Jump to (Ctrl+K)">
               <span className="palette-key">⌘K</span><span className="palette-icon" aria-hidden="true">🔍</span>
             </button>
@@ -319,9 +328,9 @@ function AppShell() {
                   <>
                     {show('rs') && <RelativeStrength ticker={ticker} />}
                     <OptionsHub ticker={ticker} tabs={optionTabs} />
-                    <ShortAndSmartMoney ticker={ticker} />
+                    {show('smartmoney') && <ShortAndSmartMoney ticker={ticker} />}
                     <AnalystRatings ticker={ticker} />
-                    <PeerBenchmark ticker={ticker} />
+                    {show('peers') && <PeerBenchmark ticker={ticker} />}
                     <AiChat ticker={ticker} onSignIn={() => setShowLogin(true)} />
                   </>
                 )}
@@ -342,6 +351,9 @@ function AppShell() {
 
                 {/* ── News & AI ───────────────────────────────── */}
                 {subTab === 'news' && <NewsSentiment newsData={newsData} />}
+
+                {/* Only cards that Advanced would actually show; the trading style may hide the rest */}
+                <SimpleNote names={simpleHidden.filter(id => showAll || !config.hide.includes(id)).map(id => CARD_NAMES[id])} />
 
                 {(hiddenHere > 0 || (subTab === 'analysis' && config.options.length < ALL_OPTION_TABS.length) || showAll) && (
                   <button className="btn-secondary btn-sm show-all-btn" onClick={() => setShowAll(v => !v)}>

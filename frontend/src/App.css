@@ -5342,7 +5342,8 @@ button.signal-chip { cursor: pointer; }
   .metric-label { font-size: 0.58rem; letter-spacing: 0.03em; }
   .metric-value { font-size: 0.85rem; }
 }
-@media (max-width: 380px) {
+/* Phones: the 📈 logo stands alone so the mode toggle and account buttons fit */
+@media (max-width: 460px) {
   .header-title-text { display: none; }
 }
 
@@ -5388,4 +5389,25 @@ button.signal-chip { cursor: pointer; }
 @media (max-width: 640px) {
   .long-term-plan .phone-cards td[data-label="Role"] { grid-column: 1 / -1; }
   .long-term-plan .phone-cards td[data-label="Role"] select { width: 100%; }
+}
+
+/* ── Simple / Advanced mode ── */
+.mode-toggle { display: inline-flex; flex-shrink: 0; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; overflow: hidden; }
+.mode-toggle button {
+  background: rgba(255,255,255,0.04); color: var(--text-secondary); border: 0; padding: 6px 10px;
+  font-size: 0.78rem; font-weight: 600; cursor: pointer; line-height: 1.2;
+}
+.mode-toggle button + button { border-left: 1px solid rgba(255,255,255,0.12); }
+.mode-toggle button.active { background: var(--accent, #3b82f6); color: #fff; }
+.mode-toggle button:focus-visible { outline: 2px solid var(--accent, #3b82f6); outline-offset: -2px; }
+[data-theme="light"] .mode-toggle { border-color: rgba(0,0,0,0.12); }
+[data-theme="light"] .mode-toggle button { background: rgba(0,0,0,0.03); }
+[data-theme="light"] .mode-toggle button + button { border-left-color: rgba(0,0,0,0.12); }
+[data-theme="light"] .mode-toggle button.active { color: #fff; }
+.mode-short { display: none; }
+.simple-note { margin: 1rem 0 0.25rem; font-size: 0.82rem; color: var(--text-muted); }
+@media (max-width: 600px) {
+  .mode-toggle button { height: 34px; padding: 0 0.45rem; font-size: 0.7rem; }
+  .mode-long { display: none; }
+  .mode-short { display: inline; }
 }

@@ -10,6 +10,8 @@ import TabStrip from './TabStrip';
 import PnlCalendar from './PnlCalendar';
 import PaperTrades from './PaperTrades';
 import Scorecard from './Scorecard';
+import { useUiMode, SIMPLE } from '../uiMode';
+import { SimpleNote } from './ModeToggle';
 import {
   fetchJournal, addJournalEntry, updateJournalEntry, deleteJournalEntry, fetchJournalCoach, fetchClosedTrades, fetchClosedOptions, logClosedOption, updateClosedOption, deleteClosedOption,
   recordAccountingEntry, fetchTradePlans, logClosedSpread, deleteClosedSpread, updateClosedSpread,
@@ -736,6 +738,9 @@ export default function Journal(props) {
   </div>;
 }
 
+const JOURNAL_VIEWS = [['history', 'Trade history'], ['journal', 'Manual journal'], ['options', 'Options review'], ['cycles', 'Wheel cycles'],
+  ['scorecard', 'vs S&P 500'], ['paper', 'Paper trades']];
+
 function JournalViews({ onSignIn, onSelect }) {
   const { user } = useAuth();
   const [report, setReport] = useState(null);
@@ -746,6 +751,7 @@ function JournalViews({ onSignIn, onSelect }) {
   const [coach, setCoach] = useState(null);
   const [coachLoading, setCoachLoading] = useState(false);
   const [view, setView] = useState('history');
+  const { simple } = useUiMode();
 
   const load = useCallback(() => {
     fetchJournal().then(setReport).catch(e => setMsg(e.message));
@@ -766,12 +772,16 @@ function JournalViews({ onSignIn, onSelect }) {
   }
 
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
-  const navigation = <TabStrip label="Journal views" activeKey={view}>
-    {[['history', 'Trade history'], ['journal', 'Manual journal'], ['options', 'Options review'], ['cycles', 'Wheel cycles'], ['scorecard', 'vs S&P 500'], ['paper', 'Paper trades']].map(([id, label]) =>
-      <button key={id} className={`sub-tab ${view === id ? 'active' : ''}`} onClick={() => setView(id)}>{label}</button>)}
+  const views = JOURNAL_VIEWS.filter(([id]) => !simple || SIMPLE.journal.includes(id));
+  const active = views.some(([id]) => id === view) ? view : 'history';
+  const hiddenNote = <SimpleNote names={JOURNAL_VIEWS.filter(([id]) => !views.some(([v]) => v === id)).map(([, label]) => label)} />;
+  const navigation = <TabStrip label="Journal views" activeKey={active}>
+    {views.map(([id, label]) =>
+      <button key={id} className={`sub-tab ${active === id ? 'active' : ''}`} onClick={() => setView(id)}>{label}</button>)}
   </TabStrip>;
-  if (view !== 'journal') return <div className="journal portfolio-workspace">{navigation}
-    {view === 'history' ? <RecordedHistory /> : view === 'cycles' ? <WheelCycles /> : view === 'paper' ? <PaperTrades /> : view === 'scorecard' ? <Scorecard /> : <Review version={user.id} />}
+  if (active !== 'journal') return <div className="journal portfolio-workspace">{navigation}
+    {active === 'history' ? <RecordedHistory /> : active === 'cycles' ? <WheelCycles /> : active === 'paper' ? <PaperTrades /> : active === 'scorecard' ? <Scorecard /> : <Review version={user.id} />}
+    {hiddenNote}
   </div>;
 
   const save = async () => {
@@ -943,6 +953,7 @@ function JournalViews({ onSignIn, onSelect }) {
           </div>
         </div>
       )}
+      {hiddenNote}
     </div>
   );
 }

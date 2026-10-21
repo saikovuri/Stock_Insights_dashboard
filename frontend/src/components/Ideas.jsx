@@ -6,6 +6,8 @@ import InPlay from './InPlay';
 import StrategyTester from './StrategyTester';
 import WheelIdeas from './WheelIdeas';
 import { useProfile } from '../ProfileContext';
+import { useUiMode, SIMPLE } from '../uiMode';
+import { SimpleNote } from './ModeToggle';
 import { FlowTable } from './OptionsFlow';
 import { fetchUnusualOptions, fetchInsiderBuying, fetchTrackRecord } from '../api/stockApi';
 
@@ -195,6 +197,9 @@ export default function Ideas({ onSelect }) {
     return TABS.some(([id]) => id === saved) ? saved : profile === 'day' ? 'inplay' : 'setups';
   });
   const choose = t => { setTab(t); sessionStorage.setItem('ideas_tab', t); };
+  const { simple } = useUiMode();
+  const visible = simple ? TABS.filter(([id]) => SIMPLE.ideas.includes(id)) : TABS;
+  const active = visible.some(([id]) => id === tab) ? tab : 'setups';
   useEffect(() => {
     const onGoto = event => { if (event.detail?.ideasTab) setTab(event.detail.ideasTab); };
     window.addEventListener('stockpilot:goto', onGoto);
@@ -202,19 +207,20 @@ export default function Ideas({ onSelect }) {
   }, []);
   return (
     <div className="ideas-page">
-      <TabStrip label="Ideas views" activeKey={tab}>
-        {TABS.map(([id, label]) => (
-          <button key={id} className={`sub-tab ${tab === id ? 'active' : ''}`} onClick={() => choose(id)}>{label}</button>
+      <TabStrip label="Ideas views" activeKey={active}>
+        {visible.map(([id, label]) => (
+          <button key={id} className={`sub-tab ${active === id ? 'active' : ''}`} onClick={() => choose(id)}>{label}</button>
         ))}
       </TabStrip>
-      {tab === 'inplay' && <InPlay onSelect={onSelect} />}
-      {tab === 'setups' && <SetupScanner onSelect={onSelect} />}
-      {tab === 'wheel' && <WheelIdeas onSelect={onSelect} />}
-      {tab === 'flow' && <UnusualOptions onSelect={onSelect} />}
-      {tab === 'insiders' && <InsiderBuying onSelect={onSelect} />}
-      {tab === 'macro' && <EconomicCalendar />}
-      {tab === 'tester' && <StrategyTester />}
-      {tab === 'record' && <TrackRecord />}
+      {active === 'inplay' && <InPlay onSelect={onSelect} />}
+      {active === 'setups' && <SetupScanner onSelect={onSelect} />}
+      {active === 'wheel' && <WheelIdeas onSelect={onSelect} />}
+      {active === 'flow' && <UnusualOptions onSelect={onSelect} />}
+      {active === 'insiders' && <InsiderBuying onSelect={onSelect} />}
+      {active === 'macro' && <EconomicCalendar />}
+      {active === 'tester' && <StrategyTester />}
+      {active === 'record' && <TrackRecord />}
+      <SimpleNote names={TABS.filter(([id]) => !visible.some(([v]) => v === id)).map(([, label]) => label.replace(/^\S+\s/, ''))} />
     </div>
   );
 }

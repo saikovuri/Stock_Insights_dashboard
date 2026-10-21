@@ -20,7 +20,7 @@ const STEPS = [
     body: (
       <ul className="tour-list">
         <li><b>Dashboard</b> — deep-dive one stock</li>
-        <li><b>Ideas</b> — stocks in play, setups, unusual options, insider buying, strategy tester</li>
+        <li><b>Ideas</b> — setups, wheel candidates and their track record (more in Advanced)</li>
         <li><b>Watchlist</b> — track and screen your tickers</li>
         <li><b>Portfolio</b> — holdings, performance, dividends, taxes</li>
         <li><b>Journal</b> — plan trades and review what works</li>
@@ -31,6 +31,11 @@ const STEPS = [
     sel: '.profile-select',
     title: 'Pick your trading style',
     body: 'Day trader, swing or long-term: StockPilot tailors the chart, cards and AI analysis to how you trade. Change it anytime.',
+  },
+  {
+    sel: '.mode-toggle',
+    title: 'Simple or Advanced',
+    body: 'Simple keeps the everyday tools and hides specialist ones. Switch to Advanced anytime to see everything; nothing is deleted.',
   },
   {
     sel: '.btn-login',

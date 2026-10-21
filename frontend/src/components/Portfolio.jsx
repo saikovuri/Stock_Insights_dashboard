@@ -28,6 +28,8 @@ import Skeleton from './Skeleton';
 import NextSteps from './NextSteps';
 import ExpiryLadder from './ExpiryLadder';
 import { TradingRules, TrimPlanner } from './RiskTools';
+import { useUiMode, SIMPLE } from '../uiMode';
+import { SimpleNote } from './ModeToggle';
 
 const GUEST_HOLDINGS_KEY = 'guest_holdings';
 const usd = (value) => `${value < 0 ? '-' : ''}$${Math.abs(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -40,8 +42,15 @@ function saveGuestHoldings(list) {
   localStorage.setItem(GUEST_HOLDINGS_KEY, JSON.stringify(list));
 }
 
+const RISK_TOOLS = [['next-steps', 'Next steps'], ['risk-guard', 'Risk guard'], ['trading-rules', 'Rules'], ['trim-planner', 'Trim'],
+  ['position-alerts', 'Option alerts'], ['earnings-exposure', 'Earnings'], ['expiry-ladder', 'Expiry ladder'], ['stress-scenarios', 'Stress test'],
+  ['correlations', 'Correlation'], ['sectors', 'Sectors']];
+const SIMPLE_RISK_NAMES = { 'portfolio-doctor': 'AI portfolio health', 'trim-planner': 'trim planner', 'earnings-exposure': 'earnings exposure',
+  'expiry-ladder': 'expiration ladder', 'stress-scenarios': 'stress scenarios', correlations: 'correlation', sectors: 'sector allocation' };
+
 export default function Portfolio() {
   const { token, user } = useAuth();
+  const { simple } = useUiMode();
   const isGuest = !user;
 
   const [tab, setTab] = useState('stocks');
@@ -407,6 +416,7 @@ export default function Portfolio() {
     const option = options.find(item => item.id === id);
     if (option) { setSection('holdings'); setTab('options'); setView('current'); setRepairOpt(option); }
   };
+  const riskTool = id => !simple || !SIMPLE.risk.includes(id);
   const jumpTo = id => {
     const element = document.getElementById(id);
     if (element?.tagName === 'DETAILS') element.open = true;
@@ -428,14 +438,12 @@ export default function Portfolio() {
         {isGuest ? <p>Sign in to review portfolio risk.</p> : <>
           <nav className="jump-menu" aria-label="Portfolio Risk sections">
             <span className="market-sub">Jump to:</span>
-            {[['next-steps', 'Next steps'], ['risk-guard', 'Risk guard'], ['trading-rules', 'Rules'], ['trim-planner', 'Trim'], ['position-alerts', 'Option alerts'],
-              ['earnings-exposure', 'Earnings'], ['expiry-ladder', 'Expiry ladder'], ['stress-scenarios', 'Stress test'],
-              ['correlations', 'Correlation'], ['sectors', 'Sectors']].map(([id, label]) => (
+            {RISK_TOOLS.filter(([id]) => riskTool(id)).map(([id, label]) => (
               <button key={id} type="button" className="jump-chip" onClick={() => jumpTo(id)}>{label}</button>
             ))}
           </nav>
           <h3 id="next-steps">Suggested next steps</h3>
-          <PortfolioDoctor key={version} />
+          {riskTool('portfolio-doctor') && <PortfolioDoctor key={version} />}
           <NextSteps version={`${version}:${rulesRevision}`} account={account} onRepair={repair}
             onShowAlerts={() => document.getElementById('position-alerts')?.scrollIntoView({ behavior: 'smooth' })}
             onShowTax={() => { setInsightsTab('tax'); setSection('performance'); }}
@@ -444,16 +452,21 @@ export default function Portfolio() {
           <h3 id="risk-guard">Risk guard</h3>
           <RiskGuard version={`${version}:${rulesRevision}`} onChanged={() => setRulesRevision(value => value + 1)} />
           <details className="risk-tool" id="trading-rules"><summary><h3>My trading rules</h3></summary><TradingRules onSaved={() => setRulesRevision(value => value + 1)} /></details>
-          <h3 id="trim-planner">Trim planner</h3>
-          <TrimPlanner tickers={[...new Set(holdings.map(item => item.ticker))].sort()} initialTicker={trimTicker} />
+          {(riskTool('trim-planner') || trimTicker) && <>
+            <h3 id="trim-planner">Trim planner</h3>
+            <TrimPlanner tickers={[...new Set(holdings.map(item => item.ticker))].sort()} initialTicker={trimTicker} />
+          </>}
           <h3 id="position-alerts">Option alerts</h3><Today version={version} onRepair={repair} onAssign={id => { const option = options.find(item => item.id === id); if (option) handleAssign(option); }} />
-          <h3 id="earnings-exposure">Earnings exposure</h3><Earnings version={version} />
-          <h3 id="expiry-ladder">Expiration ladder</h3><ExpiryLadder version={version} />
-          <h3 id="stress-scenarios">Stress scenarios</h3><WhatIf options={options} holdings={holdings} spreads={optionsSummary?.spreads || []} />
-          <div id="correlations">{holdings.length >= 2 ? <CorrelationHeatmap tickers={[...new Set(holdings.map(item => item.ticker))]} />
-            : <p className="market-sub">Correlation needs at least two stocks.</p>}</div>
-          <div id="sectors">{holdings.length > 0 && !portfolio?.incomplete ? <SectorAllocation holdings={holdings} />
-            : <p className="market-sub">Sector allocation needs priced holdings.</p>}</div>
+          {!simple && <>
+            <h3 id="earnings-exposure">Earnings exposure</h3><Earnings version={version} />
+            <h3 id="expiry-ladder">Expiration ladder</h3><ExpiryLadder version={version} />
+            <h3 id="stress-scenarios">Stress scenarios</h3><WhatIf options={options} holdings={holdings} spreads={optionsSummary?.spreads || []} />
+            <div id="correlations">{holdings.length >= 2 ? <CorrelationHeatmap tickers={[...new Set(holdings.map(item => item.ticker))]} />
+              : <p className="market-sub">Correlation needs at least two stocks.</p>}</div>
+            <div id="sectors">{holdings.length > 0 && !portfolio?.incomplete ? <SectorAllocation holdings={holdings} />
+              : <p className="market-sub">Sector allocation needs priced holdings.</p>}</div>
+          </>}
+          <SimpleNote names={SIMPLE.risk.filter(id => !riskTool(id) && !(id === 'trim-planner' && trimTicker)).map(id => SIMPLE_RISK_NAMES[id])} />
         </>}
       </section>}
       {section === 'plan' && <section className="portfolio-section">

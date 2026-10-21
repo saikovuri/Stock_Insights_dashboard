@@ -5,6 +5,7 @@ This guide describes the implementation as inspected on October 5, 2026. It expl
 ## Contents
 
 - [Main navigation](#main-navigation)
+- [Simple and Advanced mode](#simple-and-advanced-mode)
 - [Profiles and Dashboard](#trading-profiles-and-dashboard)
 - [Setup scanner](#ideas-navigation-and-setup-scanner)
 - [Wheel qualification and capital planning](#wheel-candidate-qualification)
@@ -55,7 +56,7 @@ An absent candidate does not necessarily mean a bad investment. It can mean miss
 | Portfolio | Recorded holdings and options, account risks, income/performance, and the account ledger. |
 | Journal | Separate recorded trading history from manually written trade plans and reviews. |
 
-The Dashboard has Overview, Analysis, Fundamentals, and News subtabs. Overview starts with the quote and key metrics, then **Signals** (recent chart events such as "Lost 200-day" or "Oversold") and "since last look". On phones, Holdings and open options list your positions before the add/sell form (row actions such as Edit or Sell scroll to the form), and open options and peer comparisons show one card per row instead of a sideways-scrolling table. So do the Setups scanner results and the setup track record; on phones the scanner has a **Sort by** menu with a high/low-first button in place of sortable column headers. Other tables also become cards on phones: Stocks in play, insider buying, the options-idea track record, analyst upgrades/downgrades, institutional and insider holders, account cash, sold/closed stocks and options, vs S&P 500, tax lots, buy zones, the wheel plan and Combined P&L. Analyst upgrades show "From → To" only when the grade changed. Income ideas, Wheel candidates and Manage a wheel position each start with a one-line **Use this when** note. When a row of subtabs is wider than the screen, it scrolls sideways without a scrollbar: fades and ‹ › arrows mark hidden tabs, and the selected tab scrolls into view. On phones the subtabs wrap into an even grid instead (up to three per row, four as a 2×2 block), with equal-height cells and each emoji kept beside its first word. On phones the five main tabs show an icon above a one-line label; the header shows the trading style as its icon (tap opens the full list), a 🔍 jump-to button in place of ⌘K, and compact theme, notification and Sign Out controls that stay within the screen. Stock alerts put the badge above the message, and segmented filters wrap rather than hide options. The trading-style selector changes defaults, ordering, and visibility; it is not an account risk limit. Sign-in enables account-specific features. Theme controls affect appearance only. Older `#setups`, `#screener`, and `#tools` links route to Ideas, Watchlist, and Journal respectively.
+The Dashboard has Overview, Analysis, Fundamentals, and News subtabs. Overview starts with the quote and key metrics, then **Signals** (recent chart events such as "Lost 200-day" or "Oversold") and "since last look". On phones, Holdings and open options list your positions before the add/sell form (row actions such as Edit or Sell scroll to the form), and open options and peer comparisons show one card per row instead of a sideways-scrolling table. So do the Setups scanner results and the setup track record; on phones the scanner has a **Sort by** menu with a high/low-first button in place of sortable column headers. Other tables also become cards on phones: Stocks in play, insider buying, the options-idea track record, analyst upgrades/downgrades, institutional and insider holders, account cash, sold/closed stocks and options, vs S&P 500, tax lots, buy zones, the wheel plan and Combined P&L. Analyst upgrades show "From → To" only when the grade changed. Income ideas, Wheel candidates and Manage a wheel position each start with a one-line **Use this when** note. When a row of subtabs is wider than the screen, it scrolls sideways without a scrollbar: fades and ‹ › arrows mark hidden tabs, and the selected tab scrolls into view. On phones the subtabs wrap into an even grid instead (up to three per row, four as a 2×2 block), with equal-height cells and each emoji kept beside its first word. On phones the five main tabs show an icon above a one-line label; the header shows the 📈 logo without the StockPilot name (up to 460px wide), the trading style as its icon (tap opens the full list), the **Simple | Adv** toggle, a 🔍 jump-to button in place of ⌘K, and compact theme, notification and Sign Out controls that stay within the screen. Stock alerts put the badge above the message, and segmented filters wrap rather than hide options. The trading-style selector changes defaults, ordering, and visibility; it is not an account risk limit. Sign-in enables account-specific features. Theme controls affect appearance only. Older `#setups`, `#screener`, and `#tools` links route to Ideas, Watchlist, and Journal respectively.
 
 **Jump to (Ctrl+K / ⌘K)** opens a command palette from anywhere; the ⌘K button in the header does the same.
 - Type words to filter destinations: every tab, each Ideas view, each Portfolio section, and the main tools (import broker CSV, expiration ladder, trim planner, trading rules, buy zones, edge report, P&L calendar). It also offers System status (signed in) and the theme toggle.
@@ -63,6 +64,25 @@ The Dashboard has Overview, Analysis, Fundamentals, and News subtabs. Overview s
 - ↑/↓ choose, Enter runs, Esc or a click outside closes. Destinations inside a page open their section, expand collapsed panels, and scroll there once loaded.
 
 Source: [frontend/src/App.jsx](frontend/src/App.jsx).
+
+## Simple and Advanced Mode
+
+The **Simple | Advanced** toggle in the header chooses how much of the app is shown. **Simple** is the default. It keeps the daily routine (Next steps, Risk guard, Holdings, Long-term plan, Journal) and hides specialist or overlapping tools. Nothing is deleted or turned off: hidden tools keep their data, alerts and scheduled jobs, and **Advanced** shows everything.
+
+| Area | Simple shows | Simple hides |
+| --- | --- | --- |
+| Ideas | Setups, Wheel, Options track record | In play, Unusual options, Insider buying, Macro calendar, Strategy tester |
+| Portfolio Risk | Suggested next steps, Risk guard, My trading rules, Option alerts | AI portfolio health, trim planner, earnings exposure, expiration ladder, stress scenarios, correlation, sector allocation |
+| Journal | Trade history, Manual journal, Options review, vs S&P 500, Paper trades | Wheel cycles |
+| Stock page | Overview, News and the other cards (subject to the trading style) | Relative strength, short interest & smart money and peer comparison (Analysis); ownership and raw financial statements (Fundamentals) |
+
+Holdings, Long-term plan, Income & Performance, Watchlist and the Options hub are the same in both modes.
+- Where something is hidden, a line at the bottom says what (for example "Simple mode hides 5 more: …") with a **Show advanced** button.
+- **Plan a trim** in Next steps still opens the trim planner in Simple mode.
+- Choosing a hidden tool in **Jump to** switches to Advanced so it can open.
+- The choice is saved on this device (browser storage), not synced to your account, so phone and laptop can differ. If the browser can't save it, the choice lasts until the page is reloaded. It is separate from the trading style, which changes defaults and ordering.
+
+Source: [frontend/src/uiMode.js](frontend/src/uiMode.js), [frontend/src/components/ModeToggle.jsx](frontend/src/components/ModeToggle.jsx).
 
 ## Trading Profiles and Dashboard
 
@@ -74,7 +94,7 @@ Source: [frontend/src/App.jsx](frontend/src/App.jsx).
 | Swing trader (default) | Six months, daily bars | Overview, Analysis, Fundamentals, News | Raw statements | Volatility, Flow, Directional, Income |
 | Long-term investor | Five years, weekly bars | Overview, Fundamentals, News, Analysis | Relative strength | Income, Volatility |
 
-The "show hidden cards" control reveals the remaining cards and options tabs. Profiles are stored locally and synchronized for signed-in users. They change presentation and AI context, not Wheel thresholds or portfolio concentration limits.
+The "show hidden cards" control reveals the remaining cards and options tabs, except cards that Simple mode also hides (relative strength, short interest & smart money, peers, ownership, raw statements); those need Advanced as well (see [Simple and Advanced mode](#simple-and-advanced-mode)). The Simple-mode note on a stock page lists only cards that switching to Advanced would actually show. Profiles are stored locally and synchronized for signed-in users. They change presentation and AI context, not Wheel thresholds or portfolio concentration limits.
 
 Source: [frontend/src/ProfileContext.jsx](frontend/src/ProfileContext.jsx).
 
@@ -101,7 +121,7 @@ The market overview shows when its quotes were fetched, and a selected stock sho
 
 ### Analysis Tab
 
-The panel order is relative strength, Options Hub, short interest/smart money, analyst ratings, peer comparisons, and AI Chat. Relative strength is hidden initially for the long-term profile. The Options Hub's three views are **Volatility & positioning**, Income ("Sell premium"), and Directional; their rules are detailed below. Volatility & positioning shows IV rank and expected moves plus the former Flow tab (put/call ratios, call/put walls, gamma flip, max pain, and this stock's unusual contracts). Day traders see positioning first; long-term investors see it folded under "Positioning & unusual activity".
+The panel order is relative strength, Options Hub, short interest/smart money, analyst ratings, peer comparisons, and AI Chat. Relative strength is hidden initially for the long-term profile. Simple mode hides relative strength, short interest/smart money and peer comparisons for every profile. The Options Hub's three views are **Volatility & positioning**, Income ("Sell premium"), and Directional; their rules are detailed below. Volatility & positioning shows IV rank and expected moves plus the former Flow tab (put/call ratios, call/put walls, gamma flip, max pain, and this stock's unusual contracts). Day traders see positioning first; long-term investors see it folded under "Positioning & unusual activity".
 
 Relative strength is not RSI. The scanner's raw RS measure is `0.4 * 3-month return + 0.2 * 6-month return + 0.2 * 9-month return + 0.2 * 12-month return`, using approximately 63/126/189/252 trading bars. It converts this into a roughly 1-99 percentile rating within the available scan. Separate one-, three-, six-, and twelve-month comparisons show stock return minus SPY return, in percentage points. Sector rankings average member RS ratings. A ticker outside the current scan can be compared against its stored distribution; if no suitable distribution exists, its RS rating can be unavailable.
 
@@ -117,7 +137,7 @@ Shows the selected ticker's articles and sentiment summaries. A sentiment score 
 
 ## Ideas: Navigation and Setup Scanner
 
-The eight tabs are **In play**, **Setups**, **Wheel**, **Unusual options**, **Insider buying**, **Macro calendar**, **Strategy tester**, and **Options track record**. The selected Ideas tab is remembered for the session; absent a saved choice, day traders start at In play and other profiles at Setups.
+The eight tabs are **In play**, **Setups**, **Wheel**, **Unusual options**, **Insider buying**, **Macro calendar**, **Strategy tester**, and **Options track record**. The selected Ideas tab is remembered for the session; absent a saved choice, day traders start at In play and other profiles at Setups. In Simple mode only Setups, Wheel and Options track record show, so day traders also start at Setups, and a saved tab that is hidden falls back to Setups (see [Simple and Advanced mode](#simple-and-advanced-mode)).
 
 ### Setups: Universe and Trend
 
@@ -818,6 +838,8 @@ Source: [frontend/src/components/Portfolio.jsx](frontend/src/components/Portfoli
 
 ## Portfolio: Portfolio Risk
 
+In Simple mode this view shows Suggested next steps, Risk guard, My trading rules and Option alerts; the other tools below appear in Advanced (see [Simple and Advanced mode](#simple-and-advanced-mode)).
+
 ### Suggested Next Steps
 
 The top of Portfolio Risk gathers open issues and opportunities into one list, ordered Act, Warn, Idea, then Info. It follows the account selected in the Portfolio account bar (all accounts when none is selected) and says which account it is showing. These are rule-based checks on recorded positions and cash, not investment advice. They do not place trades.
@@ -1169,7 +1191,7 @@ Source: [backend/fundamentals.py](backend/fundamentals.py).
 
 ## Journal and Trade Planning
 
-The Journal workspace has **Trade history**, **Manual journal**, **Options review**, and **Wheel cycles**. One **📝 Plan a trade** button (with the hint "Checklist and position size before you enter") in the shared Journal header opens a dialog containing the Pre-Trade Checklist and Position Size Calculator. Planning tools are not repeated inline on each tab. Close or Escape dismisses the dialog; the draft remains while switching Journal tabs, but is not saved across leaving the workspace or changing accounts. Guests can use these tools but need sign-in for saved journal/review data.
+The Journal workspace has **Trade history**, **Manual journal**, **Options review**, **Wheel cycles**, **vs S&P 500** and **Paper trades**. Simple mode hides Wheel cycles. One **📝 Plan a trade** button (with the hint "Checklist and position size before you enter") in the shared Journal header opens a dialog containing the Pre-Trade Checklist and Position Size Calculator. Planning tools are not repeated inline on each tab. Close or Escape dismisses the dialog; the draft remains while switching Journal tabs, but is not saved across leaving the workspace or changing accounts. Guests can use these tools but need sign-in for saved journal/review data.
 
 ### Trade History
 
@@ -1482,7 +1504,7 @@ The source establishes what the rules do, but does not establish that each exact
 
 ### Scope and Boundaries
 
-This guide describes the current **React frontend and FastAPI backend**, including profile-hidden views revealed by Show all. It does not treat every component filename as a live navigation item. For example, the older standalone Screener, DCA simulator, PriceChart and separate AI-summary/bull-bear components are not current app workspaces. The legacy OptionsDesk wrapper's tabs are not the current Portfolio navigation; its individual panels are reused in Portfolio/Journal. CSV import is reachable through Portfolio's import section, even though its old tab branch remains in the source.
+This guide describes the current **React frontend and FastAPI backend**, including profile-hidden views revealed by Show all and tools hidden in Simple mode. It does not treat every component filename as a live navigation item. For example, the older standalone Screener, DCA simulator, PriceChart and separate AI-summary/bull-bear components are not current app workspaces. The legacy OptionsDesk wrapper's tabs are not the current Portfolio navigation; its individual panels are reused in Portfolio/Journal. CSV import is reachable through Portfolio's import section, even though its old tab branch remains in the source.
 
 All monetary examples and standard equity-option multipliers assume the app's USD/100-share conventions unless a view states otherwise. The application is a research and record-keeping tool, not an execution venue, broker-reconciled accounting system or comprehensive tax filing product. A visible idea, favorable score, AI verdict or completed checklist does not override missing-data warnings or independent eligibility/capital checks.
 

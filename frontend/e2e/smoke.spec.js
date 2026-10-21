@@ -34,6 +34,8 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem('token', 'synthetic-test-token');
     localStorage.setItem('stockpilot_tour_v1', 'done');
+    // Most checks cover every tool; Simple mode has its own test
+    if (!localStorage.getItem('ui_mode')) localStorage.setItem('ui_mode', 'advanced');
   });
   await page.route('**/api/**', async route => {
     const data = fixtures[new URL(route.request().url()).pathname];
@@ -991,4 +993,42 @@ test('risk guard, entry risk check and long-term plan fit the screen', async ({ 
   await expect(page.getByRole('button', { name: 'Record the move' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath('long-term-plan.png'), fullPage: true });
+});
+
+test('simple mode hides specialist tools, says what is hidden, and the header toggle fits', async ({ page }, testInfo) => {
+  await page.addInitScript(() => localStorage.setItem('ui_mode', 'simple'));
+  await page.goto('/#ideas');
+  const toggle = page.getByRole('group', { name: 'Interface mode' });
+  await expect(toggle.getByRole('button', { name: 'Simple' })).toHaveAttribute('aria-pressed', 'true');
+  const header = page.locator('.header-top');
+  expect(await header.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+  await header.screenshot({ path: testInfo.outputPath('mode-toggle-header.png') });
+  const ideas = page.getByRole('navigation', { name: 'Ideas views' });
+  await expect(ideas.getByRole('button')).toHaveText([/Setups/, /Wheel/, /Options track record/]);
+  await expect(page.getByText(/Simple mode hides 5 more: In play, Unusual options/)).toBeVisible();
+  await page.getByRole('button', { name: /Portfolio/ }).first().click();
+  await page.getByRole('button', { name: 'Portfolio Risk' }).click();
+  await expect(page.getByRole('heading', { name: 'Risk guard' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Stress scenarios' })).toHaveCount(0);
+  await expect(page.getByText(/Simple mode hides 7 more: AI portfolio health, trim planner/)).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+  await toggle.getByRole('button', { name: 'Advanced' }).click();
+  await expect(page.getByRole('heading', { name: 'Stress scenarios' })).toBeVisible();
+  await expect(page.getByText(/Simple mode hides/)).toHaveCount(0);
+  expect(await page.evaluate(() => localStorage.getItem('ui_mode'))).toBe('advanced');
+});
+
+test('the simple-mode note on a stock page lists only cards Advanced would show', async ({ page }) => {
+  await page.addInitScript(() => { localStorage.setItem('ui_mode', 'simple'); localStorage.setItem('trader_profile', 'long'); });
+  await page.route('**/api/stock/PYPL/metrics', route => route.fulfill({ json: { ticker: 'PYPL', name: 'PayPal', price: 52.8 } }));
+  await page.route('**/api/stock/PYPL/history?*', route => route.fulfill({ json: [] }));
+  await page.goto('/#dashboard');
+  await page.getByRole('combobox', { name: 'Ticker or company name' }).fill('PYPL');
+  await page.getByRole('button', { name: 'Analyze', exact: true }).click();
+  await page.getByRole('button', { name: /Analysis/, exact: false }).click();
+  // The long-term style hides relative strength on its own, so Simple's note must not promise it
+  await expect(page.getByText('Simple mode hides 2 more: short interest & smart money, peer comparison.')).toBeVisible();
+  await page.getByRole('button', { name: 'Show advanced' }).click();
+  await expect(page.getByText(/Simple mode hides/)).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Show cards hidden for long-term investors/ })).toBeVisible();
 });
